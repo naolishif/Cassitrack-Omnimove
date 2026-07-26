@@ -550,8 +550,21 @@ function toggleModeChip(el) {
     doSearch();
 }
 
+// Ordina per il punteggio multi-criterio calcolato dal backend (OM-17).
+// Ogni profilo pesa tempo/costo/ambiente diversamente, quindi due opzioni che
+// pareggiano sul criterio principale vengono comunque distinte.
+const SCORE_KEY = { eco: 'score_eco', budget: 'score_budget', fast: 'score_fast' };
+
 function sortOptions(options) {
     const sorted = [...options];
+    const key = SCORE_KEY[activeSort];
+
+    if (key && sorted.every(o => typeof o[key] === 'number')) {
+        sorted.sort((a, b) => b[key] - a[key]);      // punteggio alto = migliore
+        return sorted;
+    }
+
+    // Ripiego a criterio singolo: backend non aggiornato o punteggi assenti.
     if (activeSort === 'eco') {
         sorted.sort((a, b) => b.green_index - a.green_index);
     } else if (activeSort === 'budget') {
