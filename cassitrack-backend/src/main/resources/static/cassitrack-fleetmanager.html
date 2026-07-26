@@ -36,6 +36,10 @@
                 Analytics
             </button>
 
+            <button class="top-btn" id="topBtnDataManagement">
+                Data Management
+            </button>
+
             <button class="top-btn logout-btn" id="topBtnLogout">
                 Log Out
             </button>
@@ -56,6 +60,28 @@
 
         <!-- Fleet Tab -->
             <div id="tab-fleet" class="tab-fleet-col">
+            <div class="section">
+                <div class="fm-filter-title">FILTERS</div>
+                <div class="fm-filter-row">
+                    <label class="fm-filter-lbl" for="routeFilter">Route</label>
+                    <select class="filter-select fm-filter-select" id="routeFilter">
+                        <option value="">All routes</option>
+                    </select>
+                </div>
+                <div class="fm-filter-row">
+                    <label class="fm-filter-lbl" for="serviceFilter">Service</label>
+                    <select class="filter-select fm-filter-select" id="serviceFilter">
+                        <option value="all">All</option>
+                        <option value="in">In service</option>
+                        <option value="out">Out of service</option>
+                    </select>
+                </div>
+                <div class="fm-filter-row">
+                    <label class="fm-filter-lbl" for="delayFilter">Min delay</label>
+                    <input type="range" class="fm-filter-range" id="delayFilter" min="0" max="20" step="1" value="0">
+                    <span class="fm-filter-val" id="delayFilterVal">off</span>
+                </div>
+            </div>
             <div class="section">
                 <div class="analytics-box">
                     <div class="analytics-title">FLEET OVERVIEW</div>
@@ -229,7 +255,7 @@
                         </div>
 
                         <div class="legend-item">
-                            <span class="legend-dot" style="background:#F59E0B"></span>
+                            <span class="legend-dot amber"></span>
                             NO TRIP
                         </div>
 
@@ -300,6 +326,209 @@
 
     </div>
 
+</div>
+
+<!-- ========================================= -->
+<!-- DATA MANAGEMENT VIEW (fleet buses CRUD)   -->
+<!-- ========================================= -->
+<div id="data-management-view" class="main-view">
+    <div class="bm-wrap">
+        <div class="bm-header">
+            <div>
+                <div class="bm-title">Data Management</div>
+                <div class="bm-sub">Edit PostgreSQL master data</div>
+            </div>
+        </div>
+
+        <div class="bm-subnav">
+            <button type="button" class="bm-subnav-btn active" id="dmTabBuses">Buses</button>
+            <button type="button" class="bm-subnav-btn" id="dmTabStops">Stops</button>
+            <button type="button" class="bm-subnav-btn" id="dmTabRoutes">Routes</button>
+        </div>
+
+        <!-- ══════════ BUSES PANEL ══════════ -->
+        <div id="dm-panel-buses" class="dm-panel active">
+        <div class="bm-panel-head">
+            <div class="bm-panel-title">Fleet buses</div>
+            <button type="button" class="apply-btn" id="bmAddBtn">＋ Add bus</button>
+        </div>
+
+        <!-- Add / Edit form (hidden until Add or Edit is pressed) -->
+        <div id="bmForm" class="bm-form" hidden>
+            <div class="bm-form-title" id="bmFormTitle">New bus</div>
+            <div class="bm-form-grid">
+                <div class="bm-field">
+                    <label class="bm-lbl" for="bmTarga">Plate (targa)</label>
+                    <input type="text" class="bm-input" id="bmTarga" maxlength="20" placeholder="e.g. FR123AB">
+                </div>
+                <div class="bm-field">
+                    <label class="bm-lbl" for="bmPosti">Seats</label>
+                    <input type="number" class="bm-input" id="bmPosti" min="1" max="300" placeholder="e.g. 50">
+                </div>
+                <div class="bm-field">
+                    <label class="bm-lbl" for="bmVehicleId">Vehicle id (optional)</label>
+                    <input type="text" class="bm-input" id="bmVehicleId" maxlength="50" placeholder="e.g. MAGNI-005">
+                </div>
+                <div class="bm-field">
+                    <label class="bm-lbl" for="bmWheelchair">Wheelchair</label>
+                    <select class="bm-input" id="bmWheelchair">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </select>
+                </div>
+                <div class="bm-field">
+                    <label class="bm-lbl" for="bmDisponibile">Available</label>
+                    <select class="bm-input" id="bmDisponibile">
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                    </select>
+                </div>
+            </div>
+            <div class="bm-form-actions">
+                <span class="bm-msg" id="bmFormMsg"></span>
+                <button type="button" class="bm-btn-ghost" id="bmCancelBtn">Cancel</button>
+                <button type="button" class="apply-btn" id="bmSaveBtn">Save</button>
+            </div>
+        </div>
+
+        <div class="bm-table-wrap">
+            <table class="bm-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Plate</th>
+                        <th>Seats</th>
+                        <th>Wheelchair</th>
+                        <th>Available</th>
+                        <th>Vehicle id</th>
+                        <th class="bm-actions-col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="bmTableBody"></tbody>
+            </table>
+        </div>
+        </div><!-- /dm-panel-buses -->
+
+        <!-- ══════════ STOPS PANEL ══════════ -->
+        <div id="dm-panel-stops" class="dm-panel">
+            <div class="bm-panel-head">
+                <div class="bm-panel-title">Stops</div>
+                <button type="button" class="apply-btn" id="stAddBtn">＋ Add stop</button>
+            </div>
+
+            <div id="stForm" class="bm-form" hidden>
+                <div class="bm-form-title" id="stFormTitle">New stop</div>
+                <div class="bm-form-grid">
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="stId">Stop id</label>
+                        <input type="text" class="bm-input" id="stId" maxlength="50" placeholder="e.g. PSB">
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="stName">Name</label>
+                        <input type="text" class="bm-input" id="stName" maxlength="200" placeholder="e.g. Piazza San Benedetto">
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="stLat">Latitude</label>
+                        <input type="number" step="any" class="bm-input" id="stLat" placeholder="41.4901">
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="stLon">Longitude</label>
+                        <input type="number" step="any" class="bm-input" id="stLon" placeholder="13.8265">
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="stActive">Active</label>
+                        <select class="bm-input" id="stActive">
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="stDesc">Description (optional)</label>
+                        <input type="text" class="bm-input" id="stDesc" maxlength="255" placeholder="Notes…">
+                    </div>
+                </div>
+                <div class="bm-form-actions">
+                    <span class="bm-msg" id="stFormMsg"></span>
+                    <button type="button" class="bm-btn-ghost" id="stCancelBtn">Cancel</button>
+                    <button type="button" class="apply-btn" id="stSaveBtn">Save</button>
+                </div>
+            </div>
+
+            <div class="bm-table-wrap">
+                <table class="bm-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Lat</th>
+                            <th>Lon</th>
+                            <th>Active</th>
+                            <th class="bm-actions-col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stTableBody"></tbody>
+                </table>
+            </div>
+        </div><!-- /dm-panel-stops -->
+
+        <!-- ══════════ ROUTES PANEL ══════════ -->
+        <div id="dm-panel-routes" class="dm-panel">
+            <div class="bm-panel-head">
+                <div class="bm-panel-title">Routes</div>
+                <button type="button" class="apply-btn" id="rtAddBtn">＋ Add route</button>
+            </div>
+
+            <div id="rtForm" class="bm-form" hidden>
+                <div class="bm-form-title" id="rtFormTitle">New route</div>
+                <div class="bm-form-grid">
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="rtId">Route id</label>
+                        <input type="text" class="bm-input" id="rtId" maxlength="50" placeholder="e.g. LINEA_4">
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="rtShort">Short name</label>
+                        <input type="text" class="bm-input" id="rtShort" maxlength="20" placeholder="e.g. 4">
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="rtLong">Long name</label>
+                        <input type="text" class="bm-input" id="rtLong" maxlength="200" placeholder="e.g. Anello Centro">
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="rtColor">Color</label>
+                        <input type="color" class="bm-input bm-input-color" id="rtColor" value="#3B82F6">
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="rtActive">Active</label>
+                        <select class="bm-input" id="rtActive">
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="bm-form-actions">
+                    <span class="bm-msg" id="rtFormMsg"></span>
+                    <button type="button" class="bm-btn-ghost" id="rtCancelBtn">Cancel</button>
+                    <button type="button" class="apply-btn" id="rtSaveBtn">Save</button>
+                </div>
+            </div>
+
+            <div class="bm-table-wrap">
+                <table class="bm-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Short</th>
+                            <th>Long name</th>
+                            <th>Color</th>
+                            <th>Active</th>
+                            <th class="bm-actions-col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rtTableBody"></tbody>
+                </table>
+            </div>
+        </div><!-- /dm-panel-routes -->
+    </div>
 </div>
 
 <script src="cassitrack-fleetmanager.js"></script>

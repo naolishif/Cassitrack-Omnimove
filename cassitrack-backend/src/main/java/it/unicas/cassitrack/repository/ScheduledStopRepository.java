@@ -52,4 +52,9 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
             "ORDER BY ss.trip.route.id, MIN(ss.stopSequence)")
     List<Object[]> findStopsGroupedByRoute();
 
+    // FK guard for stop deletion: scheduled_stops.stop_id references stops(id)
+    // ON DELETE CASCADE — a delete would silently wipe timetable rows, so the
+    // controller counts references and refuses instead of relying on the DB.
+    long countByStopId(String stopId);
+
 }

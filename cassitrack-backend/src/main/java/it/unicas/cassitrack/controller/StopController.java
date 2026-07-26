@@ -6,10 +6,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import it.unicas.cassitrack.dto.StopArrivalDTO;
 import it.unicas.cassitrack.model.Route;
 import it.unicas.cassitrack.model.ScheduledStop;
+import it.unicas.cassitrack.model.Stop;
 import it.unicas.cassitrack.repository.RouteRepository;
 import it.unicas.cassitrack.repository.ScheduledStopRepository;
+import it.unicas.cassitrack.repository.StopRepository;
 import it.unicas.cassitrack.service.ETAService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,6 +21,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -39,6 +44,7 @@ public class StopController {
     private final ETAService              etaService;
     private final ScheduledStopRepository scheduledStopRepository;
     private final RouteRepository         routeRepository;
+    private final StopRepository          stopRepository;
 
     @GetMapping("/{stopId}/arrivals")
     @Operation(
@@ -96,5 +102,84 @@ public class StopController {
                 .collect(Collectors.toList());
 
         return ResponseEntity.ok(schedule);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CRUD management (Data Management panel). Writes gated to FLEET_MANAGER in
+    // SecurityConfig (POST/PUT/DELETE /api/v1/stops/**). CSRF disabled app-wide.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Editable fields accepted from the client. */
+    public record StopRequest(String id, String name, Double lat, Double lon,
+                              String description, Boolean active) {}
+
+    private static ResponseEntity<?> err(HttpStatus status, String msg) {
+        return ResponseEntity.status(status).body(Map.of("error", msg));
+    }
+
+    @GetMapping
+    @Operation(summary = "List all stops (management)")
+    public List<Stop> listStops() {
+        return stopRepository.findAll(Sort.by(Sort.Direction.ASC, "id"));
+    }
+
+    @PostMapping
+    @Operation(summary = "Create a stop")
+    public ResponseEntity<?> createStop(@RequestBody StopRequest req) {
+        String id = req.id() == null ? null : req.id().trim();
+        String bad = validateStop(id, req);
+        if (bad != null) return err(HttpStatus.BAD_REQUEST, bad);
+        if (stopRepository.existsById(id))
+            return err(HttpStatus.CONFLICT, "A stop with id '" + id + "' already exists.");
+        Stop s = new Stop();
+        s.setId(id);
+        applyStop(s, req);
+        s.setCreatedAt(ZonedDateTime.now(ITALY_TZ));
+        return ResponseEntity.status(HttpStatus.CREATED).body(stopRepository.save(s));
+    }
+
+    @PutMapping("/{id}")
+    @Operation(summary = "Update a stop")
+    public ResponseEntity<?> updateStop(@PathVariable String id, @RequestBody StopRequest req) {
+        Stop s = stopRepository.findById(id).orElse(null);
+        if (s == null) return err(HttpStatus.NOT_FOUND, "Stop not found.");
+        String bad = validateStop(id, req);   // id already exists; re-validate name/coords
+        if (bad != null) return err(HttpStatus.BAD_REQUEST, bad);
+        applyStop(s, req);
+        return ResponseEntity.ok(stopRepository.save(s));
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Delete a stop (blocked if used in the timetable)")
+    public ResponseEntity<?> deleteStop(@PathVariable String id) {
+        Stop s = stopRepository.findById(id).orElse(null);
+        if (s == null) return err(HttpStatus.NOT_FOUND, "Stop not found.");
+        long refs = scheduledStopRepository.countByStopId(id);
+        if (refs > 0)
+            return err(HttpStatus.CONFLICT,
+                    "Cannot delete: this stop is used in " + refs + " scheduled arrival(s). "
+                            + "Remove it from the timetable first.");
+        stopRepository.delete(s);
+        return ResponseEntity.noContent().build();
+    }
+
+    private static void applyStop(Stop s, StopRequest req) {
+        s.setName(req.name().trim());
+        s.setLat(req.lat());
+        s.setLon(req.lon());
+        s.setDescription(req.description() == null || req.description().isBlank()
+                ? null : req.description().trim());
+        s.setActive(req.active() == null ? Boolean.TRUE : req.active());
+    }
+
+    private static String validateStop(String id, StopRequest req) {
+        if (id == null || !STOP_ID_RE.matcher(id).matches())
+            return "Stop id is required (letters, digits, - or _, max 50 chars).";
+        if (req.name() == null || req.name().trim().isEmpty()) return "Name is required.";
+        if (req.name().trim().length() > 200)                  return "Name is too long (max 200 characters).";
+        if (req.lat() == null || req.lon() == null)            return "Latitude and longitude are required.";
+        if (req.lat() < -90 || req.lat() > 90)                 return "Latitude must be between -90 and 90.";
+        if (req.lon() < -180 || req.lon() > 180)               return "Longitude must be between -180 and 180.";
+        return null;
     }
 }

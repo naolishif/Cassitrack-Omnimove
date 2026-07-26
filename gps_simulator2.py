@@ -243,8 +243,12 @@ class BusSimulator:
         self.wheelchair  = bus_row["wheelchair_accessible"]
         self.conn        = conn
 
-        # Simulated passenger state
-        self.passengers      = random.randint(5, int(self.capacity * 0.4))
+        # Simulated passenger state.
+        # Clamp so small-capacity buses don't break randint: e.g. a 10-seat bus
+        # gives int(10*0.4)=4, which is below the old fixed minimum of 5, making
+        # randint(5, 4) raise "empty range". Keep low <= high for any capacity.
+        _pax_high = max(1, int(self.capacity * 0.4))
+        self.passengers      = random.randint(min(5, _pax_high), _pax_high)
         self.speed_kmh       = random.uniform(25, 40)
         self.delay_minutes   = random.randint(0, 4)
         self.engine_temp     = random.uniform(78, 92)

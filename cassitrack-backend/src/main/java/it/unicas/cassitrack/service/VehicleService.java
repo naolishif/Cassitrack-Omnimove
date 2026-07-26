@@ -85,6 +85,7 @@ public class VehicleService {
                 .headingDeg(pos.getHeadingDeg())
                 .routeId(pos.getRouteId())
                 .routeName(pos.getRouteName())
+                .tripId(pos.getTripId())
                 .scheduleStatus(status)
                 .delayMinutes(pos.getDelayMinutes())
                 .nextStopId(pos.getLastStopRegisteredId())

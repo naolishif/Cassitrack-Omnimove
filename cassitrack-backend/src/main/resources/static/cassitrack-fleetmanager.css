@@ -292,6 +292,12 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     overflow:hidden;
 }
 
+#data-management-view.active-view{
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+}
+
 /* =========================================
    ANALYTICS FILTER BAR
 ========================================= */
@@ -351,6 +357,15 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     max-width:160px;
 }
 .filter-select:focus{border-color:var(--accent)}
+
+/* Fleet Monitor sidebar filters */
+.fm-filter-title{font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--dim);margin-bottom:10px}
+.fm-filter-row{display:flex;align-items:center;gap:8px}
+.fm-filter-row + .fm-filter-row{margin-top:8px}
+.fm-filter-lbl{font-family:var(--mono);font-size:11px;color:var(--text);min-width:58px}
+.fm-filter-select{flex:1;max-width:none}
+.fm-filter-range{flex:1;min-width:0;accent-color:var(--accent);cursor:pointer}
+.fm-filter-val{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:34px;text-align:right}
 
 /* Route multi-select pill row */
 .route-pills{display:flex;flex-wrap:wrap;gap:5px;align-items:center;max-width:300px}
@@ -872,3 +887,75 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .chip[data-status="EARLY"]{color:#06B6D4;border-color:#06B6D444;background:#06B6D418;font-size:9px}
 .chip[data-status="UNKNOWN"]{color:#4B5563;border-color:#4B556344;background:#4B556318;font-size:9px}
 .chip[data-status="NO_TRIP"]{color:#F59E0B;border-color:#F59E0B44;background:#F59E0B18;font-size:9px}
+
+/* ───────────────────────────────────────────────────────────────
+   BUS VISIBILITY TOGGLE + FOCUS DETAIL + DATA MANAGEMENT
+   ─────────────────────────────────────────────────────────────── */
+
+/* Sidebar vcard: actions cluster (chip + eye toggle) */
+.vcard-actions{display:flex;align-items:center;gap:8px}
+.vis-toggle{background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--dim);cursor:pointer;font-size:12px;line-height:1;padding:3px 6px;transition:color .2s,border-color .2s}
+.vis-toggle:hover{border-color:rgba(59,130,246,.4);color:var(--text)}
+.vis-toggle[data-hidden="true"]{color:var(--amber);border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.08)}
+/* A hidden bus is dimmed in the list but stays visible/tracked there */
+.vcard.hidden-bus{opacity:.55}
+
+/* Focus detail panel in the side tab */
+.bus-detail{display:flex;flex-direction:column;gap:10px}
+.bd-back{font-family:var(--mono);font-size:11px;color:var(--accent);cursor:pointer;padding:4px 2px;user-select:none;align-self:flex-start}
+.bd-back:hover{text-decoration:underline}
+.bd-card{background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.3);border-radius:10px;padding:14px}
+.bd-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.bd-id{font-weight:800;font-size:16px}
+.bd-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bd-span2{grid-column:span 2}
+.bd-visbtn{margin-top:14px;width:100%;padding:9px;border:1px solid var(--border);border-radius:7px;background:var(--panel2);color:var(--text);font-family:var(--mono);font-size:11px;cursor:pointer;transition:border-color .2s,color .2s}
+.bd-visbtn:hover{border-color:rgba(59,130,246,.4);color:var(--light)}
+
+/* ── Data Management: fleet buses CRUD ─────────────────────────────────── */
+.bm-wrap{flex:1;min-height:0;overflow:auto;padding:24px}
+.bm-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px}
+.bm-title{font-size:20px;font-weight:800;letter-spacing:-.5px}
+.bm-sub{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:4px}
+
+/* Sub-navigation (Buses / Stops / …) + entity panels */
+.bm-subnav{display:flex;gap:8px;border-bottom:1px solid var(--border);margin-bottom:18px}
+.bm-subnav-btn{font-family:var(--mono);font-size:12px;padding:8px 14px;border:none;background:transparent;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.bm-subnav-btn:hover{color:var(--text)}
+.bm-subnav-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.dm-panel{display:none}
+.dm-panel.active{display:block}
+.bm-panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.bm-panel-title{font-family:var(--mono);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+
+.bm-form{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.bm-form-title{font-family:var(--mono);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
+.bm-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.bm-field{display:flex;flex-direction:column;gap:5px}
+.bm-lbl{font-family:var(--mono);font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim)}
+.bm-input{padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-family:var(--mono);font-size:12px;outline:none}
+.bm-input:focus{border-color:var(--accent)}
+.bm-form-actions{display:flex;align-items:center;gap:10px;margin-top:14px;justify-content:flex-end}
+.bm-msg{margin-right:auto;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.bm-msg.err{color:#EF4444}
+.bm-msg.ok{color:#22C55E}
+.bm-btn-ghost{padding:8px 14px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--text);font-family:var(--mono);font-size:11px;cursor:pointer;transition:border-color .2s}
+.bm-btn-ghost:hover{border-color:var(--accent)}
+
+.bm-table-wrap{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel)}
+.bm-table{width:100%;border-collapse:collapse;font-size:12px}
+.bm-table thead th{text-align:left;font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);padding:12px 14px;border-bottom:1px solid var(--border);background:var(--panel2)}
+.bm-table td{padding:10px 14px;border-bottom:1px solid var(--border);color:var(--text)}
+.bm-table tbody tr:last-child td{border-bottom:none}
+.bm-table tbody tr:hover{background:rgba(59,130,246,.04)}
+.bm-mono{font-family:var(--mono)}
+.bm-empty{text-align:center;color:var(--dim);padding:24px}
+.bm-badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid var(--border)}
+.bm-badge.on{color:#22C55E;border-color:rgba(34,197,94,.4)}
+.bm-badge.off{color:#EF4444;border-color:rgba(239,68,68,.4)}
+.bm-actions-col{text-align:right;white-space:nowrap}
+.bm-row-btn{font-family:var(--mono);font-size:11px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);cursor:pointer;margin-left:6px;transition:border-color .2s,color .2s}
+.bm-row-btn:hover{border-color:var(--accent)}
+.bm-row-btn.danger:hover{border-color:rgba(239,68,68,.6);color:#EF4444}
+.rt-swatch{display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid var(--border);vertical-align:middle;margin-right:6px}
+.bm-input-color{padding:2px;height:34px;cursor:pointer}

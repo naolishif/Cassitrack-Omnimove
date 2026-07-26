@@ -80,17 +80,33 @@
                 routeColors[route.id] = color;
                 routeColors[route.name] = color;
 
-                // la polilinea della linea resta una per linea
-                L.polyline(route.stops.map(s=>[s.lat,s.lon]),
+                // la polilinea della linea resta una per linea (ref salvata per filtro)
+                routePolylines[route.id] = L.polyline(route.stops.map(s=>[s.lat,s.lon]),
                     {color,weight:4,opacity:.8,dashArray:'8 8'}).addTo(map);
 
                 // accumula le fermate, unendo le linee che le servono
                 route.stops.forEach(s=>{
-                    if(!stopMap[s.id]) stopMap[s.id] = {name:s.name, lat:s.lat, lon:s.lon, lines:[]};
+                    if(!stopMap[s.id]) stopMap[s.id] = {name:s.name, lat:s.lat, lon:s.lon, lines:[], routeIds:new Set()};
+                    stopMap[s.id].routeIds.add(route.id);
                     if(!stopMap[s.id].lines.some(l=>l.name===route.name))
                         stopMap[s.id].lines.push({name:route.name, color});
                 });
             });
+
+            // Populate the Route filter dropdown (Fleet Monitor sidebar).
+            const rf = document.getElementById('routeFilter');
+            if(rf){
+                // The public line number (shortName) is NOT unique — several variants
+                // can share it (e.g. two "2": full loop vs half-run). The option VALUE
+                // is always the unique route id; the LABEL adds the description so the
+                // user can tell same-numbered variants apart.
+                rf.innerHTML = '<option value="">All routes</option>' +
+                    routes.map(r=>{
+                        const num = r.name || r.id;
+                        const label = r.longName ? `${num} · ${r.longName}` : num;
+                        return `<option value="${escHtml(r.id)}">${escHtml(label)}</option>`;
+                    }).join('');
+            }
 
             // un solo marker per fermata, con TUTTE le linee nel popup
             Object.values(stopMap).forEach(st=>{
@@ -110,6 +126,7 @@
                 // (Leaflet lazy-renders bindPopup() strings), so the dynamic colours
                 // must be (re-)applied at that moment.
                 sm.on('popupopen', e => applyDynStyles(e.popup.getElement()));
+                st.marker = sm;
             });
 
             fetchVehicles();
@@ -125,8 +142,53 @@
     const markers={},vehicleData={};
     let selectedVeh=null,lastUpdate=null;
     const routeColors = {};   // id linea -> colore, riempita all'avvio
+    const routePolylines = {};// id linea -> polilinea Leaflet (per mostrare/nascondere)
+    let lastVehicles = [];    // ultima lista /vehicles ricevuta (per filtrare percorsi/fermate)
     const stopMap = {};   // stopId -> { name, lat, lon, lines:[{name,color}] }
     let fleetSize = 4;
+
+    // ── Bus map-visibility (user story) ──────────────────────────────────────
+    // vehicle_ids currently HIDDEN from the map. The bus stays fully tracked
+    // (data keeps updating, it still appears in lists) — only its map marker is
+    // suppressed. A plain in-memory Set persists for the session but not across
+    // a refresh, exactly as required.
+    const hiddenBuses = new Set();
+
+    // ── Route filter (Fleet Monitor) ─────────────────────────────────────────
+    // When set to a route id, only buses on that route are shown on the map and
+    // in the sidebar, and only that route's line + stops are drawn. null = all
+    // routes. Composes with the per-bus hide toggle and with focus mode.
+    let routeFilter    = null;   // route id, or null = all routes
+    let serviceFilter  = 'all';  // 'all' | 'in' (has trip) | 'out' (no trip)
+    let delayThreshold = 0;      // minutes; 0 = off, else keep only delay >= N
+    // A bus is shown only if it passes EVERY active filter (logical AND).
+    function busPassesFilter(v){
+        if(!v) return true;
+        if(routeFilter && v.route_id !== routeFilter) return false;
+        if(serviceFilter === 'in'  && !v.trip_id) return false;
+        if(serviceFilter === 'out' &&  v.trip_id) return false;
+        if(delayThreshold > 0 && (v.delay_minutes || 0) < delayThreshold) return false;
+        return true;
+    }
+
+    // Add/remove a bus marker from the map according to its visibility state:
+    // a bus is on the map only if it is not hidden AND it passes the route filter.
+    function applyBusVisibility(id){
+        const m = markers[id];
+        if(!m) return;
+        const visible = !hiddenBuses.has(id) && busPassesFilter(vehicleData[id]);
+        if(visible){ if(!map.hasLayer(m)) m.addTo(map); }
+        else if(map.hasLayer(m)) map.removeLayer(m);
+    }
+
+    // Flip a bus's visibility and keep BOTH surfaces (map sidebar + Data
+    // Management table) in sync — they both read the same hiddenBuses Set.
+    function toggleBusVisibility(id){
+        if(hiddenBuses.has(id)) hiddenBuses.delete(id); else hiddenBuses.add(id);
+        applyBusVisibility(id);
+        updateRouteVisibility();   // a toggled-off bus also hides its route/stops (if it was the last one)
+        updateFleet(Object.values(vehicleData));
+    }
 
     // CSP FIX (A05): schedule_status is a fixed 5-value domain (see SC above), so
     // the bus marker icon needs no dynamic style at all — a data-status attribute
@@ -163,6 +225,7 @@
     }
 
     function updateMap(vehicles){
+        lastVehicles = vehicles;
         vehicles.forEach(v=>{
             vehicleData[v.vehicle_id]=v;
             const st=!v.trip_id?'NO_TRIP':(v.schedule_status||'UNKNOWN'),pos=[v.lat,v.lon];
@@ -181,7 +244,15 @@
             // setPopupContent() re-renders the popup's inner DOM even while it's
             // currently open, so re-apply the dynamic styles in that case too.
             if (markers[v.vehicle_id].isPopupOpen()) applyDynStyles(markers[v.vehicle_id].getPopup().getElement());
+            // Suppress the marker if this bus is hidden (data above still updated → bus stays tracked).
+            applyBusVisibility(v.vehicle_id);
+            // Focus follow: keep the map centred on the selected bus as it moves.
+            if (selectedVeh === v.vehicle_id && !hiddenBuses.has(v.vehicle_id))
+                map.panTo([v.lat, v.lon], { animate: true, duration: 0.6 });
         });
+        // refresh which routes/stops are shown (buses may have moved on/off routes,
+        // or been toggled hidden — everything is recomputed from live data)
+        updateRouteVisibility();
     }
 
     function popupV(v){
@@ -213,7 +284,9 @@
     </div>`;
     }
 
-    function updateFleet(vehicles){
+    function updateFleet(all){
+        // Route filter narrows every surface (analytics counts + sidebar list).
+        const vehicles=(all||[]).filter(busPassesFilter);
         const onTime=vehicles.filter(v=>v.schedule_status==='ON_TIME'||v.schedule_status==='EARLY').length;
         const late=vehicles.filter(v=>v.schedule_status==='SLIGHTLY_LATE'||v.schedule_status==='SIGNIFICANTLY_LATE').length;
         // Analytics
@@ -243,6 +316,12 @@
         if(sLate) sLate.textContent=late;
 
         const list=document.getElementById('vehicle-list');
+        // Focus mode: when a bus is selected, the side panel shows ONLY that bus.
+        if(selectedVeh && vehicleData[selectedVeh]){
+            list.innerHTML='';
+            list.appendChild(buildBusDetail(vehicleData[selectedVeh]));
+            return;
+        }
         if(vehicles.length===0){list.innerHTML=`<div class="empty"><div class="empty-icon">🚌</div><p>No active buses.<br>Start the GPS simulator.</p></div>`;return;}
         list.innerHTML='';
         vehicles.forEach(v=>{
@@ -254,20 +333,69 @@
             const pax=v.estimated_passengers?'~'+v.estimated_passengers:'—';
             const cp=crowdPct(v.crowding_level),cc=cp>70?'#EF4444':cp>40?'#F59E0B':'#22C55E';
             const rc=routeColor(v.route_id);
+            const hidden=hiddenBuses.has(v.vehicle_id);
             const d=document.createElement('div');
-            d.className='vcard'+(selectedVeh===v.vehicle_id?' selected':'');
-            d.innerHTML=`<div class="vcard-stripe" data-status="${st}"></div><div class="vcard-top"><div class="vcard-id" data-fg="${rc}">${escHtml(v.vehicle_id)}</div><div class="chip" data-status="${st}">${l}</div></div><div class="vcard-grid"><div class="vitem"><div class="vitem-lbl">Speed</div><div class="vitem-val">${spd} km/h</div></div><div class="vitem"><div class="vitem-lbl">Passengers</div><div class="vitem-val">${pax}</div></div><div class="vitem"><div class="vitem-lbl">Crowding</div><div class="vitem-val">${escHtml(v.crowding_level)||'—'}</div></div><div class="vitem"><div class="vitem-lbl">Route</div><div class="vitem-val" data-fg="${rc}">${escHtml(v.route_name)||'—'}</div></div></div><div class="cbar"><div class="cbar-fill" data-bg="${cc}" data-width-pct="${cp}"></div></div>`;
+            d.className='vcard'+(selectedVeh===v.vehicle_id?' selected':'')+(hidden?' hidden-bus':'');
+            d.innerHTML=`<div class="vcard-stripe" data-status="${st}"></div><div class="vcard-top"><div class="vcard-id" data-fg="${rc}">${escHtml(v.vehicle_id)}</div><div class="vcard-actions"><div class="chip" data-status="${st}">${l}</div><button type="button" class="vis-toggle" data-hidden="${hidden}" aria-label="Toggle map visibility" title="${hidden?'Hidden from map — click to show':'Visible on map — click to hide'}">${hidden?'🚫':'👁'}</button></div></div><div class="vcard-grid"><div class="vitem"><div class="vitem-lbl">Speed</div><div class="vitem-val">${spd} km/h</div></div><div class="vitem"><div class="vitem-lbl">Passengers</div><div class="vitem-val">${pax}</div></div><div class="vitem"><div class="vitem-lbl">Crowding</div><div class="vitem-val">${escHtml(v.crowding_level)||'—'}</div></div><div class="vitem"><div class="vitem-lbl">Route</div><div class="vitem-val" data-fg="${rc}">${escHtml(v.route_name)||'—'}</div></div></div><div class="cbar"><div class="cbar-fill" data-bg="${cc}" data-width-pct="${cp}"></div></div>`;
             // d is a detached element (not yet appended), so this is synchronous
             // and safe to call right after setting innerHTML.
             applyDynStyles(d);
             d.addEventListener('click',()=>selV(v.vehicle_id));
+            // the visibility toggle must NOT select the bus → stop the bubble
+            const vt=d.querySelector('.vis-toggle');
+            if(vt) vt.addEventListener('click',ev=>{ev.stopPropagation();toggleBusVisibility(v.vehicle_id);});
             list.appendChild(d);
         });
     }
 
+    // Detail panel shown in the side tab when a single bus is selected.
+    function buildBusDetail(v){
+        const st  = !v.trip_id ? 'NO_TRIP' : (SC[v.schedule_status] ? v.schedule_status : 'UNKNOWN');
+        const l   = SL[v.schedule_status]||'LIVE';
+        const rc  = routeColor(v.route_id);
+        const cp  = crowdPct(v.crowding_level), cc = cp>70?'#EF4444':cp>40?'#F59E0B':'#22C55E';
+        const hidden   = hiddenBuses.has(v.vehicle_id);
+        const delayTxt = v.delay_minutes>0 ? `+${v.delay_minutes}m` : 'In orario';
+        const eta = v.eta_seconds ? Math.round(v.eta_seconds/60)+' min' : '—';
+        const el  = document.createElement('div');
+        el.className='bus-detail';
+        el.innerHTML=`
+        <div class="bd-back" id="bdBack">← Back to fleet</div>
+        <div class="bd-card">
+            <div class="bd-head">
+                <div class="bd-id" data-fg="${rc}">🚌 ${escHtml(v.vehicle_id)}</div>
+                <div class="chip" data-status="${st}">${l}</div>
+            </div>
+            <div class="bd-grid">
+                <div class="vitem bd-span2"><div class="vitem-lbl">Route</div><div class="vitem-val" data-fg="${rc}">${escHtml(v.route_name)||'—'}</div></div>
+                <div class="vitem"><div class="vitem-lbl">Speed</div><div class="vitem-val">${v.speed_kmh?v.speed_kmh.toFixed(1)+' km/h':'—'}</div></div>
+                <div class="vitem"><div class="vitem-lbl">Delay</div><div class="vitem-val vpop-delay" data-status="${st}">${delayTxt}</div></div>
+                <div class="vitem"><div class="vitem-lbl">Passengers</div><div class="vitem-val">${v.estimated_passengers?'~'+v.estimated_passengers:'—'}</div></div>
+                <div class="vitem"><div class="vitem-lbl">Crowding</div><div class="vitem-val">${escHtml(v.crowding_level)||'—'}</div></div>
+                <div class="vitem"><div class="vitem-lbl">ETA next stop</div><div class="vitem-val">${eta}</div></div>
+                <div class="vitem"><div class="vitem-lbl">Seats</div><div class="vitem-val">${v.numero_posti||'—'}</div></div>
+                <div class="vitem bd-span2"><div class="vitem-lbl">Last stop</div><div class="vitem-val">${escHtml(v.next_stop_name)||'—'}</div></div>
+                <div class="vitem bd-span2"><div class="vitem-lbl">Next stop</div><div class="vitem-val">${escHtml(v.upcoming_stop_name)||'—'}</div></div>
+                <div class="vitem"><div class="vitem-lbl">Wheelchair</div><div class="vitem-val">${v.wheelchair_accessible?'♿ Yes':'—'}</div></div>
+                <div class="vitem"><div class="vitem-lbl">Position</div><div class="vitem-val">${v.lat!=null?v.lat.toFixed(4):'—'}, ${v.lon!=null?v.lon.toFixed(4):'—'}</div></div>
+            </div>
+            <div class="cbar"><div class="cbar-fill" data-bg="${cc}" data-width-pct="${cp}"></div></div>
+            <button type="button" class="bd-visbtn" id="bdVis">${hidden?'👁 Show on map':'🚫 Hide from map'}</button>
+        </div>`;
+        applyDynStyles(el);
+        el.querySelector('#bdBack').addEventListener('click', ()=>selV(v.vehicle_id));       // same id → deselect
+        el.querySelector('#bdVis').addEventListener('click', ()=>toggleBusVisibility(v.vehicle_id));
+        return el;
+    }
+
     function selV(id){
-        selectedVeh=id;const v=vehicleData[id];
-        if(v){map.flyTo([v.lat,v.lon],16,{duration:1});markers[id]?.openPopup();}
+        if(selectedVeh===id){            // click the same bus again → deselect, back to full fleet list
+            selectedVeh=null;
+        }else{
+            selectedVeh=id;const v=vehicleData[id];
+            if(v && !hiddenBuses.has(id)){map.flyTo([v.lat,v.lon],16,{duration:1});markers[id]?.openPopup();}
+        }
+        updateRouteVisibility();
         updateFleet(Object.values(vehicleData));
     }
 
@@ -278,6 +406,49 @@
     function routeColor(routeId){
         return routeColors[routeId] || '#4B5563';
     }
+    // Show on the map ONLY the route of the currently selected bus.
+    // With no bus selected, every route is shown (default behaviour).
+    function updateRouteVisibility(){
+        // Which routes to draw:
+        //  · a bus is selected  → only that bus's route
+        //  · otherwise          → every route that has ≥1 VISIBLE (non-hidden) active bus
+        // Routes with no bus on them — and routes whose only buses are toggled off —
+        // are hidden, together with their stops.
+        let showSet;
+        if(selectedVeh && vehicleData[selectedVeh]){
+            const r = vehicleData[selectedVeh].route_id;
+            showSet = new Set(r ? [r] : []);
+        } else if(routeFilter){
+            showSet = new Set([routeFilter]);
+        } else {
+            showSet = new Set();
+            lastVehicles.forEach(v=>{ if(v.route_id && !hiddenBuses.has(v.vehicle_id) && busPassesFilter(v)) showSet.add(v.route_id); });
+        }
+        // Route polylines
+        Object.entries(routePolylines).forEach(([rid, pl])=>{
+            if(showSet.has(rid)){ if(!map.hasLayer(pl)) pl.addTo(map); }
+            else if(map.hasLayer(pl)) map.removeLayer(pl);
+        });
+        // Stops: shown only if they belong to at least one visible route
+        Object.values(stopMap).forEach(st=>{
+            if(!st.marker) return;
+            const show = st.routeIds && [...st.routeIds].some(rid=>showSet.has(rid));
+            if(show){ if(!map.hasLayer(st.marker)) st.marker.addTo(map); }
+            else if(map.hasLayer(st.marker)) map.removeLayer(st.marker);
+        });
+    }
+    // Re-evaluate every surface after any filter change (markers, routes, sidebar).
+    function refreshFilters(){
+        // if the focused bus no longer passes the active filters, drop focus
+        if(selectedVeh && vehicleData[selectedVeh] && !busPassesFilter(vehicleData[selectedVeh]))
+            selectedVeh = null;
+        Object.keys(markers).forEach(applyBusVisibility);   // re-evaluate every marker
+        updateRouteVisibility();
+        updateFleet(Object.values(vehicleData));
+    }
+    function setRouteFilter(rid){ routeFilter = rid || null; refreshFilters(); }
+    function setServiceFilter(val){ serviceFilter = val || 'all'; refreshFilters(); }
+    function setDelayThreshold(min){ delayThreshold = Math.max(0, parseInt(min, 10) || 0); refreshFilters(); }
     function chartColor(key, i){
         return routeColors[key] || `hsl(${(i * 137.5) % 360}, 70%, 55%)`;
     }
@@ -304,6 +475,361 @@
         if(viewId === 'fleet-monitor'){
             setTimeout(()=>map.invalidateSize(),200);
         }
+    }
+
+    // ─────────────────────────────────────────────
+    // DATA MANAGEMENT — fleet buses CRUD (Postgres)
+    // ─────────────────────────────────────────────
+    let bmBuses = [];          // last loaded list
+    let bmEditId = null;       // null = adding a new bus, otherwise the bus id being edited
+
+    async function loadBuses(){
+        const body = document.getElementById('bmTableBody');
+        if(body) body.innerHTML = `<tr><td colspan="7" class="bm-empty">Loading…</td></tr>`;
+        try{
+            const r = await fetch(`${API}/buses`, {headers:{'Accept':'application/json'}});
+            if(!r.ok) throw new Error(r.status);
+            bmBuses = await r.json();
+            renderBusesAdmin();
+        }catch(e){
+            if(body) body.innerHTML = `<tr><td colspan="7" class="bm-empty">Failed to load buses.</td></tr>`;
+        }
+    }
+
+    function renderBusesAdmin(){
+        const body = document.getElementById('bmTableBody');
+        if(!body) return;
+        if(!bmBuses.length){ body.innerHTML = `<tr><td colspan="7" class="bm-empty">No buses yet — use “＋ Add bus”.</td></tr>`; return; }
+        body.innerHTML = '';
+        bmBuses.slice().sort((a,b)=>(a.busId||0)-(b.busId||0)).forEach(b=>{
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${escHtml(b.busId)}</td>
+                <td class="bm-mono">${escHtml(b.targa)||'—'}</td>
+                <td>${escHtml(b.numeroPosti)}</td>
+                <td>${b.wheelchairAccessible ? '♿ Yes' : '—'}</td>
+                <td>${b.disponibile ? '<span class="bm-badge on">Available</span>' : '<span class="bm-badge off">Unavailable</span>'}</td>
+                <td class="bm-mono">${escHtml(b.currentVehicleId)||'—'}</td>
+                <td class="bm-actions-col">
+                    <button type="button" class="bm-row-btn" data-act="edit" data-id="${escHtml(b.busId)}">Edit</button>
+                    <button type="button" class="bm-row-btn danger" data-act="del" data-id="${escHtml(b.busId)}">Delete</button>
+                </td>`;
+            body.appendChild(tr);
+        });
+    }
+
+    function setBmMsg(txt, ok){
+        const el = document.getElementById('bmFormMsg');
+        if(!el) return;
+        el.textContent = txt || '';
+        el.classList.toggle('err', !!txt && !ok);
+        el.classList.toggle('ok',  !!txt && !!ok);
+    }
+
+    function openBusForm(bus){
+        bmEditId = bus ? bus.busId : null;
+        document.getElementById('bmFormTitle').textContent = bus ? `Edit bus #${bus.busId}` : 'New bus';
+        document.getElementById('bmTarga').value      = bus ? (bus.targa || '') : '';
+        document.getElementById('bmPosti').value      = bus && bus.numeroPosti != null ? bus.numeroPosti : '';
+        document.getElementById('bmVehicleId').value  = bus ? (bus.currentVehicleId || '') : '';
+        document.getElementById('bmWheelchair').value = (bus && bus.wheelchairAccessible) ? 'true' : 'false';
+        document.getElementById('bmDisponibile').value= bus ? (bus.disponibile ? 'true' : 'false') : 'true';
+        setBmMsg('');
+        document.getElementById('bmForm').hidden = false;
+        document.getElementById('bmTarga').focus();
+    }
+
+    function closeBusForm(){
+        document.getElementById('bmForm').hidden = true;
+        bmEditId = null;
+        setBmMsg('');
+    }
+
+    async function saveBus(){
+        const payload = {
+            targa:                document.getElementById('bmTarga').value,
+            numeroPosti:          parseInt(document.getElementById('bmPosti').value, 10),
+            wheelchairAccessible: document.getElementById('bmWheelchair').value === 'true',
+            disponibile:          document.getElementById('bmDisponibile').value === 'true',
+            currentVehicleId:     document.getElementById('bmVehicleId').value
+        };
+        // light client-side validation (server re-validates authoritatively)
+        if(!payload.targa || !payload.targa.trim()){ setBmMsg('Plate is required.'); return; }
+        if(!(payload.numeroPosti > 0)){ setBmMsg('Seats must be a positive number.'); return; }
+
+        const editing = bmEditId != null;
+        const url    = editing ? `${API}/buses/${bmEditId}` : `${API}/buses`;
+        const method = editing ? 'PUT' : 'POST';
+        setBmMsg('Saving…', true);
+        try{
+            const r = await fetch(url, {
+                method,
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if(r.ok){
+                closeBusForm();
+                await loadBuses();
+            }else{
+                let msg = 'Save failed.';
+                try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
+                setBmMsg(msg);
+            }
+        }catch(e){ setBmMsg('Network error while saving.'); }
+    }
+
+    async function deleteBus(id){
+        const bus = bmBuses.find(b=>b.busId===id);
+        const label = bus ? (bus.targa || ('#'+id)) : ('#'+id);
+        if(!window.confirm(`Delete bus ${label}? This cannot be undone.`)) return;
+        try{
+            const r = await fetch(`${API}/buses/${id}`, {method:'DELETE'});
+            if(r.ok){ await loadBuses(); }
+            else{
+                let msg = 'Delete failed.';
+                try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
+                window.alert(msg);
+            }
+        }catch(e){ window.alert('Network error while deleting.'); }
+    }
+
+    // ── Data Management sub-navigation (Buses / Stops / …) ────────────────────
+    function switchDmPanel(panelId, btn){
+        document.querySelectorAll('#data-management-view .dm-panel').forEach(p=>p.classList.remove('active'));
+        const panel = document.getElementById(panelId);
+        if(panel) panel.classList.add('active');
+        document.querySelectorAll('.bm-subnav-btn').forEach(b=>b.classList.remove('active'));
+        if(btn) btn.classList.add('active');
+        if(panelId === 'dm-panel-stops') loadStops();
+        else if(panelId === 'dm-panel-routes') loadRoutes();
+        else if(panelId === 'dm-panel-buses') loadBuses();
+    }
+
+    // ── Data Management: stops CRUD (Postgres) ────────────────────────────────
+    let stStops = [];
+    let stEditId = null;   // null = adding a new stop, otherwise the stop id being edited
+
+    async function loadStops(){
+        const body = document.getElementById('stTableBody');
+        if(body) body.innerHTML = `<tr><td colspan="6" class="bm-empty">Loading…</td></tr>`;
+        try{
+            const r = await fetch(`${API}/stops`, {headers:{'Accept':'application/json'}});
+            if(!r.ok) throw new Error(r.status);
+            stStops = await r.json();
+            renderStopsAdmin();
+        }catch(e){
+            if(body) body.innerHTML = `<tr><td colspan="6" class="bm-empty">Failed to load stops.</td></tr>`;
+        }
+    }
+
+    function renderStopsAdmin(){
+        const body = document.getElementById('stTableBody');
+        if(!body) return;
+        if(!stStops.length){ body.innerHTML = `<tr><td colspan="6" class="bm-empty">No stops yet — use “＋ Add stop”.</td></tr>`; return; }
+        body.innerHTML = '';
+        stStops.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(s=>{
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="bm-mono">${escHtml(s.id)}</td>
+                <td>${escHtml(s.name)||'—'}</td>
+                <td class="bm-mono">${s.lat != null ? Number(s.lat).toFixed(5) : '—'}</td>
+                <td class="bm-mono">${s.lon != null ? Number(s.lon).toFixed(5) : '—'}</td>
+                <td>${s.active ? '<span class="bm-badge on">Active</span>' : '<span class="bm-badge off">Inactive</span>'}</td>
+                <td class="bm-actions-col">
+                    <button type="button" class="bm-row-btn" data-act="edit" data-id="${escHtml(s.id)}">Edit</button>
+                    <button type="button" class="bm-row-btn danger" data-act="del" data-id="${escHtml(s.id)}">Delete</button>
+                </td>`;
+            body.appendChild(tr);
+        });
+    }
+
+    function setStMsg(txt, ok){
+        const el = document.getElementById('stFormMsg');
+        if(!el) return;
+        el.textContent = txt || '';
+        el.classList.toggle('err', !!txt && !ok);
+        el.classList.toggle('ok',  !!txt && !!ok);
+    }
+
+    function openStopForm(stop){
+        stEditId = stop ? stop.id : null;
+        document.getElementById('stFormTitle').textContent = stop ? `Edit stop ${stop.id}` : 'New stop';
+        const idEl = document.getElementById('stId');
+        idEl.value = stop ? stop.id : '';
+        idEl.disabled = !!stop;   // id is the primary key → not editable on update
+        document.getElementById('stName').value  = stop ? (stop.name || '') : '';
+        document.getElementById('stLat').value    = stop && stop.lat != null ? stop.lat : '';
+        document.getElementById('stLon').value    = stop && stop.lon != null ? stop.lon : '';
+        document.getElementById('stActive').value = stop ? (stop.active === false ? 'false' : 'true') : 'true';
+        document.getElementById('stDesc').value   = stop ? (stop.description || '') : '';
+        setStMsg('');
+        document.getElementById('stForm').hidden = false;
+        (stop ? document.getElementById('stName') : idEl).focus();
+    }
+
+    function closeStopForm(){
+        document.getElementById('stForm').hidden = true;
+        stEditId = null;
+        setStMsg('');
+    }
+
+    async function saveStop(){
+        const payload = {
+            id:          document.getElementById('stId').value,
+            name:        document.getElementById('stName').value,
+            lat:         parseFloat(document.getElementById('stLat').value),
+            lon:         parseFloat(document.getElementById('stLon').value),
+            description: document.getElementById('stDesc').value,
+            active:      document.getElementById('stActive').value === 'true'
+        };
+        if(!payload.id || !payload.id.trim()){ setStMsg('Stop id is required.'); return; }
+        if(!payload.name || !payload.name.trim()){ setStMsg('Name is required.'); return; }
+        if(Number.isNaN(payload.lat) || Number.isNaN(payload.lon)){ setStMsg('Latitude and longitude are required.'); return; }
+
+        const editing = stEditId != null;
+        const url    = editing ? `${API}/stops/${encodeURIComponent(stEditId)}` : `${API}/stops`;
+        const method = editing ? 'PUT' : 'POST';
+        setStMsg('Saving…', true);
+        try{
+            const r = await fetch(url, {
+                method,
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if(r.ok){ closeStopForm(); await loadStops(); }
+            else{
+                let msg = 'Save failed.';
+                try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
+                setStMsg(msg);
+            }
+        }catch(e){ setStMsg('Network error while saving.'); }
+    }
+
+    async function deleteStop(id){
+        const stop = stStops.find(s=>s.id===id);
+        if(!window.confirm(`Delete stop ${stop ? stop.id : id}? This cannot be undone.`)) return;
+        try{
+            const r = await fetch(`${API}/stops/${encodeURIComponent(id)}`, {method:'DELETE'});
+            if(r.ok){ await loadStops(); }
+            else{
+                let msg = 'Delete failed.';
+                try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
+                window.alert(msg);
+            }
+        }catch(e){ window.alert('Network error while deleting.'); }
+    }
+
+    // ── Data Management: routes CRUD (Postgres) ───────────────────────────────
+    let rtRoutes = [];
+    let rtEditId = null;   // null = adding a new route, otherwise the route id being edited
+
+    async function loadRoutes(){
+        const body = document.getElementById('rtTableBody');
+        if(body) body.innerHTML = `<tr><td colspan="6" class="bm-empty">Loading…</td></tr>`;
+        try{
+            const r = await fetch(`${API}/routes/manage`, {headers:{'Accept':'application/json'}});
+            if(!r.ok) throw new Error(r.status);
+            rtRoutes = await r.json();
+            renderRoutesAdmin();
+        }catch(e){
+            if(body) body.innerHTML = `<tr><td colspan="6" class="bm-empty">Failed to load routes.</td></tr>`;
+        }
+    }
+
+    function renderRoutesAdmin(){
+        const body = document.getElementById('rtTableBody');
+        if(!body) return;
+        if(!rtRoutes.length){ body.innerHTML = `<tr><td colspan="6" class="bm-empty">No routes yet — use “＋ Add route”.</td></tr>`; return; }
+        body.innerHTML = '';
+        rtRoutes.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(rt=>{
+            const hex = rt.color ? ('#'+rt.color) : null;
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="bm-mono">${escHtml(rt.id)}</td>
+                <td>${escHtml(rt.shortName)||'—'}</td>
+                <td>${escHtml(rt.longName)||'—'}</td>
+                <td>${hex ? `<span class="rt-swatch" data-bg="${escHtml(hex)}"></span><span class="bm-mono">${escHtml(rt.color)}</span>` : '—'}</td>
+                <td>${rt.active ? '<span class="bm-badge on">Active</span>' : '<span class="bm-badge off">Inactive</span>'}</td>
+                <td class="bm-actions-col">
+                    <button type="button" class="bm-row-btn" data-act="edit" data-id="${escHtml(rt.id)}">Edit</button>
+                    <button type="button" class="bm-row-btn danger" data-act="del" data-id="${escHtml(rt.id)}">Delete</button>
+                </td>`;
+            body.appendChild(tr);
+        });
+        applyDynStyles(body);   // colour swatches via data-bg (CSP-safe)
+    }
+
+    function setRtMsg(txt, ok){
+        const el = document.getElementById('rtFormMsg');
+        if(!el) return;
+        el.textContent = txt || '';
+        el.classList.toggle('err', !!txt && !ok);
+        el.classList.toggle('ok',  !!txt && !!ok);
+    }
+
+    function openRouteForm(route){
+        rtEditId = route ? route.id : null;
+        document.getElementById('rtFormTitle').textContent = route ? `Edit route ${route.id}` : 'New route';
+        const idEl = document.getElementById('rtId');
+        idEl.value = route ? route.id : '';
+        idEl.disabled = !!route;   // id is the primary key → not editable on update
+        document.getElementById('rtShort').value  = route ? (route.shortName || '') : '';
+        document.getElementById('rtLong').value   = route ? (route.longName || '') : '';
+        document.getElementById('rtColor').value  = route && route.color ? ('#' + route.color) : '#3B82F6';
+        document.getElementById('rtActive').value = route ? (route.active === false ? 'false' : 'true') : 'true';
+        setRtMsg('');
+        document.getElementById('rtForm').hidden = false;
+        (route ? document.getElementById('rtShort') : idEl).focus();
+    }
+
+    function closeRouteForm(){
+        document.getElementById('rtForm').hidden = true;
+        rtEditId = null;
+        setRtMsg('');
+    }
+
+    async function saveRoute(){
+        const payload = {
+            id:        document.getElementById('rtId').value,
+            shortName: document.getElementById('rtShort').value,
+            longName:  document.getElementById('rtLong').value,
+            color:     document.getElementById('rtColor').value.replace(/^#/, ''),
+            active:    document.getElementById('rtActive').value === 'true'
+        };
+        if(!payload.id || !payload.id.trim()){ setRtMsg('Route id is required.'); return; }
+        if(!payload.shortName || !payload.shortName.trim()){ setRtMsg('Short name is required.'); return; }
+
+        const editing = rtEditId != null;
+        const url    = editing ? `${API}/routes/${encodeURIComponent(rtEditId)}` : `${API}/routes`;
+        const method = editing ? 'PUT' : 'POST';
+        setRtMsg('Saving…', true);
+        try{
+            const r = await fetch(url, {
+                method,
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if(r.ok){ closeRouteForm(); await loadRoutes(); }
+            else{
+                let msg = 'Save failed.';
+                try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
+                setRtMsg(msg);
+            }
+        }catch(e){ setRtMsg('Network error while saving.'); }
+    }
+
+    async function deleteRoute(id){
+        const route = rtRoutes.find(x=>x.id===id);
+        if(!window.confirm(`Delete route ${route ? route.id : id}? This cannot be undone.`)) return;
+        try{
+            const r = await fetch(`${API}/routes/${encodeURIComponent(id)}`, {method:'DELETE'});
+            if(r.ok){ await loadRoutes(); }
+            else{
+                let msg = 'Delete failed.';
+                try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
+                window.alert(msg);
+            }
+        }catch(e){ window.alert('Network error while deleting.'); }
     }
 
     async function logoutUser(){
@@ -847,7 +1373,79 @@
     // ─────────────────────────────────────────────────────────────────
     document.getElementById('topBtnFleetMonitor').addEventListener('click', e => switchTopView('fleet-monitor', e.currentTarget));
     document.getElementById('topBtnAnalytics').addEventListener('click', e => switchTopView('analytics-view', e.currentTarget));
+    document.getElementById('topBtnDataManagement').addEventListener('click', e => { switchTopView('data-management-view', e.currentTarget); switchDmPanel('dm-panel-buses', document.getElementById('dmTabBuses')); });
     document.getElementById('topBtnLogout').addEventListener('click', logoutUser);
+
+    // Data Management sub-navigation
+    const dmTabBuses = document.getElementById('dmTabBuses');
+    if(dmTabBuses) dmTabBuses.addEventListener('click', e => switchDmPanel('dm-panel-buses', e.currentTarget));
+    const dmTabStops = document.getElementById('dmTabStops');
+    if(dmTabStops) dmTabStops.addEventListener('click', e => switchDmPanel('dm-panel-stops', e.currentTarget));
+    const dmTabRoutes = document.getElementById('dmTabRoutes');
+    if(dmTabRoutes) dmTabRoutes.addEventListener('click', e => switchDmPanel('dm-panel-routes', e.currentTarget));
+
+    // Data Management > buses CRUD
+    const bmAddBtn = document.getElementById('bmAddBtn');
+    if(bmAddBtn) bmAddBtn.addEventListener('click', () => openBusForm(null));
+    const bmCancelBtn = document.getElementById('bmCancelBtn');
+    if(bmCancelBtn) bmCancelBtn.addEventListener('click', closeBusForm);
+    const bmSaveBtn = document.getElementById('bmSaveBtn');
+    if(bmSaveBtn) bmSaveBtn.addEventListener('click', saveBus);
+    const bmTableBody = document.getElementById('bmTableBody');
+    if(bmTableBody) bmTableBody.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-act]');
+        if(!btn) return;
+        const id = parseInt(btn.dataset.id, 10);
+        if(btn.dataset.act === 'edit'){ const b = bmBuses.find(x=>x.busId===id); if(b) openBusForm(b); }
+        else if(btn.dataset.act === 'del'){ deleteBus(id); }
+    });
+
+    // Data Management > stops CRUD
+    const stAddBtn = document.getElementById('stAddBtn');
+    if(stAddBtn) stAddBtn.addEventListener('click', () => openStopForm(null));
+    const stCancelBtn = document.getElementById('stCancelBtn');
+    if(stCancelBtn) stCancelBtn.addEventListener('click', closeStopForm);
+    const stSaveBtn = document.getElementById('stSaveBtn');
+    if(stSaveBtn) stSaveBtn.addEventListener('click', saveStop);
+    const stTableBody = document.getElementById('stTableBody');
+    if(stTableBody) stTableBody.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-act]');
+        if(!btn) return;
+        const id = btn.dataset.id;   // stop id is a string
+        if(btn.dataset.act === 'edit'){ const s = stStops.find(x=>x.id===id); if(s) openStopForm(s); }
+        else if(btn.dataset.act === 'del'){ deleteStop(id); }
+    });
+
+    // Data Management > routes CRUD
+    const rtAddBtn = document.getElementById('rtAddBtn');
+    if(rtAddBtn) rtAddBtn.addEventListener('click', () => openRouteForm(null));
+    const rtCancelBtn = document.getElementById('rtCancelBtn');
+    if(rtCancelBtn) rtCancelBtn.addEventListener('click', closeRouteForm);
+    const rtSaveBtn = document.getElementById('rtSaveBtn');
+    if(rtSaveBtn) rtSaveBtn.addEventListener('click', saveRoute);
+    const rtTableBody = document.getElementById('rtTableBody');
+    if(rtTableBody) rtTableBody.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-act]');
+        if(!btn) return;
+        const id = btn.dataset.id;   // route id is a string
+        if(btn.dataset.act === 'edit'){ const rt = rtRoutes.find(x=>x.id===id); if(rt) openRouteForm(rt); }
+        else if(btn.dataset.act === 'del'){ deleteRoute(id); }
+    });
+
+    // Fleet Monitor > filters (route + service + min delay)
+    const routeFilterEl = document.getElementById('routeFilter');
+    if(routeFilterEl) routeFilterEl.addEventListener('change', e => setRouteFilter(e.target.value));
+
+    const serviceFilterEl = document.getElementById('serviceFilter');
+    if(serviceFilterEl) serviceFilterEl.addEventListener('change', e => setServiceFilter(e.target.value));
+
+    const delayFilterEl = document.getElementById('delayFilter');
+    if(delayFilterEl) delayFilterEl.addEventListener('input', e => {
+        const v = parseInt(e.target.value, 10) || 0;
+        const lbl = document.getElementById('delayFilterVal');
+        if(lbl) lbl.textContent = v > 0 ? '≥' + v + 'm' : 'off';
+        setDelayThreshold(v);
+    });
 
     document.getElementById('presetBtnToday').addEventListener('click', e => setPreset(e.currentTarget, 'today'));
     document.getElementById('presetBtnYesterday').addEventListener('click', e => setPreset(e.currentTarget, 'yesterday'));

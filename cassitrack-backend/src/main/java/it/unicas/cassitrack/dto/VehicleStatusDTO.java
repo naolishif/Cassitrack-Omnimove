@@ -50,6 +50,10 @@ public class VehicleStatusDTO {
     @JsonProperty("route_name")
     private String routeName;
 
+    /** ID of the trip (scheduled run) this bus is currently operating; null if not on a trip */
+    @JsonProperty("trip_id")
+    private String tripId;
+
     /** Schedule adherence status */
     @JsonProperty("schedule_status")
     private ScheduleStatus scheduleStatus;
