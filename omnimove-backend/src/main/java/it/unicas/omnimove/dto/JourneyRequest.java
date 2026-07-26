@@ -16,6 +16,13 @@ public class JourneyRequest {
     @JsonProperty("user_id") private Long userId;
     @JsonProperty("origin_stop_id") private String originStopId;
     @JsonProperty("dest_stop_id")   private String destStopId;
+
+    /**
+     * Desired departure time as "HH:mm" (Europe/Rome). Optional:
+     * null or blank -> now. If the time is already past today, tomorrow is assumed.
+     */
+    @JsonProperty("departure_time") private String departureTime;
+
     @JsonProperty("messages") private List<String> messages = new ArrayList<>();
 
     public void addMessage(String msg) { this.messages.add(msg); }

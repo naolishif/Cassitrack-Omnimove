@@ -29,6 +29,7 @@
 <div class="tabs">
     <div class="tab active" data-tab="stats">Statistics &amp; Analytics</div>
     <div class="tab" data-tab="users">User Management</div>
+    <div class="tab" data-tab="settings">Settings</div>
 </div>
 
 <!-- CONTENT -->
@@ -226,6 +227,31 @@
                 </thead>
                 <tbody id="userTbody"></tbody>
             </table>
+        </div>
+    </div>
+
+    <div class="pane" id="pane-settings">
+        <div class="settings-card">
+            <h2 class="settings-h">Google Maps integration</h2>
+            <p class="settings-note">
+                When a switch is OFF, that feature stops calling Google and uses the
+                timetable instead. Walking, bike and scooter always use Google and
+                cannot be turned off here.
+            </p>
+            <div class="setting-row">
+                <div class="setting-text">
+                    <div class="setting-title">Journey search</div>
+                    <div class="setting-desc">Traffic-aware bus travel time in route planning.</div>
+                </div>
+                <button class="switch" id="swSearch" data-key="google.search" role="switch" aria-checked="true"></button>
+            </div>
+            <div class="setting-row">
+                <div class="setting-text">
+                    <div class="setting-title">Stop arrivals</div>
+                    <div class="setting-desc">Real-time delay recomputed from each bus's live position.</div>
+                </div>
+                <button class="switch" id="swStopEta" data-key="google.stop_eta" role="switch" aria-checked="true"></button>
+            </div>
         </div>
     </div>
 </div>

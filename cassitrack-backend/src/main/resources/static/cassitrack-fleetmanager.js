@@ -261,8 +261,11 @@
         const st = !v.trip_id ? 'NO_TRIP' : (SC[v.schedule_status] ? v.schedule_status : 'UNKNOWN');
         const l=SL[v.schedule_status]||'LIVE';
         const routeCol = routeColor(v.route_id);
-        const cp=crowdPct(v.crowding_level),cc=cp>70?'#EF4444':cp>40?'#F59E0B':'#22C55E';
-        const delayTxt=v.delay_minutes>0?`+${v.delay_minutes}m`:'In orario';
+        const cp=crowdPct(v),cc=crowdColor(v.crowding_level);
+        const delayTxt = (typeof v.delay_minutes === 'number')
+            ? (v.delay_minutes === 0 ? '0m'
+                : `${v.delay_minutes > 0 ? '+' : ''}${v.delay_minutes}m`)
+            : '—';
         return `
     <div class="vpop">
         <div class="vpop-top">
@@ -274,8 +277,9 @@
             <div><div class="vpop-lbl">ROUTE</div><span data-fg="${routeCol}">${escHtml(v.route_name)||'—'}</span></div>
             <div><div class="vpop-lbl">DELAY</div><span class="vpop-delay" data-status="${st}">${delayTxt}</span></div>
             <div><div class="vpop-lbl">PASSENGERS</div>${v.estimated_passengers?'~'+v.estimated_passengers:'—'}</div>
-            <div class="vpop-span2"><div class="vpop-lbl">LAST STOP</div>${escHtml(v.next_stop_name)||'—'}</div>
-            <div class="vpop-span2"><div class="vpop-lbl">NEXT STOP</div>${escHtml(v.upcoming_stop_name)||'—'}</div>
+            <div class="vpop-span2"><div class="vpop-lbl">LAST STOP</div>${escHtml(v.last_stop_name)||'—'}</div>
+            <div class="vpop-span2"><div class="vpop-lbl">NEXT STOP</div>${escHtml(v.next_stop_name)||'—'}</div>
+            <div class="vpop-span2"><div class="vpop-lbl">ADHERENCE</div><span class="vpop-delay" data-status="${st}">${adherenceText(v)}</span></div>
         </div>
         <div class="vpop-barwrap">
             <div class="vpop-bar" data-bg="${cc}" data-width-pct="${cp}"></div>
@@ -331,12 +335,12 @@
             const st=!v.trip_id?'NO_TRIP':(v.schedule_status||'UNKNOWN'),l=SL[st]||SL.UNKNOWN;
             const spd=v.speed_kmh?v.speed_kmh.toFixed(1):'0.0';
             const pax=v.estimated_passengers?'~'+v.estimated_passengers:'—';
-            const cp=crowdPct(v.crowding_level),cc=cp>70?'#EF4444':cp>40?'#F59E0B':'#22C55E';
+            const cp=crowdPct(v),cc=crowdColor(v.crowding_level);
             const rc=routeColor(v.route_id);
             const hidden=hiddenBuses.has(v.vehicle_id);
             const d=document.createElement('div');
             d.className='vcard'+(selectedVeh===v.vehicle_id?' selected':'')+(hidden?' hidden-bus':'');
-            d.innerHTML=`<div class="vcard-stripe" data-status="${st}"></div><div class="vcard-top"><div class="vcard-id" data-fg="${rc}">${escHtml(v.vehicle_id)}</div><div class="vcard-actions"><div class="chip" data-status="${st}">${l}</div><button type="button" class="vis-toggle" data-hidden="${hidden}" aria-label="Toggle map visibility" title="${hidden?'Hidden from map — click to show':'Visible on map — click to hide'}">${hidden?'🚫':'👁'}</button></div></div><div class="vcard-grid"><div class="vitem"><div class="vitem-lbl">Speed</div><div class="vitem-val">${spd} km/h</div></div><div class="vitem"><div class="vitem-lbl">Passengers</div><div class="vitem-val">${pax}</div></div><div class="vitem"><div class="vitem-lbl">Crowding</div><div class="vitem-val">${escHtml(v.crowding_level)||'—'}</div></div><div class="vitem"><div class="vitem-lbl">Route</div><div class="vitem-val" data-fg="${rc}">${escHtml(v.route_name)||'—'}</div></div></div><div class="cbar"><div class="cbar-fill" data-bg="${cc}" data-width-pct="${cp}"></div></div>`;
+            d.innerHTML=`<div class="vcard-stripe" data-status="${st}"></div><div class="vcard-top"><div class="vcard-id" data-fg="${rc}">${escHtml(v.vehicle_id)}</div><div class="vcard-actions"><div class="chip" data-status="${st}">${l}</div><button type="button" class="vis-toggle" data-hidden="${hidden}" aria-label="Toggle map visibility" title="${hidden?'Hidden from map — click to show':'Visible on map — click to hide'}">${hidden?'🚫':'👁'}</button></div></div><div class="vcard-grid"><div class="vitem"><div class="vitem-lbl">Speed</div><div class="vitem-val">${spd} km/h</div></div><div class="vitem"><div class="vitem-lbl">Passengers</div><div class="vitem-val">${pax}</div></div><div class="vitem"><div class="vitem-lbl">Crowding</div><div class="vitem-val">${escHtml(v.crowding_level)||'—'}</div></div><div class="vitem"><div class="vitem-lbl">Route</div><div class="vitem-val" data-fg="${rc}">${escHtml(v.route_name)||'—'}</div></div></div><div class="vadh" data-status="${st}">${adherenceText(v)}</div><div class="cbar"><div class="cbar-fill" data-bg="${cc}" data-width-pct="${cp}"></div></div>`;
             // d is a detached element (not yet appended), so this is synchronous
             // and safe to call right after setting innerHTML.
             applyDynStyles(d);
@@ -402,7 +406,8 @@
 
 
     // Helpers
-    function crowdPct(l){return{LOW:18,MEDIUM:48,HIGH:74,VERY_HIGH:95}[l]||0;}
+    function crowdPct(v){return typeof v.occupancy_pct === 'number' ? v.occupancy_pct : 0;}
+    function crowdColor(l){return {LOW:'#22C55E',MEDIUM:'#F59E0B',HIGH:'#EF4444',VERY_HIGH:'#EF4444'}[l]||'#4B5563';}
     function routeColor(routeId){
         return routeColors[routeId] || '#4B5563';
     }
@@ -449,6 +454,29 @@
     function setRouteFilter(rid){ routeFilter = rid || null; refreshFilters(); }
     function setServiceFilter(val){ serviceFilter = val || 'all'; refreshFilters(); }
     function setDelayThreshold(min){ delayThreshold = Math.max(0, parseInt(min, 10) || 0); refreshFilters(); }
+
+    function adherenceText(v){
+        if(!v.trip_id) return 'Not in service';
+        if(typeof v.delay_minutes !== 'number' || !v.delay_stop_name)
+            return 'Awaiting first arrival';
+
+        const stop = escHtml(v.delay_stop_name);
+        const m    = v.delay_minutes;
+
+        switch(v.schedule_status){
+            case 'EARLY':
+                return `${Math.abs(m)} min early at ${stop}`;
+            case 'SLIGHTLY_LATE':
+            case 'SIGNIFICANTLY_LATE':
+                return `${m} min late at ${stop}`;
+            case 'ON_TIME':
+                return m === 0 ? `On time at ${stop}`
+                    : `On time at ${stop} (${m > 0 ? '+' : ''}${m} min)`;
+            default:
+                return 'Adherence unavailable';
+        }
+    }
+
     function chartColor(key, i){
         return routeColors[key] || `hsl(${(i * 137.5) % 360}, 70%, 55%)`;
     }

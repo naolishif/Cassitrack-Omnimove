@@ -165,7 +165,11 @@ public class AnalyticsService {
             info.put("vehicle_id",    v.getVehicleId());
             info.put("status",        v.getScheduleStatus() != null ? v.getScheduleStatus().name() : "UNKNOWN");
             info.put("speed_kmh",     v.getSpeedKmh());
-            info.put("delay_minutes", avgDelaysByBus.getOrDefault(v.getVehicleId(), (double) v.getDelayMinutes()));
+            // NPE FIX: the second argument of getOrDefault is evaluated eagerly, so
+            // (double) v.getDelayMinutes() threw whenever a bus had not yet reached
+            // its first stop and delay_minutes was still null.
+            Double liveDelay = v.getDelayMinutes() != null ? v.getDelayMinutes().doubleValue() : null;
+            info.put("delay_minutes", avgDelaysByBus.getOrDefault(v.getVehicleId(), liveDelay));
             info.put("crowding",      v.getCrowdingLevel());
             return info;
         }).collect(Collectors.toList());

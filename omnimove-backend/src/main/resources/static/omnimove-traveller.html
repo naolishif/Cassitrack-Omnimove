@@ -82,6 +82,12 @@
                 <select id="destSelect" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;cursor:pointer;">
                 </select>
             </div>
+            <div class="search-seg">
+                <span>🕐</span>
+                <input id="departTime" type="time" step="60"
+                       style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;cursor:pointer;"
+                       title="Leave blank for now">
+            </div>
             <button class="search-btn" onclick="swapStops()" style="background:var(--bg-app);color:var(--text-dark);border-left:1px solid var(--border-mid);padding:10px 14px;font-size:16px" title="Swap">⇄</button>
             <button class="search-btn" onclick="doSearch()">Search →</button>
         </div>

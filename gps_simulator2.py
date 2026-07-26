@@ -68,7 +68,6 @@ STEPS_BETWEEN_STOPS  = 12      # interpolation points between each pair of stops
 GPS_NOISE_METRES     = 6       # ±6m GPS jitter
 MAX_SPEED_KMH        = 50
 MIN_SPEED_KMH        = 12
-MAX_DELAY_MINUTES    = 20
 BUS_CAPACITY         = {       # from buses.numero_posti
     "MAGNI-001": 85,
     "MAGNI-002": 85,
@@ -250,8 +249,6 @@ class BusSimulator:
         _pax_high = max(1, int(self.capacity * 0.4))
         self.passengers      = random.randint(min(5, _pax_high), _pax_high)
         self.speed_kmh       = random.uniform(25, 40)
-        self.delay_minutes   = random.randint(0, 4)
-        self.engine_temp     = random.uniform(78, 92)
         self.battery_voltage = random.uniform(12.2, 12.8)
 
         # Trip / route state
@@ -340,6 +337,8 @@ class BusSimulator:
         heading  = compute_heading(wp["lat"], wp["lon"], next_wp["lat"], next_wp["lon"])
 
         at_stop = wp["at_stop"]
+        self._last_at_stop      = at_stop
+        self._last_nearest_stop = wp["nearest_stop"]
 
         # Speed: slow down approaching stop, speed up between stops
         if at_stop:
@@ -350,56 +349,34 @@ class BusSimulator:
             self.speed_kmh  = max(MIN_SPEED_KMH, min(MAX_SPEED_KMH, self.speed_kmh))
             self.speed_kmh += random.uniform(-2, 2)
 
-        # Delay drift: small random walk
-        self.delay_minutes += random.choice([-1, 0, 0, 1])
-        self.delay_minutes  = max(0, min(MAX_DELAY_MINUTES, self.delay_minutes))
-
-        # Engine temp drift
-        self.engine_temp += random.uniform(-0.5, 0.5)
-        self.engine_temp  = max(70, min(105, self.engine_temp))
-
         # Battery slow drain
         self.battery_voltage -= random.uniform(0, 0.002)
         self.battery_voltage  = max(11.8, min(12.8, self.battery_voltage))
 
         # Passengers
         occupancy = self._simulate_passengers(at_stop)
-        occupancy_pct = round(occupancy / self.capacity * 100, 1)
 
+
+        # BLE scanner: the on-board unit counts nearby Bluetooth devices.
+        # Not every passenger carries a discoverable device, and some carry
+        # more than one — VehicleService calibrates back with a 0.6 factor.
+        ble_devices = max(0, int(round(occupancy / 0.6)) + random.randint(-2, 2))
 
         return {
             # ── Identity ──────────────────────────────────────────
             "vehicle_id":        self.vehicle_id,
-            "targa":             self.targa,
             "timestamp":         datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
 
-            # ── Position ──────────────────────────────────────────
+            # ── Position (raw GNSS output) ────────────────────────
             "lat":               round(lat, 6),
             "lon":               round(lon, 6),
             "heading_deg":       round(heading, 1),
-
-            # ── Movement ──────────────────────────────────────────
             "speed_kmh":         round(self.speed_kmh, 1),
-            "at_stop":           at_stop,
-            "nearest_stop":      wp["nearest_stop"],
-            "nearest_stop_id":   wp["nearest_stop_id"],
 
-            # ── Schedule ──────────────────────────────────────────
-            "trip_id":           self.trip_id,
-            "route_id":          self.route_id,
-            "route_name":        self.route_name,
-            "route_color":       self.route_color,
-            "delay_minutes":     self.delay_minutes,
-            "scheduled_seconds": wp["arrival_seconds"],
-
-            # ── Passengers ────────────────────────────────────────
+            # ── On-board sensors ──────────────────────────────────
+            "ble_device_count":  ble_devices,
             "passengers":        occupancy,
             "capacity":          self.capacity,
-            "occupancy_pct":     occupancy_pct,
-            "wheelchair_access": self.wheelchair,
-
-            # ── Vehicle telemetry ─────────────────────────────────
-            "engine_temp_c":     round(self.engine_temp, 1),
             "battery_voltage":   round(self.battery_voltage, 2),
             "firmware_version":  "2.0.0-sim",
         }
@@ -430,7 +407,11 @@ def main():
     parser.add_argument("--db-port",        type=int, default=DB_CONFIG["port"])
     parser.add_argument("--mqtt-username",  default=os.environ.get("MQTT_BUS_USERNAME", "cassitrack-bus"), help="MQTT broker username (set MQTT_USERNAME env var or leave blank for no auth)")
     parser.add_argument("--mqtt-password",  default=os.environ.get("MQTT_BUS_PASSWORD", "bus-password"), help="MQTT broker password (set MQTT_PASSWORD env var or leave blank for no auth)")
+    parser.add_argument("--raw",            action="store_true",                       help="Print the exact JSON payload published on MQTT")
+    parser.add_argument("--raw-only",       action="store_true",                       help="Print ONLY the raw payloads, no summary line")
     args = parser.parse_args()
+    if args.raw_only:
+        args.raw = True
 
     # ── Connect to PostgreSQL ─────────────────────────────────────
     print("🗄️  Connecting to PostgreSQL...")
@@ -466,6 +447,11 @@ def main():
     print(f"  {len(active)}/{len(simulators)} buses active at current time")
     print(f"  Publish interval: {args.interval}s")
     print(f"  MQTT topic pattern: cassitrack/<vehicle_id>/position")
+    print(f"  Payload fields:     vehicle_id, timestamp, lat, lon, heading_deg,")
+    print(f"                      speed_kmh, ble_device_count, passengers,")
+    print(f"                      capacity, battery_voltage, firmware_version")
+    if args.raw:
+        print(f"  Raw payload dump:   ON")
     print(f"{'─'*60}\n")
 
     # ── Connect to MQTT ───────────────────────────────────────────
@@ -495,19 +481,28 @@ def main():
                     continue
 
                 topic = f"cassitrack/{payload['vehicle_id']}/position"
-                client.publish(topic, json.dumps(payload), qos=1)
+                wire  = json.dumps(payload)
+                client.publish(topic, wire, qos=1)
 
-                status = "🛑 STOP" if payload["at_stop"] else "🚌      "
-                delay  = f"+{payload['delay_minutes']}m" if payload["delay_minutes"] > 0 else "on time"
-                print(
-                    f"  {status} {payload['vehicle_id']} | "
-                    f"{payload['route_name']:7s} | "
-                    f"({payload['lat']:.5f}, {payload['lon']:.5f}) | "
-                    f"{payload['speed_kmh']:5.1f} km/h | "
-                    f"{payload['passengers']:3d}/{payload['capacity']} pax | "
-                    f"delay: {delay:8s} | "
-                    f"last stop: {payload['nearest_stop']}"
-                )
+                if not args.raw_only:
+                    # route / trip / stop are NOT transmitted any more — printed
+                    # here only so the operator can see what the simulated bus is
+                    # doing. Anything in [brackets] never leaves this process.
+                    status = "\U0001F6D1 STOP" if sim._last_at_stop else "\U0001F68C      "
+                    print(
+                        f"  {status} {payload['vehicle_id']} | "
+                        f"({payload['lat']:.5f}, {payload['lon']:.5f}) | "
+                        f"{payload['speed_kmh']:5.1f} km/h | "
+                        f"{payload['passengers']:3d}/{payload['capacity']} pax | "
+                        f"ble: {payload['ble_device_count']:3d} | "
+                        f"[sim: {sim.route_name} near {sim._last_nearest_stop}]"
+                    )
+
+                if args.raw:
+                    # Exactly the bytes that go on the wire — nothing added,
+                    # nothing derived. This is all CassiTrack receives.
+                    print(f"     \u2197 TX {topic}")
+                    print(f"        {wire}")
 
             print()
             time.sleep(args.interval)

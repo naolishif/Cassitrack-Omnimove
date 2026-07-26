@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV '/home/massi/Desktop/UNIVERSITA/Distributed Programming_Molinara/cassitrack_&_omnimove/cassitrack_&_omnimove/.venv'
+set -gx VIRTUAL_ENV '/home/massi/Desktop/cassitrack_&_omnimove/cassitrack_&_omnimove/.venv'
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/"bin $PATH

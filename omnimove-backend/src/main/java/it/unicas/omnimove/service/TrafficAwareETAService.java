@@ -2,6 +2,7 @@ package it.unicas.omnimove.service;
 
 import it.unicas.omnimove.client.CassitrackClient;
 import it.unicas.omnimove.dto.StopArrivalDTO;
+import it.unicas.omnimove.dto.VehicleDTO;
 import it.unicas.omnimove.model.Stop;
 import it.unicas.omnimove.repository.StopRepository;
 import lombok.RequiredArgsConstructor;
@@ -10,21 +11,28 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
- * Traffic-aware ETA service for OMNIMOVE journey planning.
+ * Enriches stop arrivals with a REAL-TIME delay, recomputed from each bus's
+ * live GPS position to the requested stop, using Google Maps live traffic.
  *
- * Fetches bus arrival data from CASSITRACK via REST, then enriches
- * each arrival with real-time traffic data from Google Maps.
+ * Two rules that shape everything here:
  *
- * The origin used for the Google Maps query is the start stop of the
- * lines (Piazza San Benedetto), read from the DB, so no user coordinates
- * are needed. Google Maps computes the traffic along the bus route itself.
+ *  1. Only buses that have ALREADY DEPARTED get a recomputed delay - i.e.
+ *     those with a vehicleId (they are on the road, tracked by GPS). A
+ *     scheduled entry with no vehicleId has no position and no meaning for
+ *     traffic, so it is returned untouched (departure time only).
  *
- * dataSource values:
- *   "GOOGLE_MAPS" → real-time traffic data available
- *   "CASSITRACK"  → fallback, using CASSITRACK ETA as-is
+ *  2. The delta is computed PER BUS, from that bus's own coordinates to the
+ *     stop - not one fixed route-start-to-stop delta applied to everyone,
+ *     which is what the previous version did.
+ *
+ * When the google.stop_eta flag is OFF, this service is not called at all:
+ * JourneyController falls back to CassiTrack's retrospective delay.
  */
 @Service
 @Slf4j
@@ -35,118 +43,77 @@ public class TrafficAwareETAService {
     private final GoogleMapsService googleMapsService;
     private final StopRepository    stopRepository;
 
-    // ID of the stop used as origin for the Google Maps traffic query
-    // (start of the lines — Piazza San Benedetto in the real Cassino network).
-    // Falls back gracefully if this stop is not present in the DB.
-    private static final String ROUTE_START_STOP_ID = "PSB";
-
     /**
-     * Result enriched with Google Maps traffic data.
+     * The stop arrival, plus the real-time recomputation when available.
+     *
+     * @param realTime      true if delayMinutes came from a live GPS+traffic calc
+     * @param delayMinutes  positive = late, negative = early, 0 = on time; null if not computed
      */
-    public record TrafficEtaResult(
-            String  vehicleId,
-            String  stopId,
-            Instant estimatedArrival,
-            long    durationSeconds,
-            long    trafficDurationSeconds,
-            long    trafficDelaySeconds,
-            long    distanceMetres,
-            String  dataSource
+    public record LiveEta(
+            StopArrivalDTO arrival,
+            boolean        realTime,
+            Integer        delayMinutes,
+            Instant        adjustedArrival
     ) {}
 
     /**
-     * Get traffic-enriched ETA for buses arriving at a stop.
+     * Recompute delays for the buses arriving at a stop.
      *
-     * No user coordinates needed — Google Maps query uses
-     * the route start as origin and the requested stop as destination.
-     *
-     * @param stopId  the stop to query (e.g. "UNI" for Università Folcara)
-     * @return list of enriched ETA results, sorted by estimated arrival
+     * @param stopId   the stop
+     * @param arrivals the merged list already assembled by JourneyController
+     *                 (live buses + scheduled entries)
      */
-    public List<TrafficEtaResult> getEnrichedArrivals(String stopId) {
-
-        // Destination stop coordinates from DB
-        Stop destStop = stopRepository.findById(stopId).orElse(null);
-        if (destStop == null || destStop.getLat() == null || destStop.getLon() == null) {
-            log.warn("Unknown or incomplete stopId: {}", stopId);
-            return List.of();
+    public List<LiveEta> enrich(String stopId, List<StopArrivalDTO> arrivals) {
+        Stop dest = stopRepository.findById(stopId).orElse(null);
+        if (dest == null || dest.getLat() == null || dest.getLon() == null) {
+            log.warn("enrich: unknown or incomplete stop {}", stopId);
+            return arrivals.stream()
+                    .map(a -> new LiveEta(a, false, null, a.getEstimatedArrival()))
+                    .toList();
         }
 
-        // Fetch base arrivals from CASSITRACK
-        List<StopArrivalDTO> arrivals;
-        try {
-            arrivals = cassitrackClient.getArrivalsAtStop(stopId);
-        } catch (Exception e) {
-            log.warn("Could not fetch arrivals from CASSITRACK: {}", e.getMessage());
-            return List.of();
-        }
+        // Current GPS position of every live vehicle, keyed by vehicleId.
+        Map<String, VehicleDTO> live = cassitrackClient.getActiveVehicles().stream()
+                .filter(v -> v.getVehicleId() != null
+                        && v.getLat() != null && v.getLon() != null)
+                .collect(Collectors.toMap(VehicleDTO::getVehicleId, Function.identity(),
+                        (a, b) -> a));
 
-        if (arrivals == null || arrivals.isEmpty()) {
-            return List.of();
-        }
-
-        // Origin = route start stop (from DB), fallback to destination if absent
-        Stop originStop = stopRepository.findById(ROUTE_START_STOP_ID)
-                .filter(s -> s.getLat() != null && s.getLon() != null)
-                .orElse(destStop);
-
-        // Query Google Maps once for this stop (route start → stop destination)
-        Optional<GoogleMapsService.TrafficResult> trafficOpt =
-                googleMapsService.getTravelTime(
-                        originStop.getLat(), originStop.getLon(),
-                        destStop.getLat(),   destStop.getLon());
-
-        // Enrich each arrival with the same traffic delta
         return arrivals.stream()
-                .map(arrival -> enrich(arrival, stopId, trafficOpt))
-                .sorted((a, b) -> a.estimatedArrival().compareTo(b.estimatedArrival()))
+                .map(a -> enrichOne(a, dest, live))
                 .toList();
     }
 
-    /**
-     * Enrich a single arrival with Google Maps traffic data.
-     * Falls back to CASSITRACK ETA if Google Maps is unavailable.
-     */
-    private TrafficEtaResult enrich(
-            StopArrivalDTO arrival,
-            String stopId,
-            Optional<GoogleMapsService.TrafficResult> trafficOpt) {
+    private LiveEta enrichOne(StopArrivalDTO a, Stop dest, Map<String, VehicleDTO> live) {
 
-        if (trafficOpt.isPresent()) {
-            GoogleMapsService.TrafficResult t = trafficOpt.get();
-            long delay = t.durationInTrafficSeconds() - t.durationSeconds();
-
-            // Adjust the CASSITRACK arrival time with the traffic delta
-            Instant adjusted = arrival.getEstimatedArrival().plusSeconds(delay);
-
-            log.debug("Enriched {} with Google Maps: base={}s traffic={}s delay={}s",
-                    stopId, t.durationSeconds(), t.durationInTrafficSeconds(), delay);
-
-            return new TrafficEtaResult(
-                    arrival.getVehicleId(),
-                    stopId,
-                    adjusted,
-                    t.durationSeconds(),
-                    t.durationInTrafficSeconds(),
-                    delay,
-                    t.distanceMetres(),
-                    "GOOGLE_MAPS"
-            );
+        // Rule 1: not yet departed -> departure time only, no delay.
+        if (a.getVehicleId() == null || !live.containsKey(a.getVehicleId())) {
+            return new LiveEta(a, false, null, a.getEstimatedArrival());
         }
 
-        // Fallback: use CASSITRACK ETA as-is
-        long etaSec = arrival.getEstimatedArrival().getEpochSecond()
-                - Instant.now().getEpochSecond();
+        VehicleDTO bus = live.get(a.getVehicleId());
 
-        return new TrafficEtaResult(
-                arrival.getVehicleId(),
-                stopId,
-                arrival.getEstimatedArrival(),
-                Math.max(0, etaSec),
-                Math.max(0, etaSec),
-                0L,
-                0L,
-                "CASSITRACK"
-        );
+        // Rule 2: this bus's own position -> the stop, with live traffic.
+        Optional<GoogleMapsService.TrafficResult> g = googleMapsService.getTravelTime(
+                bus.getLat(), bus.getLon(),
+                dest.getLat(), dest.getLon(),
+                "driving");
+
+        if (g.isEmpty()) {
+            // Google unavailable for this bus: leave it as CassiTrack had it.
+            return new LiveEta(a, false, a.getDelayMinutes(), a.getEstimatedArrival());
+        }
+
+        long trafficSec = g.get().durationInTrafficSeconds();
+        Instant adjusted = Instant.now().plusSeconds(trafficSec);
+
+        // Delay = predicted real arrival vs the scheduled arrival at this stop.
+        Integer delayMinutes = null;
+        if (a.getScheduledArrival() != null) {
+            long deltaSec = adjusted.getEpochSecond() - a.getScheduledArrival().getEpochSecond();
+            delayMinutes = Math.round(deltaSec / 60.0f);
+        }
+
+        return new LiveEta(a, true, delayMinutes, adjusted);
     }
 }

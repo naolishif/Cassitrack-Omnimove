@@ -9,7 +9,7 @@ alias deactivate 'test $?_OLD_VIRTUAL_PATH != 0 && setenv PATH "$_OLD_VIRTUAL_PA
 # Unset irrelevant variables.
 deactivate nondestructive
 
-setenv VIRTUAL_ENV '/home/massi/Desktop/UNIVERSITA/Distributed Programming_Molinara/cassitrack_&_omnimove/cassitrack_&_omnimove/.venv'
+setenv VIRTUAL_ENV '/home/massi/Desktop/cassitrack_&_omnimove/cassitrack_&_omnimove/.venv'
 
 set _OLD_VIRTUAL_PATH="$PATH"
 setenv PATH "$VIRTUAL_ENV/"bin":$PATH"

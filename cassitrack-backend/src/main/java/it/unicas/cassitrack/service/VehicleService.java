@@ -27,7 +27,6 @@ import java.util.Optional;
 public class VehicleService {
 
     private final VehicleStateCache vehicleStateCache;
-    private final RouteMatchingService routeMatchingService;
 
     /**
      * Returns current status of ALL active vehicles.
@@ -57,17 +56,12 @@ public class VehicleService {
     private VehicleStatusDTO toStatusDTO(VehiclePosition pos) {
         boolean active = vehicleStateCache.isActive(pos.getVehicleId());
 
-        // Passengers: prefer direct count from simulator,
-        // fall back to BLE estimate
-        Integer estimatedPassengers = null;
-        String  crowdingLevel       = null;
-        if (pos.getPassengers() != null) {
-            estimatedPassengers = pos.getPassengers();
-            crowdingLevel = estimateCrowdingLevel(estimatedPassengers);
-        } else if (pos.getBleDeviceCount() != null) {
-            estimatedPassengers = (int)(pos.getBleDeviceCount() * 0.6);
-            crowdingLevel = estimateCrowdingLevel(estimatedPassengers);
-        }
+        Integer estimatedPassengers = CrowdingService.effectivePassengers(
+                pos.getPassengers(), pos.getBleDeviceCount());
+        String  crowdingLevel = CrowdingService.levelFromRatio(
+                estimatedPassengers, pos.getCapacity());
+        Integer occupancyPct  = CrowdingService.occupancyPct(
+                estimatedPassengers, pos.getCapacity());
 
         VehiclePosition.ScheduleStatus status =
                 pos.getScheduleStatus() != null
@@ -83,34 +77,30 @@ public class VehicleService {
                 .lon(pos.getLon())
                 .speedKmh(pos.getSpeedKmh())
                 .headingDeg(pos.getHeadingDeg())
+                .tripId(pos.getTripId())
                 .routeId(pos.getRouteId())
                 .routeName(pos.getRouteName())
                 .tripId(pos.getTripId())
                 .scheduleStatus(status)
                 .delayMinutes(pos.getDelayMinutes())
-                .nextStopId(pos.getLastStopRegisteredId())
-                .nextStopName(pos.getLastStopRegistered())
-                .upcomingStopName(routeMatchingService.nextStopName(
-                        pos.getTripId(), pos.getRouteId(), pos.getLastStopRegisteredId()))
+                .delayStopName(pos.getDelayStopName())
+                .delayStopSequence(pos.getDelayStopSequence())
+                .delayMeasuredAt(pos.getDelayMeasuredAt())
+                // Both are resolved once, in MqttMessageHandler. Recomputing the
+                // next stop on every read (as before) meant a DB round-trip per
+                // vehicle per API call, and could disagree with the cached state.
+                .lastStopId(pos.getLastStopRegisteredId())
+                .lastStopName(pos.getLastStopRegistered())
+                .nextStopId(pos.getNextStopId())
+                .nextStopName(pos.getNextStop())
                 .etaSeconds(null)
                 .estimatedPassengers(estimatedPassengers)
                 .crowdingLevel(crowdingLevel)
                 .timestamp(pos.getTimestamp())
                 .lastSeen(pos.getReceivedAt())
+                .occupancyPct(occupancyPct)
                 .isActive(active)
                 .build();
     }
 
-
-    /**
-     * Rough crowding classification.
-     * Will be replaced by the calibrated model from the university
-     * measurement research group.
-     */
-    private String estimateCrowdingLevel(int passengers) {
-        if (passengers < 10)  return "LOW";
-        if (passengers < 25)  return "MEDIUM";
-        if (passengers < 40)  return "HIGH";
-        return "VERY_HIGH";
-    }
 }

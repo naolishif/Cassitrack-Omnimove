@@ -1,6 +1,4 @@
-#!/bin/sh
-'''exec' "/home/massi/Desktop/UNIVERSITA/Distributed Programming_Molinara/cassitrack_&_omnimove/cassitrack_&_omnimove/.venv/bin/python3" "$0" "$@"
-' '''
+#!/home/massi/Desktop/cassitrack_&_omnimove/cassitrack_&_omnimove/.venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

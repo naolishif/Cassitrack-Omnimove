@@ -8,9 +8,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.time.DayOfWeek;
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -29,86 +26,75 @@ public class RouteMatchingService {
     private final ScheduledStopRepository scheduledStopRepo;
     private final StopRepository stopRepository;
 
-    private static final ZoneId ITALY_TZ =
-            ZoneId.of("Europe/Rome");
+    /** A stop identified by both its id and its human-readable name. */
+    public record NamedStop(String id, String name) {}
 
-    // Only match if the bus is within this many metres of a stop
-    private static final double MAX_MATCH_METRES = 300.0;
+    /** Una riga di scheduled_stops, appiattita. */
+    public record StopOnTrip(String stopId, int stopSequence, int arrivalSeconds) {}
 
-    /**
-     * Find the ID of the nearest stop to a GPS position.
-     * Returns null if no stop is within MAX_MATCH_METRES.
-     */
-
-    public String findNearestStopOnTrip(String tripId, double lat, double lon) {
-        if (tripId == null) return null;
-
-        var seq = scheduledStopRepo.findByTripIdOrderByStopSequenceAsc(tripId);
-        String nearestId = null;
-        double nearestDist = Double.MAX_VALUE;
-
-        for (var ss : seq) {
-            var stopOpt = stopRepository.findById(ss.getStopId());
-            if (stopOpt.isEmpty()) continue;
-            var stop = stopOpt.get();
-            if (stop.getLat() == null || stop.getLon() == null) continue;
-
-            double dist = haversineMetres(lat, lon, stop.getLat(), stop.getLon());
-            if (dist < nearestDist) {
-                nearestDist = dist;
-                nearestId = stop.getId();
-            }
-        }
-        return nearestId;
+    public List<ScheduledStop> tripSequence(String tripId) {
+        return tripId == null ? List.of()
+                : scheduledStopRepo.findByTripIdOrderByStopSequenceAsc(tripId);
     }
 
-    private static final double ARRIVAL_RADIUS_METRES = 20.0;
-
-    /**
-     * Restituisce la fermata del trip se il bus è fisicamente arrivato
-     * (entro ARRIVAL_RADIUS_METRES), altrimenti null se è in transito tra fermate.
-     */
-    public StopArrival detectStopArrival(String tripId, double lat, double lon) {
-        if (tripId == null) return null;
-
-        var seq = scheduledStopRepo.findByTripIdOrderByStopSequenceAsc(tripId);
-        String nearestId = null;
-        Integer scheduledSec = null;
-        double nearestDist = Double.MAX_VALUE;
-
-        for (var ss : seq) {
-            var stopOpt = stopRepository.findById(ss.getStopId());
-            if (stopOpt.isEmpty()) continue;
-            var stop = stopOpt.get();
-            if (stop.getLat() == null || stop.getLon() == null) continue;
-
-            double dist = haversineMetres(lat, lon, stop.getLat(), stop.getLon());
-            if (dist < nearestDist) {
-                nearestDist  = dist;
-                nearestId    = stop.getId();
-                scheduledSec = ss.getArrivalSeconds();
+    /** La fermata in posizione {@code stopSequence}, o null oltre il capolinea. */
+    public StopOnTrip stopAtSequence(String tripId, int stopSequence) {
+        for (ScheduledStop ss : tripSequence(tripId)) {
+            if (ss.getStopSequence() == stopSequence) {
+                return new StopOnTrip(ss.getStopId(), ss.getStopSequence(), ss.getArrivalSeconds());
             }
         }
-
-        // Il bus è "arrivato" solo se è dentro il raggio della fermata più vicina
-        if (nearestId != null && nearestDist <= ARRIVAL_RADIUS_METRES) {
-            return new StopArrival(nearestId, scheduledSec);
-        }
-        return null;   // in transito tra due fermate — nessun arrivo da registrare
+        return null;
     }
 
-    public record StopArrival(String stopId, Integer scheduledSeconds) {}
-
+    /** Distanza dal fix a una fermata, o null se la fermata è sconosciuta. */
+    public Double distanceToStop(String stopId, double lat, double lon) {
+        Stop s = stopRepository.findById(stopId).orElse(null);
+        if (s == null || s.getLat() == null || s.getLon() == null) return null;
+        return haversineMetres(lat, lon, s.getLat(), s.getLon());
+    }
 
     /**
-     * Calculate the distance in metres between
-     * two GPS coordinates.
-     *
-     * Uses the Haversine formula — the same formula
-     * used in navigation systems.
-     *
-     * Analogy: this is how your phone calculates
-     * "you are 250m from the next waypoint."
+     * Aggancio iniziale: quando non sappiamo ancora dove sia il bus lungo la corsa
+     * (avvio del servizio, cambio corsa), si sceglie l'occorrenza il cui orario di
+     * tabella è più vicino all'ora corrente. Su un anello questo è l'unico criterio
+     * che distingue il quinto passaggio dal quattordicesimo.
+     */
+    public Integer bootstrapSequence(String tripId, int nowSecondsOfDay) {
+        ScheduledStop best = null;
+        for (ScheduledStop ss : tripSequence(tripId)) {   // già ordinata per stop_sequence
+            if (ss.getArrivalSeconds() <= nowSecondsOfDay) best = ss;
+            else break;
+        }
+        // Prima della partenza: aggancia al capolinea, il candidato sarà la seconda fermata.
+        return best != null ? best.getStopSequence()
+                : (tripSequence(tripId).isEmpty() ? null : 1);
+    }
+    /** La fermata immediatamente successiva nella sequenza. Null al capolinea. */
+    public NamedStop nextStopAfterSequence(String tripId, Integer stopSequence) {
+        if (stopSequence == null) return null;
+        StopOnTrip next = stopAtSequence(tripId, stopSequence + 1);
+        return next != null ? namedStop(next.stopId()) : null;
+    }
+
+    /**
+     * Resolve a stop id to its display name.
+     * Returns the id itself if the stop is unknown, never null-propagates.
+     */
+    public String stopName(String stopId) {
+        if (stopId == null) return null;
+        return stopRepository.findById(stopId).map(Stop::getName).orElse(stopId);
+    }
+
+    /** Wrap a stop id together with its resolved name. */
+    public NamedStop namedStop(String stopId) {
+        if (stopId == null) return null;
+        return new NamedStop(stopId, stopName(stopId));
+    }
+
+    /**
+     * Calculate the distance in metres between two GPS coordinates.
+     * Haversine formula — the same used in navigation systems.
      */
     public double haversineMetres(
             double lat1, double lon1,
@@ -121,34 +107,7 @@ public class RouteMatchingService {
                 + Math.cos(Math.toRadians(lat1))
                 * Math.cos(Math.toRadians(lat2))
                 * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(
-                Math.sqrt(a), Math.sqrt(1 - a)
-        );
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return R * c;
     }
-
-
-    /** Nome della fermata successiva a quella attuale, lungo la sequenza della corsa. */
-    public String nextStopName(String tripId, String routeId, String currentStopId) {
-        String nextId = nextStopId(tripId, routeId, currentStopId);
-        if (nextId == null) return null;
-        return stopRepository.findById(nextId).map(Stop::getName).orElse(nextId);
-    }
-
-    /** ID della fermata successiva a quella attuale, lungo la sequenza della corsa. */
-    public String nextStopId(String tripId, String routeId, String currentStopId) {
-        if (currentStopId == null) return null;
-        List<ScheduledStop> seq = (tripId != null)
-                ? scheduledStopRepo.findByTripIdOrderByStopSequenceAsc(tripId)
-                : (routeId != null ? scheduledStopRepo.findRepresentativeSequence(routeId) : List.of());
-
-        for (int i = 0; i < seq.size(); i++) {
-            if (seq.get(i).getStopId().equals(currentStopId)) {
-                if (i + 1 >= seq.size()) return null;
-                return seq.get(i + 1).getStopId();
-            }
-        }
-        return null;
-    }
-
 }

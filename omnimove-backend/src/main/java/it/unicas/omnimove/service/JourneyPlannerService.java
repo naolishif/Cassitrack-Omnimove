@@ -38,7 +38,7 @@ import java.util.Optional;
 public class JourneyPlannerService {
 
     private static final Logger log =
-        LoggerFactory.getLogger(JourneyPlannerService.class);
+            LoggerFactory.getLogger(JourneyPlannerService.class);
 
     private final CassitrackClient  cassitrackClient;
     private final GreenIndexService greenIndex;
@@ -47,9 +47,20 @@ public class JourneyPlannerService {
     private final it.unicas.omnimove.repository.StopRepository stopRepository;
     private final it.unicas.omnimove.repository.ScheduledStopRepository scheduledStopRepository;
     private final it.unicas.omnimove.repository.UserPreferencesRepository preferencesRepository;
+    private final GoogleApiSettingsService googleApiSettings;
 
     private static final double SPEED_SCOOTER = 20.0;
     private static final double COST_BUS      = 1.00;
+
+    // ── Pesi del punteggio multi-criterio ──────────────────────────
+    // Ogni profilo pesa le tre metriche in modo diverso. La somma fa 1.0, cosi'
+    // i punteggi restano nell'intervallo [0,1] e sono confrontabili fra opzioni
+    // della STESSA ricerca. Sono una scelta di progetto, non una taratura
+    // sperimentale: modificarli qui cambia l'ordinamento senza toccare altro.
+    //                                        tempo  costo  ambiente
+    private static final double[] W_FAST   = { 0.70,  0.10,  0.20 };
+    private static final double[] W_BUDGET = { 0.20,  0.70,  0.10 };
+    private static final double[] W_ECO    = { 0.20,  0.10,  0.70 };
 
     @Value("${elerent.bike.unlock:0.50}")
     private double bikeUnlock;
@@ -110,19 +121,6 @@ public class JourneyPlannerService {
                 }
             }
         }
-
-        if (busDeferred) {
-            boolean bikeAvailable = options.stream().anyMatch(o -> "BIKE".equals(o.getMode()));
-            if (!bikeAvailable) {
-                try {
-                    JourneyOption bus = planBus(req, msgs, weather);
-                    if (bus != null) options.add(bus);
-                } catch (Exception e) {
-                    log.warn("Failed BUS fallback option: {}", e.getMessage());
-                }
-            }
-        }
-
         if (busDeferred) {
             boolean bikeAvailable = options.stream().anyMatch(o -> "BIKE".equals(o.getMode()));
             if (!bikeAvailable) {
@@ -158,21 +156,90 @@ public class JourneyPlannerService {
                     || "WALK".equals(o.getMode()));
         }
 
+        // Punteggio multi-criterio: si calcola sull'insieme DEFINITIVO delle
+        // opzioni (dopo il filtro pioggia), perche' la normalizzazione dipende
+        // dal min/max di cio' che l'utente vedra' davvero.
+        computeScores(options);
+
         return JourneyResponse.builder()
-            .options(options)
-            .messages(msgs)
-            .origin(req.getOriginName() != null ? req.getOriginName() : "Origin")
-            .destination(req.getDestName() != null ? req.getDestName() : "Destination")
-            .totalOptions(options.size())
-            .realtimeAvailable(realtimeAvailable)
-            .weatherSummary(weather.suggestion)
-            .temperatureCelsius(weather.tempCelsius)
-            .build();
+                .options(options)
+                .messages(msgs)
+                .origin(req.getOriginName() != null ? req.getOriginName() : "Origin")
+                .destination(req.getDestName() != null ? req.getDestName() : "Destination")
+                .totalOptions(options.size())
+                .realtimeAvailable(realtimeAvailable)
+                .weatherSummary(weather.suggestion)
+                .temperatureCelsius(weather.tempCelsius)
+                .build();
     }
 
 
+    /**
+     * Assegna a ogni opzione tre punteggi in [0,1], uno per profilo (FAST /
+     * BUDGET / ECO). Il frontend ordina per il punteggio del chip attivo.
+     *
+     * Perche' un punteggio e non un semplice sort su una metrica: quando piu'
+     * opzioni pareggiano sul criterio principale (es. bici, monopattino e piedi
+     * hanno tutti green_index = 100), il criterio singolo non sa distinguerle e
+     * l'ordine diventa arbitrario. Il punteggio usa le altre due metriche come
+     * spareggio, con peso minore.
+     *
+     * Normalizzazione min-max SULLA SINGOLA RICERCA: i punteggi servono a
+     * ordinare le alternative fra loro, non hanno significato assoluto e non
+     * sono confrontabili fra ricerche diverse.
+     */
+    private void computeScores(List<JourneyOption> options) {
+        if (options == null || options.isEmpty()) return;
+
+        double[] time  = normalise(options, o -> value(o.getDurationMinutes()));
+        double[] cost  = normalise(options, o -> value(o.getCostEuros()));
+        double[] green = normalise(options, o -> value(o.getGreenIndex()));
+
+        for (int i = 0; i < options.size(); i++) {
+            JourneyOption o = options.get(i);
+            // tempo e costo: piu' basso e' meglio -> si inverte (1 - x)
+            // ambiente: piu' alto e' meglio -> si usa diretto
+            o.setScoreFast(  score(W_FAST,   time[i], cost[i], green[i]));
+            o.setScoreBudget(score(W_BUDGET, time[i], cost[i], green[i]));
+            o.setScoreEco(   score(W_ECO,    time[i], cost[i], green[i]));
+        }
+    }
+
+    private double score(double[] w, double tNorm, double cNorm, double gNorm) {
+        double s = w[0] * (1 - tNorm) + w[1] * (1 - cNorm) + w[2] * gNorm;
+        return Math.round(s * 1000) / 1000.0;
+    }
+
+    /**
+     * Min-max sulle opzioni presenti. Se tutte hanno lo stesso valore la metrica
+     * non discrimina: si restituisce 0.5 (neutro) per non favorire ne' penalizzare.
+     */
+    private double[] normalise(List<JourneyOption> options,
+                               java.util.function.ToDoubleFunction<JourneyOption> f) {
+        int n = options.size();
+        double[] raw = new double[n];
+        double lo = Double.MAX_VALUE, hi = -Double.MAX_VALUE;
+        for (int i = 0; i < n; i++) {
+            raw[i] = f.applyAsDouble(options.get(i));
+            lo = Math.min(lo, raw[i]);
+            hi = Math.max(hi, raw[i]);
+        }
+        double[] out = new double[n];
+        if (hi - lo < 1e-9) {
+            java.util.Arrays.fill(out, 0.5);
+            return out;
+        }
+        for (int i = 0; i < n; i++) out[i] = (raw[i] - lo) / (hi - lo);
+        return out;
+    }
+
+    /** Null-safe: un'opzione senza metrica non deve far saltare il calcolo. */
+    private double value(Number n) {
+        return n != null ? n.doubleValue() : 0.0;
+    }
+
     private JourneyOption planBus(JourneyRequest req, List<String> msgs,
-            WeatherService.WeatherData weather) {
+                                  WeatherService.WeatherData weather) {
 
         String nearestStop = req.getOriginStopId() != null
                 ? req.getOriginStopId()
@@ -182,6 +249,13 @@ public class JourneyPlannerService {
                 ? req.getDestStopId()
                 : findNearestStopId(req.getDestLat(), req.getDestLon());
 
+        // Punto 3: base oraria del viaggio e stato del flag google.search.
+        java.time.Instant departureBase = resolveDepartureBase(req.getDepartureTime(), msgs);
+        boolean useGoogle = googleApiSettings.isSearchEnabled();
+
+        // Il ritardo ha senso solo per una ricerca "adesso": per un viaggio
+        // futuro il ritardo attuale di un bus che gira ora non significa nulla.
+        boolean isNow = (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
 
 
         // --- Step 1: walk to bus stop ---
@@ -211,19 +285,25 @@ public class JourneyPlannerService {
         int waitMin = 5;                       // attesa iniziale, assegnata nei rami
         double busMetres ;     // default per cambio/ripiego
         List<JourneyLeg> busLegs = new ArrayList<>();
+        DelayInfo busDelay = DelayInfo.none();
 
         if (!direct.isEmpty()) {
             var line = direct.get(0);
             lineLabel = line.getShortName() + " — " + line.getLongName();
+            DelayInfo[] delayOut = { DelayInfo.none() };
+            waitMin = waitMinutesForLine(nearestStop, line.getRouteId(), line.getShortName(),
+                    msgs, delayOut, departureBase, isNow);
+            busDelay = delayOut[0];
 
-            SegTime seg = busTimeBySegments(line.getTripId(), nearestStop, destStop);
+            java.time.Instant boarding = departureBase.plusSeconds(60L * waitMin);
+            SegTime seg = busTimeBySegments(line.getTripId(), nearestStop, destStop,
+                    useGoogle ? boarding : null);
             if (seg == null) {
                 log.warn("BUS: sequenza non risolvibile per trip {}", line.getTripId());
                 return null;
             }
             busMin    = seg.minutes();
             busMetres = seg.metres();
-            waitMin = waitMinutesForLine(nearestStop, line.getRouteId(), line.getShortName(), msgs);
 
             String tripId = line.getTripId();
             busLegs.add(JourneyLeg.builder().mode("BUS")
@@ -235,11 +315,28 @@ public class JourneyPlannerService {
         } else {
             Transfer t = findBestTransfer(nearestStop, destStop);
             if (t != null) {
-                waitMin    = waitMinutesForLine(nearestStop, t.l1RouteId(), t.l1Short(), msgs);
-                int changeWait = waitMinutesForLine(t.stop(),    t.l2RouteId(), t.l2Short(), msgs);
+                DelayInfo[] delayOut = { DelayInfo.none() };
+                waitMin    = waitMinutesForLine(nearestStop, t.l1RouteId(), t.l1Short(),
+                        msgs, delayOut, departureBase, isNow);
+                busDelay = delayOut[0];
 
-                SegTime s1 = busTimeBySegments(t.l1TripId(), nearestStop, t.stop());
-                SegTime s2 = busTimeBySegments(t.l2TripId(), t.stop(), destStop);
+                java.time.Instant boarding1 = departureBase.plusSeconds(60L * waitMin);
+                SegTime s1 = busTimeBySegments(t.l1TripId(), nearestStop, t.stop(),
+                        useGoogle ? boarding1 : null);
+
+                // L'attesa al cambio si valuta al momento in cui ci ARRIVI davvero,
+                // non alla partenza: per questo serve prima la durata della tratta 1.
+                int firstLegMin = (s1 != null) ? s1.minutes() : t.l1Min();
+                java.time.Instant atTransfer = boarding1.plusSeconds(60L * firstLegMin);
+                boolean liveAtTransfer = isNow && !atTransfer.isAfter(
+                        java.time.Instant.now().plusSeconds(15 * 60));
+                int changeWait = waitMinutesForLine(t.stop(), t.l2RouteId(), t.l2Short(),
+                        msgs, null, atTransfer, liveAtTransfer);
+
+                java.time.Instant boarding2 = atTransfer.plusSeconds(60L * changeWait);
+                SegTime s2 = busTimeBySegments(t.l2TripId(), t.stop(), destStop,
+                        useGoogle ? boarding2 : null);
+
                 int    l1Min = (s1 != null) ? s1.minutes() : t.l1Min();
                 int    l2Min = (s2 != null) ? s2.minutes() : t.l2Min();
                 double m1    = (s1 != null) ? s1.metres()  : 0.0;
@@ -266,10 +363,14 @@ public class JourneyPlannerService {
                         .stopCoords(stopCoordsBetween(t.l2TripId(), t.stop(), destStop))
                         .build());
             } else {
-            log.warn("BUS: nessuna linea diretta né cambio trovato tra {} e {}", nearestStop, destStop);
-            return null;
+                log.warn("BUS: nessuna linea diretta né cambio trovato tra {} e {}", nearestStop, destStop);
+                return null;
+            }
         }
+        if (!useGoogle) {
+            msgs.add("ℹ️ Live traffic is off — bus times are from the timetable, not real-time.");
         }
+
         int total = walkMin + waitMin + busMin;
         List<JourneyLeg> legs = new ArrayList<>();
         if (walkMin > 0) legs.add(JourneyLeg.builder().mode("WALK")
@@ -296,17 +397,22 @@ public class JourneyPlannerService {
         }
 
         return JourneyOption.builder()
-            .mode("BUS").modeLabel(lineLabel)
-            .durationMinutes(total).distanceMetres(busMetres)
-            .costEuros(COST_BUS)
-            .greenIndex(greenIndex.computeGreenIndex("BUS", busMetres / 1000.0))
-            .co2Grams(greenIndex.computeCo2Grams("BUS", busMetres / 1000.0))
-            .etaMinutes(total)
-            .summary("Take " + lineLabel + " from " + fmtStop(nearestStop))
-            .weatherWarning(occupancyWarning != null ? occupancyWarning
+                .mode("BUS").modeLabel(lineLabel)
+                .durationMinutes(total).distanceMetres(busMetres)
+                .costEuros(COST_BUS)
+                .greenIndex(greenIndex.computeGreenIndex("BUS", busMetres / 1000.0))
+                .co2Grams(greenIndex.computeCo2Grams("BUS", busMetres / 1000.0))
+                .etaMinutes(total)
+                .delayMinutes(isNow && busDelay != null ? busDelay.delayMinutes() : null)
+                .delayStatus(isNow && busDelay != null ? busDelay.status() : null)
+                .delayRealTime(isNow && busDelay != null ? busDelay.realTime() : null)
+                .delayAtStop(isNow && busDelay != null ? busDelay.atStop() : null)
+                .delayLabel(isNow ? delayLabel(busDelay) : null)
+                .summary("Take " + lineLabel + " from " + fmtStop(nearestStop))
+                .weatherWarning(occupancyWarning != null ? occupancyWarning
                         : weatherService.getModeWarning(weather.condition, "BUS"))
-            .weatherSuggestion(weather.suggestion)
-            .legs(legs).build();
+                .weatherSuggestion(weather.suggestion)
+                .legs(legs).build();
     }
 
     private JourneyOption planBike(JourneyRequest req, WeatherService.WeatherData weather) {
@@ -344,19 +450,19 @@ public class JourneyPlannerService {
         int dur = (int) Math.ceil(roadM / 1000.0 / SPEED_SCOOTER * 60);
         double cost = Math.round((scooterUnlock + dur * scooterPerMin) * 100) / 100.0;
         return JourneyOption.builder()
-            .mode("SCOOTER").modeLabel("Elerent E-Scooter")
-            .durationMinutes(dur).distanceMetres(roadM)
-            .costEuros(cost).greenIndex(100).co2Grams(0.0).etaMinutes(dur)
-            .summary("🛴 Elerent e-scooter " + fmtDist(roadM) + " — " + dur
-                + " min (~€" + String.format("%.2f", cost) + ")")
-            .weatherWarning(weatherService.getModeWarning(weather.condition, "SCOOTER"))
-            .weatherSuggestion(weather.suggestion)
-            .legs(List.of(JourneyLeg.builder().mode("SCOOTER")
-                .from(req.getOriginName()).to(req.getDestName())
+                .mode("SCOOTER").modeLabel("Elerent E-Scooter")
                 .durationMinutes(dur).distanceMetres(roadM)
-                .instruction("Elerent e-scooter · Unlock €" + scooterUnlock
-                    + " + €" + scooterPerMin + "/min · elerent.it").build()))
-            .build();
+                .costEuros(cost).greenIndex(100).co2Grams(0.0).etaMinutes(dur)
+                .summary("🛴 Elerent e-scooter " + fmtDist(roadM) + " — " + dur
+                        + " min (~€" + String.format("%.2f", cost) + ")")
+                .weatherWarning(weatherService.getModeWarning(weather.condition, "SCOOTER"))
+                .weatherSuggestion(weather.suggestion)
+                .legs(List.of(JourneyLeg.builder().mode("SCOOTER")
+                        .from(req.getOriginName()).to(req.getDestName())
+                        .durationMinutes(dur).distanceMetres(roadM)
+                        .instruction("Elerent e-scooter · Unlock €" + scooterUnlock
+                                + " + €" + scooterPerMin + "/min · elerent.it").build()))
+                .build();
     }
 
     private JourneyOption planWalk(JourneyRequest req, WeatherService.WeatherData weather) {
@@ -368,17 +474,17 @@ public class JourneyPlannerService {
         double roadM = r.get().distanceMetres();
         int dur = (int) Math.ceil(r.get().durationSeconds() / 60.0);
         return JourneyOption.builder()
-            .mode("WALK").modeLabel("Walking")
-            .durationMinutes(dur).distanceMetres(roadM)
-            .costEuros(0.0).greenIndex(100).co2Grams(0.0).etaMinutes(dur)
-            .summary("🌿 Have a car free day! Walk " + fmtDist(roadM) + " — " + dur + " min")
-            .weatherWarning(weatherService.getModeWarning(weather.condition, "WALK"))
-            .weatherSuggestion(weather.suggestion)
-            .legs(List.of(JourneyLeg.builder().mode("WALK")
-                .from(req.getOriginName()).to(req.getDestName())
+                .mode("WALK").modeLabel("Walking")
                 .durationMinutes(dur).distanceMetres(roadM)
-                .instruction("Walk the entire route").build()))
-            .build();
+                .costEuros(0.0).greenIndex(100).co2Grams(0.0).etaMinutes(dur)
+                .summary("🌿 Have a car free day! Walk " + fmtDist(roadM) + " — " + dur + " min")
+                .weatherWarning(weatherService.getModeWarning(weather.condition, "WALK"))
+                .weatherSuggestion(weather.suggestion)
+                .legs(List.of(JourneyLeg.builder().mode("WALK")
+                        .from(req.getOriginName()).to(req.getDestName())
+                        .durationMinutes(dur).distanceMetres(roadM)
+                        .instruction("Walk the entire route").build()))
+                .build();
     }
 
     private double haversineMetres(double lat1,double lon1,double lat2,double lon2) {
@@ -386,9 +492,36 @@ public class JourneyPlannerService {
         double dLat = Math.toRadians(lat2 - lat1);
         double dLon = Math.toRadians(lon2 - lon1);
         double a = Math.sin(dLat/2)*Math.sin(dLat/2)
-            + Math.cos(Math.toRadians(lat1))*Math.cos(Math.toRadians(lat2))
-            * Math.sin(dLon/2)*Math.sin(dLon/2);
+                + Math.cos(Math.toRadians(lat1))*Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon/2)*Math.sin(dLon/2);
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    /**
+     * Istante di partenza del viaggio.
+     *  - null/vuoto  -> adesso
+     *  - "HH:mm"     -> quell'ora oggi (Europe/Rome); se gia' passata, domani
+     * Se sposta a domani, lo annuncia in msgs.
+     */
+    private java.time.Instant resolveDepartureBase(String hhmm, List<String> msgs) {
+        if (hhmm == null || hhmm.isBlank()) return java.time.Instant.now();
+        try {
+            java.time.ZoneId tz = java.time.ZoneId.of("Europe/Rome");
+            java.time.LocalTime t = java.time.LocalTime.parse(hhmm.trim());   // "HH:mm"
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(tz);
+            java.time.ZonedDateTime cand = now.with(t);
+            if (cand.isBefore(now)) {
+                cand = cand.plusDays(1);
+                if (msgs != null) {
+                    msgs.add("\u23F0 " + hhmm.trim()
+                            + " has already passed today \u2014 showing results for tomorrow.");
+                }
+            }
+            return cand.toInstant();
+        } catch (Exception e) {
+            log.warn("departure_time '{}' non valido, uso now: {}", hhmm, e.getMessage());
+            return java.time.Instant.now();
+        }
     }
 
     /** Percorso reale su strada per la modalità Google data (walking/bicycling/driving). */
@@ -396,6 +529,19 @@ public class JourneyPlannerService {
         return googleMapsService.getTravelTime(
                 req.getOriginLat(), req.getOriginLon(),
                 req.getDestLat(),   req.getDestLon(), mode);
+    }
+
+    private String delayLabel(DelayInfo d) {
+        if (d == null || d.delayMinutes() == null) return null;
+        int m = d.delayMinutes();
+        String base;
+        if ("EARLY".equals(d.status()))           base = Math.abs(m) + " min early";
+        else if (m <= 0 || "ON_TIME".equals(d.status())) base = "on time";
+        else                                      base = m + " min late";
+
+        return d.realTime()
+                ? "Bus currently " + base
+                : "Bus was " + base + " at " + d.atStop();
     }
 
     private String findNearestStopId(double lat, double lon) {
@@ -495,34 +641,58 @@ public class JourneyPlannerService {
     }
     private record SegTime(int minutes, double metres) {}
 
+    /** Ciò che sappiamo del ritardo del bus scelto per questa tratta. */
+    private record DelayInfo(Integer delayMinutes, String status, boolean realTime, String atStop) {
+        static DelayInfo none() { return new DelayInfo(null, null, false, null); }
+    }
+
     /** Tempo e distanza del bus lungo la sequenza reale delle fermate:
      *  per ogni tratta consecutiva una chiamata Google (traffico live),
      *  con ripiego sull'orario del DB se Google non risponde. */
-    private SegTime busTimeBySegments(String tripId, String originStop, String destStop) {
+    private SegTime busTimeBySegments(String tripId, String originStop, String destStop,
+                                      java.time.Instant boardingTime) {
         var seq = new ArrayList<>(scheduledStopRepository.findByTripId(tripId));
         seq.sort(Comparator.comparingInt(it.unicas.omnimove.model.ScheduledStop::getStopSequence));
 
-        int oi = indexOfStop(seq, originStop);
-        int di = indexOfStop(seq, destStop);
-        if (oi < 0 || di < 0) return null;
-
-        int from = Math.min(oi, di);
-        int to   = Math.max(oi, di);
+        // Su una corsa ad anello le fermate ricompaiono. Scegli la coppia di
+        // occorrenze in cui l'origine precede la destinazione, la più corta:
+        // è il segmento che l'utente percorre davvero.
+        int from = -1, to = -1;
+        for (int i = 0; i < seq.size(); i++) {
+            if (!seq.get(i).getStopId().equals(originStop)) continue;
+            for (int j = i + 1; j < seq.size(); j++) {
+                if (!seq.get(j).getStopId().equals(destStop)) continue;
+                if (from < 0 || (j - i) < (to - from)) { from = i; to = j; }
+                break;   // per questa occorrenza di origine, la prima destinazione a valle basta
+            }
+        }
+        if (from < 0) return null;   // destinazione mai raggiungibile dopo l'origine su questa corsa
 
         int totalSec = 0;
         double totalM = 0;
+        // boardingTime == null significa Google disattivato per la ricerca:
+        // in quel caso si usa solo l'orario statico del DB, nessuna chiamata.
+        java.time.Instant legStart = boardingTime;
         for (int i = from; i < to; i++) {
             var a = seq.get(i);
             var b = seq.get(i + 1);
-            var g = googleMapsService.getTravelTime(
-                    getStopLat(a.getStopId()), getStopLon(a.getStopId()),
-                    getStopLat(b.getStopId()), getStopLon(b.getStopId()), "driving");
-            if (g.isPresent()) {
-                totalSec += (int) g.get().durationInTrafficSeconds();
-                totalM   += g.get().distanceMetres();
+            int segSec;
+            if (boardingTime != null) {
+                var g = googleMapsService.getTravelTime(
+                        getStopLat(a.getStopId()), getStopLon(a.getStopId()),
+                        getStopLat(b.getStopId()), getStopLon(b.getStopId()),
+                        "driving", legStart);
+                if (g.isPresent()) {
+                    segSec  = (int) g.get().durationInTrafficSeconds();
+                    totalM += g.get().distanceMetres();
+                } else {
+                    segSec = Math.abs(b.getArrivalSeconds() - a.getArrivalSeconds());
+                }
             } else {
-                totalSec += Math.abs(b.getArrivalSeconds() - a.getArrivalSeconds());  // ripiego DB
+                segSec = Math.abs(b.getArrivalSeconds() - a.getArrivalSeconds());
             }
+            totalSec += segSec;
+            if (legStart != null) legStart = legStart.plusSeconds(segSec);
         }
         return new SegTime((int) Math.ceil(totalSec / 60.0), totalM);
     }
@@ -563,45 +733,61 @@ public class JourneyPlannerService {
      *   3. Se CassiTrack non risponde o la lista è vuota, cade su waitMinutesFromSchedule (DB).
      */
     private int waitMinutesForLine(String stopId, String routeId, String routeShort,
-                                   List<String> msgs) {
-        try {
-            List<StopArrivalDTO> arrivals = cassitrackClient.getArrivalsAtStop(stopId);
+                                   List<String> msgs, DelayInfo[] out,
+                                   java.time.Instant when, boolean useLive) {
+        // useLive == false -> ricerca per un orario futuro: un bus tracciato ADESSO
+        // non dice nulla su quel momento, quindi si va diritti all'orario di tabella.
+        if (useLive) {
+            try {
+                List<StopArrivalDTO> arrivals = cassitrackClient.getArrivalsAtStop(stopId);
 
-            Optional<StopArrivalDTO> exactMatch = arrivals.stream()
-                    .filter(a -> (routeId    != null && routeId.equals(a.getRouteId()))
-                            || (routeShort != null && a.getRouteName() != null
-                            && a.getRouteName().contains(routeShort)))
-                    .findFirst();
+                // Solo un bus DELLA LINEA RICHIESTA e' rilevante: il prossimo bus di
+                // un'altra linea non dice nulla ne' sull'attesa ne' sul ritardo.
+                Optional<StopArrivalDTO> exactMatch = arrivals.stream()
+                        .filter(a -> (routeId    != null && routeId.equals(a.getRouteId()))
+                                || (routeShort != null && a.getRouteName() != null
+                                && a.getRouteName().contains(routeShort)))
+                        .findFirst();
 
-            StopArrivalDTO match;
-            if (exactMatch.isPresent()) {
-                match = exactMatch.get();
-            } else if (!arrivals.isEmpty()) {
-                // Fallback: prossimo bus generico alla fermata
-                match = arrivals.get(0);
-                if (msgs != null) {
-                    String lineLabel = routeShort != null ? routeShort : routeId;
-                    msgs.add("ℹ️ Real-time data is not available for route" + lineLabel
-                            + " — Estimated wait time based on the next bus currently in service "
-                            + fmtStop(stopId) + ".");
+                if (exactMatch.isPresent()) {
+                    StopArrivalDTO match = exactMatch.get();
+
+                    // Il ritardo si raccoglie SOLO dal match esatto. Prima veniva preso
+                    // dal primo bus qualsiasi: la scheda mostrava il ritardo di un altro
+                    // bus spacciandolo per quello del viaggio dell'utente.
+                    if (out != null) {
+                        boolean live = match.getVehicleId() != null;
+                        out[0] = new DelayInfo(
+                                match.getDelayMinutes(),
+                                match.getScheduleStatus(),
+                                live,
+                                fmtStop(stopId));
+                    }
+
+                    if (match.getEstimatedArrival() != null) {
+                        long etaSec = match.getEstimatedArrival().getEpochSecond()
+                                - System.currentTimeMillis() / 1000;
+                        return (int) Math.max(0, etaSec / 60);
+                    }
+                } else {
+                    // Linea non tracciata ora: si usa l'ORARIO DI TABELLA della linea
+                    // giusta (sotto), non l'ETA di un bus di un'altra linea.
+                    if (msgs != null) {
+                        String lineLabel = routeShort != null ? routeShort : routeId;
+                        msgs.add("\u2139\ufe0f No live bus for route " + lineLabel + " right now \u2014 "
+                                + "wait time at " + fmtStop(stopId) + " estimated from the timetable.");
+                    }
+                    log.debug("waitMinutesForLine: nessun bus live per linea {} a {}, uso orario DB",
+                            routeShort, stopId);
                 }
-                log.debug("waitMinutesForLine: fallback bus generico per linea {} a {}",
-                        routeShort, stopId);
-            } else {
-                match = null;
-            }
 
-            if (match != null && match.getEstimatedArrival() != null) {
-                long etaSec = match.getEstimatedArrival().getEpochSecond()
-                        - System.currentTimeMillis() / 1000;
-                return (int) Math.max(0, etaSec / 60);
+            } catch (Exception e) {
+                log.debug("ETA per linea non disponibile a {}: {}", stopId, e.getMessage());
             }
-        } catch (Exception e) {
-            log.debug("ETA per linea non disponibile a {}: {}", stopId, e.getMessage());
         }
 
-        // Fallback finale: orario statico nel DB
-        return waitMinutesFromSchedule(stopId, routeShort);
+        // Orario statico della linea richiesta, all'istante di riferimento.
+        return waitMinutesFromSchedule(stopId, routeShort, when);
     }
 
     /**
@@ -611,8 +797,10 @@ public class JourneyPlannerService {
      * Usato quando CassiTrack non è disponibile o non ha dati per quella linea.
      * Restituisce 5 solo se non ci sono più corse oggi (ultima corsa già passata).
      */
-    private int waitMinutesFromSchedule(String stopId, String routeShort) {
-        int nowSec = LocalTime.now(ZoneId.of("Europe/Rome")).toSecondOfDay();
+    private int waitMinutesFromSchedule(String stopId, String routeShort, java.time.Instant when) {
+        // Secondi dalla mezzanotte dell'ISTANTE DI RIFERIMENTO, non di "adesso":
+        // per una ricerca futura conta l'orario scelto, non l'ora corrente.
+        int nowSec = when.atZone(ZoneId.of("Europe/Rome")).toLocalTime().toSecondOfDay();
 
         List<ScheduledStop> candidates = (routeShort != null)
                 ? scheduledStopRepository.findByStopIdAndRouteShort(stopId, routeShort)
