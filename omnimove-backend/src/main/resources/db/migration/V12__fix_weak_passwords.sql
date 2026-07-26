@@ -1,5 +1,5 @@
 -- ================================================================
--- V11__fix_weak_passwords.sql
+-- V12__fix_weak_passwords.sql
 -- OMNIMOVE — Remove/update accounts seeded with weak passwords
 --
 -- WHY THIS EXISTS:

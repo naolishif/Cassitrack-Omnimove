@@ -50,8 +50,6 @@ public class VehicleStatusDTO {
      * read `v.trip_id`. The check `!v.trip_id ? 'NO_TRIP' : ...` was therefore
      * always true and every bus rendered as NO_TRIP.
      */
-    @JsonProperty("trip_id")
-    private String tripId;
 
     /** Route this bus is currently operating (e.g. "LINEA-16") */
     @JsonProperty("route_id")
