@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
  *   - The app DB user has INSERT only (never SELECT).
  *   - The 'security_auditor' DB role has SELECT only.
  *
- * See migration V12__security_audit_events.sql for the DDL and grants.
+ * See migration V13__security_audit_events.sql for the DDL and grants.
  */
 @Entity
 @Table(name = "security_audit_events")
