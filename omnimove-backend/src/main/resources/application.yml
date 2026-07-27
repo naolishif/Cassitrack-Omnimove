@@ -59,6 +59,8 @@ spring:
 
 server:
   port: 8180
+  servlet:
+    context-path: ${SERVER_SERVLET_CONTEXT_PATH:/omnimove}
 
 # ── CASSITRACK API Connection ─────────────────────────────────
 # OMNIMOVE calls CASSITRACK for live bus data

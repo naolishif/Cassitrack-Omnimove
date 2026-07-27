@@ -43,10 +43,17 @@
 
         <!-- ══ PANEL: Register ═══════════════════════════════════════ -->
         <form class="form" id="registerForm" onsubmit="handleRegister(event)">
-            <div>
-                <div class="label">Full Name</div>
-                <input class="input" type="text" id="regName" placeholder="Nawaye Shiferaw"/>
-                <span class="field-err" id="err-regName"></span>
+            <div class="name-row" style="display:flex;gap:10px">
+                <div style="flex:1">
+                    <div class="label">Name</div>
+                    <input class="input" type="text" id="regFirstName" placeholder="Nawaye"/>
+                    <span class="field-err" id="err-regFirstName"></span>
+                </div>
+                <div style="flex:1">
+                    <div class="label">Surname</div>
+                    <input class="input" type="text" id="regLastName" placeholder="Shiferaw"/>
+                    <span class="field-err" id="err-regLastName"></span>
+                </div>
             </div>
             <div>
                 <div class="label">Email</div>

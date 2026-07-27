@@ -441,17 +441,9 @@ async function loadStops() {
         STOPS = {};
         stops.forEach(s => { STOPS[s.id] = { id: s.id, name: s.name, lat: s.lat, lon: s.lon }; });
 
-        const optionsHtml = stops
-            .map(s => `<option value="${s.id}">${s.name}</option>`)
-            .join('');
-
-        // Origin keeps "My Location" (GPS) first, then every stop
-        originSel.innerHTML = '<option value="GPS">📍 My Location</option>' + optionsHtml;
-        destSel.innerHTML   = optionsHtml;
-
-        // Sensible defaults: first stop as origin, a different one as destination
-        originSel.value = stops[0].id;
-        destSel.value   = stops.length > 1 ? stops[1].id : stops[0].id;
+        // Typable inputs: set sensible defaults (display name + hidden stop id)
+        setStop(originSel, stops[0].id);
+        setStop(destSel, stops.length > 1 ? stops[1].id : stops[0].id);
 
         renderStopMarkers();
 
@@ -497,35 +489,23 @@ function tryGetGPS() {
 }
 
 // ── GPS trigger when user switches to "My Location" ───────────────
-document.getElementById('originSelect').addEventListener('change', function () {
-    if (this.value === 'GPS') {
-        showToast('📡 Getting your location...');
-        tryGetGPS()
-            .then(pos => {
-                showToast('📍 Location detected!');
-                map.setView([pos.lat, pos.lon], 16);
-            })
-            .catch(() => {
-                showToast('GPS unavailable — select a stop', true);
-                const firstStop = Object.keys(STOPS)[0];
-                if (firstStop) this.value = firstStop;
-            });
-    }
-});
+// (origin GPS handling now lives in the autocomplete selection below)
 
 function swapStops() {
-    const originSel = document.getElementById('originSelect');
-    const destSel   = document.getElementById('destSelect');
-    const ov = originSel.value;
-    const dv = destSel.value;
-    if (ov !== 'GPS') destSel.value = ov;
-    originSel.value = dv;
+    const o = document.getElementById('originSelect');
+    const d = document.getElementById('destSelect');
+    const ov = o.value, oid = o.dataset.id;
+    o.value = d.value; o.dataset.id = d.dataset.id;
+    d.value = ov;      d.dataset.id = oid;
 }
 
 function getOrigin() {
-    const val = document.getElementById('originSelect').value;
-    if (val === 'GPS') {
-        if (!userLat) return null;
+    const el  = document.getElementById('originSelect');
+    const val = el.dataset.id;
+    // No origin picked (empty field) → default to My Location (GPS)
+    if (!el.value.trim() || !val || val === 'GPS') {
+        setStop(el, 'GPS');          // show "My Location" in the field, don't leave it empty
+        if (!userLat) return null;   // null → doSearch will request GPS
         return { name: 'My Location', lat: userLat, lon: userLon, isGPS: true };
     }
     return { ...STOPS[val], isGPS: false };
@@ -577,7 +557,8 @@ function sortOptions(options) {
 
 // ── Search ────────────────────────────────────────────────────────
 async function doSearch() {
-    const destId = document.getElementById('destSelect').value;
+    _acHide();   // close the suggestion list on search
+    const destId = document.getElementById('destSelect').dataset.id;
     const dest   = STOPS[destId];
     let origin   = getOrigin();
 
@@ -752,14 +733,14 @@ function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
     const startBtn = document.createElement('button');
     startBtn.className = 'action-btn btn-green';
     startBtn.style.cssText = 'width:100%;font-size:14px;padding:13px';
-    startBtn.textContent = '🚀 Start Journey';
+    startBtn.textContent = 'Start Journey';
     startBtn.onclick = startJourney;
 
     banner.appendChild(infoDiv);
     banner.appendChild(startBtn);
     document.querySelector('.routes-list').appendChild(banner);
 
-    showToast(`${modeEmoji} ${label} selected — tap Start Journey`);
+    if (!window.matchMedia('(max-width: 768px)').matches) showToast(`${modeEmoji} ${label} selected — tap Start Journey`);
 }
 
 async function startJourney() {
@@ -966,13 +947,13 @@ async function startJourney() {
             }
         }, 60000);
 
-        showToast(`🚀 Journey started! ${durationMin} min to destination`);
+        showToast(`Journey started! ${durationMin} min to destination`);
 
     } catch (err) {
         console.error('startJourney failed:', err);
         showToast('⚠️ Impossibile avviare il percorso', true);
         window._journeyStarting = false;
-        if (_startBtn) { _startBtn.disabled = false; _startBtn.textContent = '🚀 Start Journey'; }
+        if (_startBtn) { _startBtn.disabled = false; _startBtn.textContent = 'Start Journey'; }
     }
 }
 
@@ -1004,7 +985,7 @@ function endJourney() {
         + '<div style="font-size:12px;margin-top:6px">Search a new route above</div>'
         + '</div>';
 
-    showToast('🏁 Journey ended — great trip!');
+    if (!window.matchMedia('(max-width: 768px)').matches) showToast('🏁 Journey ended — great trip!');
     loadEcoStats();
 }
 
@@ -1052,9 +1033,14 @@ function switchProfileTab(tab) {
     document.querySelectorAll('.ptab-pane').forEach(p => p.classList.remove('active'));
     const el = document.getElementById('ptab-' + tab);
     if (el) el.classList.add('active');
-    if (tab === 'history') loadHistory();
+    if (tab === 'history')   loadHistory();
     if (tab === 'favorites') loadFavorites();
-    if (tab === 'settings') loadPreferences();
+    if (tab === 'settings')  loadPreferences();
+    if (tab === 'account') {
+        const user = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
+        document.getElementById('accountName').textContent  = user.name  || '—';
+        document.getElementById('accountEmail').textContent = user.email || '—';
+    }
 }
 
 // Escape a string so it is safe inside a double-quoted HTML attribute.
@@ -1235,3 +1221,224 @@ function renderSuggestions(suggestions) {
 
 // ── Initial load: populate stops (dropdowns + map markers) ─────────
 loadStops();
+
+// ══════════════════════════════════════════════════════════════
+
+// ── Step 3: mobile ☰ menu drawer ──────────────────────────────
+function openMenu() {
+    document.getElementById('menuDrawer').classList.add('open');
+    document.getElementById('menuScrim').classList.add('open');
+}
+function closeMenu() {
+    document.getElementById('menuDrawer').classList.remove('open');
+    document.getElementById('menuScrim').classList.remove('open');
+}
+// Tapping a menu item on mobile switches the pane (existing handler) then closes the drawer
+document.querySelectorAll('.sidebar-nav .nav-item').forEach(function (it) {
+    it.addEventListener('click', function () {
+        if (window.matchMedia('(max-width: 768px)').matches) closeMenu();
+    });
+});
+
+// ── Step 4: mobile full-screen subpages (back arrow + title) ──
+function setMobilePane(pane, title) {
+    document.body.dataset.pane = pane || 'map';
+    var t = document.getElementById('mobileTitle');
+    if (t) t.textContent = title || '';
+}
+function backToMap() {
+    var mapNav = document.querySelector('.sidebar-nav .nav-item[data-pane="map"]');
+    if (mapNav) mapNav.click();          // reuse the existing pane-switch handler
+    else setMobilePane('map', '');
+}
+// Track the active pane so CSS can swap the search UI for the back bar
+document.querySelectorAll('.sidebar-nav .nav-item').forEach(function (it) {
+    it.addEventListener('click', function () {
+        var pane = it.dataset.pane || 'map';
+        var clone = it.cloneNode(true);
+        var badge = clone.querySelector('.nav-badge');
+        if (badge) badge.remove();
+        var label = clone.textContent.replace(/\s+/g, ' ').trim();
+        setMobilePane(pane, pane === 'map' ? '' : label);
+    });
+});
+// Start on the map pane
+setMobilePane('map', '');
+
+// ── Step 5: back arrow reopens the ☰ menu; track profile section ──
+function backToMap() { openMenu(); }   // overrides the earlier definition
+document.querySelectorAll('.sidebar-nav .nav-item').forEach(function (it) {
+    it.addEventListener('click', function () {
+        document.body.dataset.tab = it.dataset.tab || '';
+    });
+});
+
+// ── Step 6: ← returns to the map (☰ still opens the menu for other sections) ──
+function backToMap() {
+    var n = document.querySelector('.sidebar-nav .nav-item[data-pane="map"]');
+    if (n) n.click();
+}
+
+// ── Step 7: ensure the Leaflet map renders on mobile / after reflow ──
+window.addEventListener('resize', function () { try { map.invalidateSize(); } catch (e) {} });
+setTimeout(function () { try { map.invalidateSize(); } catch (e) {} }, 500);
+
+// ── Step 9: the ← on option pages reopens the menu ──
+function backToMap() { openMenu(); }
+
+// ── Step 10: draggable routes sheet (Google-Maps style, mobile only) ──
+(function () {
+    var sheet = document.querySelector('.map-sidebar');
+    var handle = document.getElementById('sheetHandle');
+    if (!sheet || !handle) return;
+
+    function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+    var _pane = document.getElementById('pane-map');
+    function paneH() { return (_pane && _pane.clientHeight) ? _pane.clientHeight : window.innerHeight; }
+    function states() { var h = paneH(); return [110, Math.round(h * 0.45), Math.round(h * 0.94)]; }   // peek · half · full (capped to the map area)
+    function clamp(h) { var s = states(); return Math.max(s[0], Math.min(s[s.length - 1], h)); }
+    function pointY(e) { return e.touches ? e.touches[0].clientY : e.clientY; }
+
+    var dragging = false, startY = 0, startH = 0, lastY = 0;
+
+    function down(e) {
+        if (!isMobile()) return;
+        dragging = true;
+        sheet.style.transition = 'none';
+        startY = lastY = pointY(e);
+        startH = sheet.offsetHeight;
+        e.preventDefault();
+    }
+    function move(e) {
+        if (!dragging) return;
+        lastY = pointY(e);
+        sheet.style.height = clamp(startH + (startY - lastY)) + 'px';
+        if (e.cancelable) e.preventDefault();
+    }
+    function up() {
+        if (!dragging) return;
+        dragging = false;
+        sheet.style.transition = 'height 0.25s ease';
+        var s = states();
+        var dy = startY - lastY;                 // >0 up, <0 down
+        var cur = 0, best = Infinity;
+        s.forEach(function (t, i) { var d = Math.abs(t - startH); if (d < best) { best = d; cur = i; } });
+        var target = cur;
+        if (dy > 30 && cur < s.length - 1) target = cur + 1;      // dragged up → bigger
+        else if (dy < -30 && cur > 0) target = cur - 1;          // dragged down → smaller
+        else {
+            best = Infinity;
+            var h = sheet.offsetHeight;
+            s.forEach(function (t, i) { var d = Math.abs(t - h); if (d < best) { best = d; target = i; } });
+        }
+        sheet.style.height = s[target] + 'px';
+        try { map.invalidateSize(); } catch (e) {}
+    }
+
+    handle.addEventListener('mousedown', down);
+    handle.addEventListener('touchstart', down, { passive: false });
+    window.addEventListener('mousemove', move);
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('mouseup', up);
+    window.addEventListener('touchend', up);
+    window.addEventListener('resize', function () { if (!isMobile()) sheet.style.height = ''; });
+})();
+
+// ── Step 12: closing the menu (✕ / tap-outside) returns to the map ──
+function closeMenuMap() {
+    var n = document.querySelector('.sidebar-nav .nav-item[data-pane="map"]');
+    if (n) n.click(); else closeMenu();
+}
+
+// ── Step 19: back arrow reveals the map behind the reopened menu ──
+function backToMap() {
+    var n = document.querySelector('.sidebar-nav .nav-item[data-pane="map"]');
+    if (n) n.click();   // switch to the map pane (also closes menu + sets data-pane=map)
+    openMenu();         // then reopen the menu over the map
+}
+
+// ── Step 23: on mobile, move the zoom control to top-right (menu floats top-left) ──
+if (window.matchMedia('(max-width: 768px)').matches) {
+    try { map.zoomControl.setPosition('topright'); } catch (e) {}
+}
+
+// ── Step 24: typable search with autocomplete suggestions ──────────
+function setStop(el, id) {
+    if (!el) return;
+    if (id === 'GPS') { el.value = 'My Location'; el.dataset.id = 'GPS'; return; }
+    const s = STOPS[id];
+    if (s) { el.value = s.name; el.dataset.id = id; }
+}
+
+let _acFor = null;
+
+function _acItems(inputEl, q) {
+    q = (q || '').trim().toLowerCase();
+    const out = [];
+    if (inputEl.id === 'originSelect') {
+        if (!q || 'my location'.indexOf(q) === 0) out.push({ id: 'GPS', name: 'My Location' });
+    }
+    Object.values(STOPS).forEach(s => {
+        const n = (s.name || '').toLowerCase();
+        if (!q || n.startsWith(q)) out.push({ id: s.id, name: s.name });
+    });
+    // fall back to "contains" if nothing starts with the query
+    if (q && out.length === 0) {
+        Object.values(STOPS).forEach(s => {
+            if ((s.name || '').toLowerCase().includes(q)) out.push({ id: s.id, name: s.name });
+        });
+    }
+    return out.slice(0, 8);
+}
+
+function _acShow(inputEl) {
+    const acList = document.getElementById('acList');
+    if (!acList) return;
+    _acFor = inputEl;
+    const items = _acItems(inputEl, inputEl.value);
+    if (!items.length) { acList.style.display = 'none'; return; }
+    acList.innerHTML = items.map(it =>
+        `<div class="ac-item" data-id="${escAttr(it.id)}">${escHtml(it.name)}</div>`).join('');
+    const r = inputEl.getBoundingClientRect();
+    acList.style.left = r.left + 'px';
+    acList.style.top = (r.bottom + 4) + 'px';
+    acList.style.width = r.width + 'px';
+    acList.style.display = 'block';
+}
+
+function _acHide() {
+    const acList = document.getElementById('acList');
+    if (acList) acList.style.display = 'none';
+    _acFor = null;
+}
+
+function initAutocomplete() {
+    const acList = document.getElementById('acList');
+    if (!acList) return;
+    ['originSelect', 'destSelect'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('focus', () => { el.select(); _acShow(el); });
+        el.addEventListener('input', () => _acShow(el));
+        el.addEventListener('blur', () => setTimeout(_acHide, 150));
+    });
+    acList.addEventListener('mousedown', (e) => {
+        const item = e.target.closest('.ac-item');
+        if (!item || !_acFor) return;
+        e.preventDefault();
+        const id = item.dataset.id;
+        const target = _acFor;
+        if (id === 'GPS') {
+            setStop(target, 'GPS');
+            showToast('📡 Getting your location...');
+            tryGetGPS().then(pos => { showToast('📍 Location detected!'); map.setView([pos.lat, pos.lon], 16); })
+                       .catch(() => showToast('GPS unavailable — pick a stop', true));
+        } else {
+            setStop(target, id);
+        }
+        _acHide();
+    });
+    window.addEventListener('scroll', _acHide, true);
+    window.addEventListener('resize', _acHide);
+}
+initAutocomplete();

@@ -17,7 +17,8 @@
 <body>
 
 <!-- ─── SIDEBAR ─── -->
-<div class="sidebar">
+<div class="sidebar" id="menuDrawer">
+    <button class="menu-close" onclick="closeMenuMap()" aria-label="Close menu">✕</button>
     <div class="sidebar-brand">
         <div class="brand-logo">OMNI<span>MOVE</span></div>
         <div class="brand-tagline">Smarter urban mobility</div>
@@ -29,6 +30,7 @@
             <div class="name" id="sidebarName">—</div>
             <div class="email" id="sidebarEmail">—</div>
         </div>
+        <button onclick="logout()" title="Log out" style="margin-left:auto;flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-soft);font-size:18px;padding:4px;border-radius:8px;transition:color .2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-soft)'">→</button>
     </div>
 
     <nav class="sidebar-nav">
@@ -54,6 +56,9 @@
         <div class="nav-item" data-pane="profile" data-tab="settings">
             <span class="nav-icon">⚙</span> Preferences
         </div>
+        <div class="nav-item" data-pane="profile" data-tab="account">
+            <span class="nav-icon">👤</span> Account
+        </div>
     </nav>
 
     <div class="sidebar-eco">
@@ -65,22 +70,25 @@
     </div>
 </div>
 
+<!-- Mobile menu scrim (tap to close drawer) -->
+<div class="menu-scrim" id="menuScrim" onclick="closeMenuMap()"></div>
+
 <!-- ─── MAIN ─── -->
 <div class="main">
 
     <!-- TOPBAR -->
     <div class="topbar">
+        <button class="hamburger" id="menuBtn" aria-label="Open menu" onclick="openMenu()">☰</button>
+        <button class="mobile-back" onclick="backToMap()" aria-label="Back">←</button>
+        <span class="mobile-title" id="mobileTitle"></span>
         <div class="topbar-search">
             <div class="search-seg">
                 <span>📍</span>
-                <select id="originSelect" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;cursor:pointer;">
-                    <option value="GPS"> My Location</option>
-                </select>
+                <input id="originSelect" type="text" autocomplete="off" placeholder="Origin" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
             </div>
             <div class="search-seg">
                 <span>🏁</span>
-                <select id="destSelect" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;cursor:pointer;">
-                </select>
+                <input id="destSelect" type="text" autocomplete="off" placeholder="Destination" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
             </div>
             <div class="search-seg">
                 <span>🕐</span>
@@ -109,9 +117,11 @@
         <!-- ── MAP PANE ── -->
         <div class="pane active" id="pane-map">
             <div id="map"></div>
+            <button class="map-menu-fab" onclick="openMenu()" aria-label="Open menu">☰</button>
             <div class="ai-fab" onclick="openAI()" title="Ask OmniAI">✦</div>
 
             <div class="map-sidebar">
+                <div class="sheet-handle" id="sheetHandle"><span></span></div>
                 <div class="map-sidebar-header">
                     <h2>Smart Routes</h2>
                     <div class="weather-pill">☁️ 18°C · Light rain</div>
@@ -286,6 +296,7 @@
                     <div class="profile-tab" data-ptab="favorites" onclick="switchProfileTab('favorites')">Favourites</div>
                     <div class="profile-tab" data-ptab="payment" onclick="switchProfileTab('payment')">Payment</div>
                     <div class="profile-tab" data-ptab="settings" onclick="switchProfileTab('settings')">Preferences</div>
+                <div class="profile-tab" data-ptab="account" onclick="switchProfileTab('account')">Account</div>
                 </div>
 
                 <div class="ptab-pane active" id="ptab-history">
@@ -387,35 +398,42 @@
                         </div>
                     </div>
                     <div class="settings-section">
-                        <span class="section-label">Account</span>
-                        <div class="pref-row" style="gap:12px;flex-wrap:wrap">
-                            <button class="action-btn" onclick="logout()" style="width:auto;padding:8px 20px;background:#fef2f2;color:var(--red);border:1px solid #fee2e2">Log Out</button>
-                            <button class="action-btn" onclick="confirmDeleteAccount()" style="width:auto;padding:8px 20px;background:#1a0a0a;color:#f87171;border:1px solid #7f1d1d">🗑 Delete Account</button>
-                            <button class="action-btn btn-green" onclick="savePreferences()" style="width:auto;padding:8px 20px">💾 Save Preferences</button>
-                        </div>
-                        <p style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.5">
-                            Deleting your account is permanent and cannot be undone. All your data will be removed.
-                        </p>
+                        <span class="section-label">Save Changes</span>
+                        <button class="action-btn btn-green" onclick="savePreferences()" style="width:100%;padding:12px 20px;font-size:14px;font-weight:700">💾 Save Preferences</button>
                     </div>
 
-                    <!-- Delete Account confirmation modal -->
-                    <div id="deleteModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
-                         z-index:9999;align-items:center;justify-content:center">
-                        <div style="background:#0f1623;border:1px solid #7f1d1d;border-radius:12px;
-                             padding:32px;max-width:380px;width:90%;text-align:center">
-                            <div style="font-size:36px;margin-bottom:12px">⚠️</div>
-                            <div style="font-size:18px;font-weight:800;margin-bottom:8px;color:#f87171">Delete Account</div>
-                            <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:24px">
-                                Are you sure? This will permanently delete your account and all associated data. This action cannot be undone.
-                            </p>
-                            <div style="display:flex;gap:12px;justify-content:center">
-                                <button onclick="document.getElementById('deleteModal').style.display='none'"
-                                    style="padding:10px 24px;background:#1e293b;color:#94a3b8;border:1px solid #334155;
-                                    border-radius:8px;cursor:pointer;font-weight:700">Cancel</button>
-                                <button id="confirmDeleteBtn" onclick="deleteAccount()"
-                                    style="padding:10px 24px;background:#7f1d1d;color:#fca5a5;border:none;
-                                    border-radius:8px;cursor:pointer;font-weight:700">Yes, delete my account</button>
+                </div>
+
+                <div class="ptab-pane" id="ptab-account">
+                    <div class="settings-section">
+                        <span class="section-label">Profile</span>
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" id="accountName">—</div>
+                                <div class="pref-desc" id="accountEmail">—</div>
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <span class="section-label">Session</span>
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label">Log out of OmniMove</div>
+                                <div class="pref-desc">You will need to sign in again to access your account</div>
+                            </div>
+                            <button class="action-btn" onclick="logout()" style="width:auto;padding:8px 20px;flex-shrink:0;background:#fef2f2;color:var(--red);border:1px solid #fee2e2">Log Out</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <span class="section-label">Account Actions</span>
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" style="color:var(--red)">Delete account</div>
+                                <div class="pref-desc">Permanently removes your account and all data.</div>
+                            </div>
+                            <button class="action-btn" onclick="confirmDeleteAccount()" style="width:auto;padding:8px 20px;flex-shrink:0;background:none;color:var(--red);border:1px solid #fecaca">Delete</button>
                         </div>
                     </div>
                 </div>
@@ -423,6 +441,27 @@
             </div>
         </div>
 
+    </div>
+</div>
+
+<!-- Delete Account confirmation modal -->
+<div id="deleteModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+     z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#0f1623;border:1px solid #7f1d1d;border-radius:12px;
+         padding:32px;max-width:380px;width:90%;text-align:center">
+        <div style="font-size:36px;margin-bottom:12px">⚠️</div>
+        <div style="font-size:18px;font-weight:800;margin-bottom:8px;color:#f87171">Delete Account</div>
+        <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:24px">
+            Are you sure? This will permanently delete your account and all associated data. This action cannot be undone.
+        </p>
+        <div style="display:flex;gap:12px;justify-content:center">
+            <button onclick="document.getElementById('deleteModal').style.display='none'"
+                style="padding:10px 24px;background:#1e293b;color:#94a3b8;border:1px solid #334155;
+                border-radius:8px;cursor:pointer;font-weight:700">Cancel</button>
+            <button id="confirmDeleteBtn" onclick="deleteAccount()"
+                style="padding:10px 24px;background:#7f1d1d;color:#fca5a5;border:none;
+                border-radius:8px;cursor:pointer;font-weight:700">Yes, delete my account</button>
+        </div>
     </div>
 </div>
 
@@ -461,6 +500,8 @@
         <div class="stop-sheet-list" id="stopSheetList"></div>
     </div>
 </div>
+
+<div class="ac-list" id="acList"></div>
 
 <script src="omnimove-traveller.js"></script>
 </body>

@@ -72,7 +72,7 @@ public class MqttMessageHandler implements MessageHandler {
 
             // ── Step 2: Validate ──────────────────────────────────
             if (!isValid(pos)) {
-                securityAuditService.mqttInvalidPayload(topic);
+                securityAuditService.mqttInvalidPayload(topic, "validation failed");
                 return;
             }
 
@@ -133,6 +133,7 @@ public class MqttMessageHandler implements MessageHandler {
 
         } catch (Exception e) {
             log.error("Failed to process MQTT message from topic [{}]: {}", topic, e.getMessage(), e);
+            securityAuditService.mqttInvalidPayload(topic, e.getMessage());
         }
     }
 
