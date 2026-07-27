@@ -36,7 +36,10 @@
                 Analytics
             </button>
 
-            <button class="top-btn" id="topBtnDataManagement">
+            <!-- Single Data Management entry point. Was previously two buttons
+                 (topBtnDataManagement + topBtnDataMgmt) pointing at two rival
+                 views; they are merged into one view below. -->
+            <button class="top-btn" id="topBtnDataMgmt">
                 Data Management
             </button>
 
@@ -254,6 +257,7 @@
                             LATE
                         </div>
 
+                        <!-- CSP FIX (A05): .legend-dot.amber, never style="background:#F59E0B" -->
                         <div class="legend-item">
                             <span class="legend-dot amber"></span>
                             NO TRIP
@@ -329,84 +333,73 @@
 </div>
 
 <!-- ========================================= -->
-<!-- DATA MANAGEMENT VIEW (fleet buses CRUD)   -->
+<!-- DATA MANAGEMENT VIEW                      -->
+<!--                                           -->
+<!-- Merged view: the Buses panel uses the new -->
+<!-- search/filter/drawer UI (US-01), while    -->
+<!-- Stops and Routes keep their working CRUD  -->
+<!-- panels. Sub-tab buttons carry BOTH class  -->
+<!-- names so the new .dm-subtab styling and   -->
+<!-- the existing .bm-subnav-btn active-state  -->
+<!-- JS both keep working.                     -->
 <!-- ========================================= -->
-<div id="data-management-view" class="main-view">
-    <div class="bm-wrap">
-        <div class="bm-header">
-            <div>
-                <div class="bm-title">Data Management</div>
-                <div class="bm-sub">Edit PostgreSQL master data</div>
-            </div>
+<div id="data-management" class="main-view">
+    <div class="dm-wrap">
+
+        <!-- Sub-tabs -->
+        <div class="dm-subtabs">
+            <button type="button" class="dm-subtab bm-subnav-btn active" id="dmTabBuses">Buses</button>
+            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabStops">Stops</button>
+            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabRoutes">Routes</button>
         </div>
 
-        <div class="bm-subnav">
-            <button type="button" class="bm-subnav-btn active" id="dmTabBuses">Buses</button>
-            <button type="button" class="bm-subnav-btn" id="dmTabStops">Stops</button>
-            <button type="button" class="bm-subnav-btn" id="dmTabRoutes">Routes</button>
-        </div>
-
-        <!-- ══════════ BUSES PANEL ══════════ -->
+        <!-- ══════════ BUSES PANEL (US-01 registry) ══════════ -->
         <div id="dm-panel-buses" class="dm-panel active">
-        <div class="bm-panel-head">
-            <div class="bm-panel-title">Fleet buses</div>
-            <button type="button" class="apply-btn" id="bmAddBtn">＋ Add bus</button>
-        </div>
 
-        <!-- Add / Edit form (hidden until Add or Edit is pressed) -->
-        <div id="bmForm" class="bm-form" hidden>
-            <div class="bm-form-title" id="bmFormTitle">New bus</div>
-            <div class="bm-form-grid">
-                <div class="bm-field">
-                    <label class="bm-lbl" for="bmTarga">Plate (targa)</label>
-                    <input type="text" class="bm-input" id="bmTarga" maxlength="20" placeholder="e.g. FR123AB">
-                </div>
-                <div class="bm-field">
-                    <label class="bm-lbl" for="bmPosti">Seats</label>
-                    <input type="number" class="bm-input" id="bmPosti" min="1" max="300" placeholder="e.g. 50">
-                </div>
-                <div class="bm-field">
-                    <label class="bm-lbl" for="bmVehicleId">Vehicle id (optional)</label>
-                    <input type="text" class="bm-input" id="bmVehicleId" maxlength="50" placeholder="e.g. MAGNI-005">
-                </div>
-                <div class="bm-field">
-                    <label class="bm-lbl" for="bmWheelchair">Wheelchair</label>
-                    <select class="bm-input" id="bmWheelchair">
-                        <option value="false">No</option>
-                        <option value="true">Yes</option>
-                    </select>
-                </div>
-                <div class="bm-field">
-                    <label class="bm-lbl" for="bmDisponibile">Available</label>
-                    <select class="bm-input" id="bmDisponibile">
-                        <option value="true">Yes</option>
-                        <option value="false">No</option>
-                    </select>
-                </div>
-            </div>
-            <div class="bm-form-actions">
-                <span class="bm-msg" id="bmFormMsg"></span>
-                <button type="button" class="bm-btn-ghost" id="bmCancelBtn">Cancel</button>
-                <button type="button" class="apply-btn" id="bmSaveBtn">Save</button>
-            </div>
-        </div>
+            <!-- Toolbar: search + filters + new -->
+            <div class="dm-toolbar">
+                <input type="search" id="dmSearch" class="dm-input dm-search"
+                       placeholder="Search plate, route, antenna id..."
+                       aria-label="Search buses">
 
-        <div class="bm-table-wrap">
-            <table class="bm-table">
-                <thead>
+                <select id="dmFilterStatus" class="dm-input dm-select" aria-label="Filter by status">
+                    <option value="">All statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                    <option value="MAINTENANCE">Maintenance</option>
+                </select>
+
+                <select id="dmFilterRoute" class="dm-input dm-select" aria-label="Filter by route">
+                    <option value="">All routes</option>
+                    <option value="UNASSIGNED">Unassigned</option>
+                </select>
+
+                <button class="dm-btn dm-btn-ghost" id="dmResetBtn">Reset</button>
+                <button class="dm-btn dm-btn-primary" id="dmNewBtn">+ New bus</button>
+            </div>
+
+            <!-- Table -->
+            <div class="dm-table-wrap">
+                <table class="dm-table">
+                    <thead>
                     <tr>
-                        <th>ID</th>
+                        <th>Bus ID</th>
                         <th>Plate</th>
-                        <th>Seats</th>
-                        <th>Wheelchair</th>
-                        <th>Available</th>
-                        <th>Vehicle id</th>
-                        <th class="bm-actions-col">Actions</th>
+                        <th>Assigned route</th>
+                        <th class="dm-num">Capacity</th>
+                        <th>Status</th>
+                        <th>Antenna ID</th>
+                        <th class="dm-center">On map</th>
+                        <th class="dm-right">Actions</th>
                     </tr>
-                </thead>
-                <tbody id="bmTableBody"></tbody>
-            </table>
-        </div>
+                    </thead>
+                    <tbody id="dmTableBody">
+                    <tr><td colspan="8" class="dm-empty">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="dm-footer" id="dmCount"></div>
         </div><!-- /dm-panel-buses -->
 
         <!-- ══════════ STOPS PANEL ══════════ -->
@@ -528,8 +521,72 @@
                 </table>
             </div>
         </div><!-- /dm-panel-routes -->
+
+    </div>
+
+    <!-- ── Form drawer (slides in from the right) — Buses only ── -->
+    <div class="dm-drawer-backdrop" id="dmDrawerBackdrop"></div>
+
+    <aside class="dm-drawer" id="dmDrawer" aria-hidden="true">
+        <div class="dm-drawer-head">
+            <h3 id="dmDrawerTitle">New bus</h3>
+            <button class="dm-icon-btn" id="dmDrawerClose" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="dm-drawer-body">
+            <label class="dm-label" for="dmTarga">Plate (targa)</label>
+            <input type="text" id="dmTarga" class="dm-input" placeholder="AA123BB" maxlength="20">
+
+            <label class="dm-label" for="dmCapacity">Capacity (seats)</label>
+            <input type="number" id="dmCapacity" class="dm-input" min="1" placeholder="85">
+
+            <label class="dm-label" for="dmRoute">Assigned route</label>
+            <select id="dmRoute" class="dm-input dm-select">
+                <option value="">— Unassigned —</option>
+            </select>
+
+            <label class="dm-label" for="dmStatus">Status</label>
+            <select id="dmStatus" class="dm-input dm-select">
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+                <option value="MAINTENANCE">Maintenance</option>
+            </select>
+
+            <label class="dm-label" for="dmVehicleId">Antenna / Vehicle ID <span class="dm-hint">(optional)</span></label>
+            <input type="text" id="dmVehicleId" class="dm-input" placeholder="MAGNI-001" maxlength="50">
+
+            <label class="dm-check">
+                <input type="checkbox" id="dmAccessible">
+                <span>Wheelchair accessible</span>
+            </label>
+
+            <label class="dm-check">
+                <input type="checkbox" id="dmMapVisible" checked>
+                <span>Show on fleet map</span>
+            </label>
+
+            <p class="dm-error" id="dmFormError"></p>
+        </div>
+
+        <div class="dm-drawer-foot">
+            <button class="dm-btn dm-btn-ghost" id="dmCancelBtn">Cancel</button>
+            <button class="dm-btn dm-btn-primary" id="dmSaveBtn">Save</button>
+        </div>
+    </aside>
+
+    <!-- ── Delete confirmation ── -->
+    <div class="dm-confirm-backdrop" id="dmConfirmBackdrop">
+        <div class="dm-confirm">
+            <h4>Delete bus</h4>
+            <p id="dmConfirmText">This cannot be undone.</p>
+            <div class="dm-confirm-actions">
+                <button class="dm-btn dm-btn-ghost" id="dmConfirmCancel">Cancel</button>
+                <button class="dm-btn dm-btn-danger" id="dmConfirmOk">Delete</button>
+            </div>
+        </div>
     </div>
 </div>
+
 
 <script src="cassitrack-fleetmanager.js"></script>
 </body>

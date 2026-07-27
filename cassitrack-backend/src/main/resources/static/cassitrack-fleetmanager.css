@@ -1257,3 +1257,53 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .dm-confirm h4 { font-size: 15px; font-weight: 800; color: var(--red); margin-bottom: 10px; }
 .dm-confirm p { font-family: var(--mono); font-size: 12px; color: var(--dim); line-height: 1.6; margin-bottom: 20px; }
 .dm-confirm-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* ── Entity panels (Buses / Stops / Routes) ───────────────────── */
+/* The Buses panel is a flex column so its table can scroll; Stops and
+   Routes are simple scrolling blocks. */
+.dm-panel { display: none; min-height: 0; }
+.dm-panel.active { display: block; overflow: auto; }
+#dm-panel-buses.active { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+
+/* ── Stops / Routes panels ─────────────────────────────────────────────────
+   These two still render through the original markup and their JS builders
+   emit these class names (bm-empty, bm-badge, bm-row-btn, bm-mono…), so the
+   rules below must stay until those panels are migrated to .dm-* markup.
+   Deliberately NOT re-added: .bm-wrap, .bm-header, .bm-title, .bm-sub and
+   .bm-subnav-btn — the merged view uses .dm-wrap and .dm-subtab for those,
+   and duplicating them would resurrect the redundancy this merge removed.
+   ───────────────────────────────────────────────────────────────────────── */
+.bm-panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.bm-panel-title{font-family:var(--mono);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+
+.bm-form{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.bm-form-title{font-family:var(--mono);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
+.bm-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.bm-field{display:flex;flex-direction:column;gap:5px}
+.bm-lbl{font-family:var(--mono);font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim)}
+.bm-input{padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-family:var(--mono);font-size:12px;outline:none}
+.bm-input:focus{border-color:var(--accent)}
+.bm-input-color{padding:2px;height:34px;cursor:pointer}
+.bm-form-actions{display:flex;align-items:center;gap:10px;margin-top:14px;justify-content:flex-end}
+.bm-msg{margin-right:auto;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.bm-msg.err{color:#EF4444}
+.bm-msg.ok{color:#22C55E}
+.bm-btn-ghost{padding:8px 14px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--text);font-family:var(--mono);font-size:11px;cursor:pointer;transition:border-color .2s}
+.bm-btn-ghost:hover{border-color:var(--accent)}
+
+.bm-table-wrap{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel)}
+.bm-table{width:100%;border-collapse:collapse;font-size:12px}
+.bm-table thead th{text-align:left;font-family:var(--mono);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);padding:12px 14px;border-bottom:1px solid var(--border);background:var(--panel2)}
+.bm-table td{padding:10px 14px;border-bottom:1px solid var(--border);color:var(--text)}
+.bm-table tbody tr:last-child td{border-bottom:none}
+.bm-table tbody tr:hover{background:rgba(59,130,246,.04)}
+.bm-mono{font-family:var(--mono)}
+.bm-empty{text-align:center;color:var(--dim);padding:24px}
+.bm-badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid var(--border)}
+.bm-badge.on{color:#22C55E;border-color:rgba(34,197,94,.4)}
+.bm-badge.off{color:#EF4444;border-color:rgba(239,68,68,.4)}
+.bm-actions-col{text-align:right;white-space:nowrap}
+.bm-row-btn{font-family:var(--mono);font-size:11px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);cursor:pointer;margin-left:6px;transition:border-color .2s,color .2s}
+.bm-row-btn:hover{border-color:var(--accent)}
+.bm-row-btn.danger:hover{border-color:rgba(239,68,68,.6);color:#EF4444}
+.rt-swatch{display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid var(--border);vertical-align:middle;margin-right:6px}

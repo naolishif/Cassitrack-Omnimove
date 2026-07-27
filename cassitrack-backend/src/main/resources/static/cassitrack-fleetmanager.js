@@ -504,133 +504,23 @@
             setTimeout(()=>map.invalidateSize(),200);
         }
     }
-
-    // ─────────────────────────────────────────────
-    // DATA MANAGEMENT — fleet buses CRUD (Postgres)
-    // ─────────────────────────────────────────────
-    let bmBuses = [];          // last loaded list
-    let bmEditId = null;       // null = adding a new bus, otherwise the bus id being edited
-
-    async function loadBuses(){
-        const body = document.getElementById('bmTableBody');
-        if(body) body.innerHTML = `<tr><td colspan="7" class="bm-empty">Loading…</td></tr>`;
-        try{
-            const r = await fetch(`${API}/buses`, {headers:{'Accept':'application/json'}});
-            if(!r.ok) throw new Error(r.status);
-            bmBuses = await r.json();
-            renderBusesAdmin();
-        }catch(e){
-            if(body) body.innerHTML = `<tr><td colspan="7" class="bm-empty">Failed to load buses.</td></tr>`;
-        }
-    }
-
-    function renderBusesAdmin(){
-        const body = document.getElementById('bmTableBody');
-        if(!body) return;
-        if(!bmBuses.length){ body.innerHTML = `<tr><td colspan="7" class="bm-empty">No buses yet — use “＋ Add bus”.</td></tr>`; return; }
-        body.innerHTML = '';
-        bmBuses.slice().sort((a,b)=>(a.busId||0)-(b.busId||0)).forEach(b=>{
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${escHtml(b.busId)}</td>
-                <td class="bm-mono">${escHtml(b.targa)||'—'}</td>
-                <td>${escHtml(b.numeroPosti)}</td>
-                <td>${b.wheelchairAccessible ? '♿ Yes' : '—'}</td>
-                <td>${b.disponibile ? '<span class="bm-badge on">Available</span>' : '<span class="bm-badge off">Unavailable</span>'}</td>
-                <td class="bm-mono">${escHtml(b.currentVehicleId)||'—'}</td>
-                <td class="bm-actions-col">
-                    <button type="button" class="bm-row-btn" data-act="edit" data-id="${escHtml(b.busId)}">Edit</button>
-                    <button type="button" class="bm-row-btn danger" data-act="del" data-id="${escHtml(b.busId)}">Delete</button>
-                </td>`;
-            body.appendChild(tr);
-        });
-    }
-
-    function setBmMsg(txt, ok){
-        const el = document.getElementById('bmFormMsg');
-        if(!el) return;
-        el.textContent = txt || '';
-        el.classList.toggle('err', !!txt && !ok);
-        el.classList.toggle('ok',  !!txt && !!ok);
-    }
-
-    function openBusForm(bus){
-        bmEditId = bus ? bus.busId : null;
-        document.getElementById('bmFormTitle').textContent = bus ? `Edit bus #${bus.busId}` : 'New bus';
-        document.getElementById('bmTarga').value      = bus ? (bus.targa || '') : '';
-        document.getElementById('bmPosti').value      = bus && bus.numeroPosti != null ? bus.numeroPosti : '';
-        document.getElementById('bmVehicleId').value  = bus ? (bus.currentVehicleId || '') : '';
-        document.getElementById('bmWheelchair').value = (bus && bus.wheelchairAccessible) ? 'true' : 'false';
-        document.getElementById('bmDisponibile').value= bus ? (bus.disponibile ? 'true' : 'false') : 'true';
-        setBmMsg('');
-        document.getElementById('bmForm').hidden = false;
-        document.getElementById('bmTarga').focus();
-    }
-
-    function closeBusForm(){
-        document.getElementById('bmForm').hidden = true;
-        bmEditId = null;
-        setBmMsg('');
-    }
-
-    async function saveBus(){
-        const payload = {
-            targa:                document.getElementById('bmTarga').value,
-            numeroPosti:          parseInt(document.getElementById('bmPosti').value, 10),
-            wheelchairAccessible: document.getElementById('bmWheelchair').value === 'true',
-            disponibile:          document.getElementById('bmDisponibile').value === 'true',
-            currentVehicleId:     document.getElementById('bmVehicleId').value
-        };
-        // light client-side validation (server re-validates authoritatively)
-        if(!payload.targa || !payload.targa.trim()){ setBmMsg('Plate is required.'); return; }
-        if(!(payload.numeroPosti > 0)){ setBmMsg('Seats must be a positive number.'); return; }
-
-        const editing = bmEditId != null;
-        const url    = editing ? `${API}/buses/${bmEditId}` : `${API}/buses`;
-        const method = editing ? 'PUT' : 'POST';
-        setBmMsg('Saving…', true);
-        try{
-            const r = await fetch(url, {
-                method,
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify(payload)
-            });
-            if(r.ok){
-                closeBusForm();
-                await loadBuses();
-            }else{
-                let msg = 'Save failed.';
-                try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
-                setBmMsg(msg);
-            }
-        }catch(e){ setBmMsg('Network error while saving.'); }
-    }
-
-    async function deleteBus(id){
-        const bus = bmBuses.find(b=>b.busId===id);
-        const label = bus ? (bus.targa || ('#'+id)) : ('#'+id);
-        if(!window.confirm(`Delete bus ${label}? This cannot be undone.`)) return;
-        try{
-            const r = await fetch(`${API}/buses/${id}`, {method:'DELETE'});
-            if(r.ok){ await loadBuses(); }
-            else{
-                let msg = 'Delete failed.';
-                try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
-                window.alert(msg);
-            }
-        }catch(e){ window.alert('Network error while deleting.'); }
-    }
-
+ 
     // ── Data Management sub-navigation (Buses / Stops / …) ────────────────────
     function switchDmPanel(panelId, btn){
-        document.querySelectorAll('#data-management-view .dm-panel').forEach(p=>p.classList.remove('active'));
+        // Scoped to #data-management: the old #data-management-view was merged away.
+        document.querySelectorAll('#data-management .dm-panel').forEach(p=>p.classList.remove('active'));
         const panel = document.getElementById(panelId);
         if(panel) panel.classList.add('active');
-        document.querySelectorAll('.bm-subnav-btn').forEach(b=>b.classList.remove('active'));
+        document.querySelectorAll('.dm-subtab').forEach(b=>b.classList.remove('active'));
         if(btn) btn.classList.add('active');
         if(panelId === 'dm-panel-stops') loadStops();
         else if(panelId === 'dm-panel-routes') loadRoutes();
-        else if(panelId === 'dm-panel-buses') loadBuses();
+        // Buses now render through the US-01 registry UI (dmLoadBuses), not the
+        // superseded bm* table. dmLoadRoutes() fills the route filter/assign lists.
+        else if(panelId === 'dm-panel-buses'){
+            if(!dmState.routes.length) dmLoadRoutes();
+            dmLoadBuses();
+        }
     }
 
     // ── Data Management: stops CRUD (Postgres) ────────────────────────────────
@@ -1401,7 +1291,10 @@
     // ─────────────────────────────────────────────────────────────────
     document.getElementById('topBtnFleetMonitor').addEventListener('click', e => switchTopView('fleet-monitor', e.currentTarget));
     document.getElementById('topBtnAnalytics').addEventListener('click', e => switchTopView('analytics-view', e.currentTarget));
-    document.getElementById('topBtnDataManagement').addEventListener('click', e => { switchTopView('data-management-view', e.currentTarget); switchDmPanel('dm-panel-buses', document.getElementById('dmTabBuses')); });
+    // NOTE: the second Data Management button (topBtnDataManagement -> the old
+    // #data-management-view) was removed when the two rival panels were merged
+    // into a single #data-management view. Its listener lives further down,
+    // bound to topBtnDataMgmt.
     document.getElementById('topBtnLogout').addEventListener('click', logoutUser);
 
     // Data Management sub-navigation
@@ -1412,21 +1305,8 @@
     const dmTabRoutes = document.getElementById('dmTabRoutes');
     if(dmTabRoutes) dmTabRoutes.addEventListener('click', e => switchDmPanel('dm-panel-routes', e.currentTarget));
 
-    // Data Management > buses CRUD
-    const bmAddBtn = document.getElementById('bmAddBtn');
-    if(bmAddBtn) bmAddBtn.addEventListener('click', () => openBusForm(null));
-    const bmCancelBtn = document.getElementById('bmCancelBtn');
-    if(bmCancelBtn) bmCancelBtn.addEventListener('click', closeBusForm);
-    const bmSaveBtn = document.getElementById('bmSaveBtn');
-    if(bmSaveBtn) bmSaveBtn.addEventListener('click', saveBus);
-    const bmTableBody = document.getElementById('bmTableBody');
-    if(bmTableBody) bmTableBody.addEventListener('click', e => {
-        const btn = e.target.closest('button[data-act]');
-        if(!btn) return;
-        const id = parseInt(btn.dataset.id, 10);
-        if(btn.dataset.act === 'edit'){ const b = bmBuses.find(x=>x.busId===id); if(b) openBusForm(b); }
-        else if(btn.dataset.act === 'del'){ deleteBus(id); }
-    });
+    // Data Management > buses CRUD is wired further down (dm* handlers) — the
+    // superseded bm* inline-form wiring was removed with its panel.
 
     // Data Management > stops CRUD
     const stAddBtn = document.getElementById('stAddBtn');
@@ -1771,8 +1651,8 @@
 
     document.getElementById('topBtnDataMgmt').addEventListener('click', e => {
         switchTopView('data-management', e.currentTarget);
-        if (!dmState.routes.length) dmLoadRoutes();
-        dmLoadBuses();
+        // Always land on Buses so the view has a defined starting panel.
+        switchDmPanel('dm-panel-buses', document.getElementById('dmTabBuses'));
     });
 
     document.getElementById('dmSearch').addEventListener('input', e => dmApplySearch(e.target.value));
