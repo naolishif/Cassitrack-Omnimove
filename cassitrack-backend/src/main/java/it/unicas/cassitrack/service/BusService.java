@@ -5,6 +5,7 @@ import it.unicas.cassitrack.model.Bus;
 import it.unicas.cassitrack.model.Route;
 import it.unicas.cassitrack.repository.BusRepository;
 import it.unicas.cassitrack.repository.RouteRepository;
+import it.unicas.cassitrack.repository.TripRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class BusService {
 
     private final BusRepository busRepository;
     private final RouteRepository routeRepository;
+    private final TripRepository tripRepository;
 
     private static final Set<String> VALID_STATUSES =
             Set.of("ACTIVE", "INACTIVE", "MAINTENANCE");
@@ -113,9 +115,24 @@ public class BusService {
 
     // ── DELETE ──────────────────────────────────────────────────────
 
+    /**
+     * Delete a bus, refusing if it would break referential integrity.
+     *
+     * trips.bus_id is a NOT NULL FK to buses(bus_id), so deleting a bus that
+     * still has trips would fail at the database and surface as an opaque 500.
+     * We count first and return a readable 409 instead, telling the fleet
+     * manager exactly how many trips need reassigning.
+     */
     @Transactional
     public void delete(Integer id) {
         if (!busRepository.existsById(id)) throw notFound(id);
+
+        long trips = tripRepository.countByBusBusId(id);
+        if (trips > 0)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Cannot delete: this bus is assigned to " + trips + " trip(s). "
+                            + "Reassign or remove those trips first.");
+
         busRepository.deleteById(id);
     }
 

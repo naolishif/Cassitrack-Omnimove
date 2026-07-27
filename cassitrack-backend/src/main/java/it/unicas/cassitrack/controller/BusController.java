@@ -1,132 +1,130 @@
 package it.unicas.cassitrack.controller;
 
-import it.unicas.cassitrack.model.Bus;
-import it.unicas.cassitrack.repository.BusRepository;
-import it.unicas.cassitrack.repository.TripRepository;
-import org.springframework.data.domain.Sort;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import it.unicas.cassitrack.dto.BusDTO;
+import it.unicas.cassitrack.service.BusService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * CRUD management of the bus fleet (Postgres `buses` table), consumed by the
- * fleet manager's Data Management panel.
+ * REST controller for the bus registry — US-01 "Manage buses".
  *
- * All endpoints require FLEET_MANAGER (defence in depth: also gated in
- * SecurityConfig). CSRF is disabled application-wide (JWT, stateless), so no
- * token handling is needed on the client.
+ * Base path: /api/v1/buses
+ *
+ * Consumed by the fleet manager's Data Management panel. Business logic lives
+ * in {@link BusService}; this class only maps HTTP to service calls and turns
+ * service exceptions into readable JSON.
+ *
+ * Note the deliberate split: this endpoint manages the *registry* (plate,
+ * capacity, assigned route, status). Live telemetry stays on /api/v1/vehicles.
+ *
+ * Authorisation: SecurityConfig already restricts "/api/v1/buses/**" to
+ * FLEET_MANAGER for every method (not just writes). The class-level
+ * {@code @PreAuthorize} below repeats that as defence in depth, so the rule
+ * survives a future relaxation of the URL matchers. CSRF is disabled
+ * application-wide (JWT, stateless), so no token handling is needed client-side.
  */
 @RestController
 @RequestMapping("/api/v1/buses")
+@RequiredArgsConstructor
 @PreAuthorize("hasAnyAuthority('FLEET_MANAGER', 'ROLE_FLEET_MANAGER')")
+@Tag(name = "Bus Registry",
+        description = "Create, read, update and delete buses in the fleet registry (US-01)")
 public class BusController {
 
-    private final BusRepository busRepository;
-    private final TripRepository tripRepository;
+    private final BusService busService;
 
-    public BusController(BusRepository busRepository, TripRepository tripRepository) {
-        this.busRepository = busRepository;
-        this.tripRepository = tripRepository;
+    @GetMapping(produces = "application/json")
+    @Operation(summary = "List buses",
+            description = "Optional free-text search plus status and route filters.")
+    public ResponseEntity<List<BusDTO>> getAll(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String routeId) {
+        return ResponseEntity.ok(busService.getAll(search, status, routeId));
     }
 
-    /** Editable fields accepted from the client. busId is server-assigned. */
-    public record BusRequest(String targa,
-                             Integer numeroPosti,
-                             Boolean wheelchairAccessible,
-                             Boolean disponibile,
-                             String currentVehicleId) {}
-
-    private static ResponseEntity<?> error(HttpStatus status, String msg) {
-        return ResponseEntity.status(status).body(Map.of("error", msg));
+    @GetMapping(value = "/route-options", produces = "application/json")
+    @Operation(summary = "Routes available for assignment / filtering")
+    public ResponseEntity<List<Map<String, String>>> getRouteOptions() {
+        return ResponseEntity.ok(busService.getRouteOptions());
     }
 
-    @GetMapping
-    public List<Bus> list() {
-        return busRepository.findAll(Sort.by(Sort.Direction.ASC, "busId"));
+    @GetMapping(value = "/{id}", produces = "application/json")
+    @Operation(summary = "Get a single bus by id")
+    public ResponseEntity<BusDTO> getById(@PathVariable Integer id) {
+        return ResponseEntity.ok(busService.getById(id));
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<?> get(@PathVariable Integer id) {
-        Bus b = busRepository.findById(id).orElse(null);
-        if (b == null) return error(HttpStatus.NOT_FOUND, "Bus not found.");
-        return ResponseEntity.ok(b);
+    @PostMapping(consumes = "application/json", produces = "application/json")
+    @Operation(summary = "Create a bus (FLEET_MANAGER only)")
+    public ResponseEntity<BusDTO> create(@Valid @RequestBody BusDTO dto) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(busService.create(dto));
     }
 
-    @PostMapping
-    public ResponseEntity<?> create(@RequestBody BusRequest req) {
-        String targa = normalizeTarga(req.targa());
-        String cvid  = blankToNull(req.currentVehicleId());
-        String bad = validate(targa, req.numeroPosti(), cvid);
-        if (bad != null) return error(HttpStatus.BAD_REQUEST, bad);
-        if (busRepository.existsByTarga(targa))
-            return error(HttpStatus.CONFLICT, "A bus with plate '" + targa + "' already exists.");
-        if (cvid != null && busRepository.existsByCurrentVehicleId(cvid))
-            return error(HttpStatus.CONFLICT, "Vehicle id '" + cvid + "' is already assigned to another bus.");
-
-        Bus b = new Bus();
-        apply(b, targa, req, cvid);
-        return ResponseEntity.status(HttpStatus.CREATED).body(busRepository.save(b));
+    @PutMapping(value = "/{id}", consumes = "application/json", produces = "application/json")
+    @Operation(summary = "Update a bus (FLEET_MANAGER only)")
+    public ResponseEntity<BusDTO> update(@PathVariable Integer id,
+                                         @Valid @RequestBody BusDTO dto) {
+        return ResponseEntity.ok(busService.update(id, dto));
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<?> update(@PathVariable Integer id, @RequestBody BusRequest req) {
-        Bus b = busRepository.findById(id).orElse(null);
-        if (b == null) return error(HttpStatus.NOT_FOUND, "Bus not found.");
-        String targa = normalizeTarga(req.targa());
-        String cvid  = blankToNull(req.currentVehicleId());
-        String bad = validate(targa, req.numeroPosti(), cvid);
-        if (bad != null) return error(HttpStatus.BAD_REQUEST, bad);
-        if (busRepository.existsByTargaAndBusIdNot(targa, id))
-            return error(HttpStatus.CONFLICT, "A bus with plate '" + targa + "' already exists.");
-        if (cvid != null && busRepository.existsByCurrentVehicleIdAndBusIdNot(cvid, id))
-            return error(HttpStatus.CONFLICT, "Vehicle id '" + cvid + "' is already assigned to another bus.");
-
-        apply(b, targa, req, cvid);
-        return ResponseEntity.ok(busRepository.save(b));
+    /**
+     * PUT rather than PATCH on purpose: SecurityConfig only declares
+     * FLEET_MANAGER rules for POST/PUT/DELETE, so a PATCH route would fall
+     * through to the generic "authenticated" rule and be writable by any
+     * logged-in user.
+     */
+    @PutMapping(value = "/{id}/visibility", produces = "application/json")
+    @Operation(summary = "Show or hide this bus on the fleet map (FLEET_MANAGER only)")
+    public ResponseEntity<BusDTO> setVisibility(@PathVariable Integer id,
+                                                @RequestParam boolean visible) {
+        return ResponseEntity.ok(busService.setMapVisible(id, visible));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> delete(@PathVariable Integer id) {
-        Bus b = busRepository.findById(id).orElse(null);
-        if (b == null) return error(HttpStatus.NOT_FOUND, "Bus not found.");
-        long trips = tripRepository.countByBusBusId(id);
-        if (trips > 0)
-            return error(HttpStatus.CONFLICT,
-                    "Cannot delete: this bus is assigned to " + trips + " trip(s). "
-                            + "Reassign or remove those trips first.");
-        busRepository.delete(b);
+    @Operation(summary = "Delete a bus (FLEET_MANAGER only)")
+    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+        busService.delete(id);
         return ResponseEntity.noContent().build();
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────────
-    private static void apply(Bus b, String targa, BusRequest req, String cvid) {
-        b.setTarga(targa);
-        b.setNumeroPosti(req.numeroPosti());
-        b.setWheelchairAccessible(Boolean.TRUE.equals(req.wheelchairAccessible()));
-        b.setDisponibile(req.disponibile() == null ? Boolean.TRUE : req.disponibile());
-        b.setCurrentVehicleId(cvid);
+    // ── Error handling ──────────────────────────────────────────────
+    // server.error.include-message is intentionally NOT enabled globally
+    // (it would leak internal messages across the whole app). These handlers
+    // are scoped to this controller only, so the Data Management UI can show
+    // useful validation feedback without weakening that global setting.
+
+    /** Duplicate plate / unknown route / missing bus → readable message. */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleStatus(ResponseStatusException ex) {
+        return ResponseEntity.status(ex.getStatusCode())
+                .body(Map.of(
+                        "status", ex.getStatusCode().value(),
+                        "message", ex.getReason() == null ? "Request failed" : ex.getReason()));
     }
 
-    private static String normalizeTarga(String t) {
-        return t == null ? null : t.trim().toUpperCase();
-    }
-
-    private static String blankToNull(String s) {
-        if (s == null) return null;
-        String t = s.trim();
-        return t.isEmpty() ? null : t;
-    }
-
-    private static String validate(String targa, Integer posti, String cvid) {
-        if (targa == null || targa.isEmpty()) return "Plate (targa) is required.";
-        if (targa.length() > 20)             return "Plate is too long (max 20 characters).";
-        if (posti == null)                   return "Number of seats is required.";
-        if (posti < 1 || posti > 300)        return "Number of seats must be between 1 and 300.";
-        if (cvid != null && cvid.length() > 50) return "Vehicle id is too long (max 50 characters).";
-        return null;
+    /** Bean-validation failures (@NotBlank, @Min, @Pattern) → first field message. */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
+        String message = ex.getBindingResult().getFieldErrors().stream()
+                .map(DefaultMessageSourceResolvable::getDefaultMessage)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse("Invalid bus data");
+        return ResponseEntity.badRequest()
+                .body(Map.of("status", 400, "message", message));
     }
 }
