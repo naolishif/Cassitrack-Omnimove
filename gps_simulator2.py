@@ -68,6 +68,7 @@ STEPS_BETWEEN_STOPS  = 12      # interpolation points between each pair of stops
 GPS_NOISE_METRES     = 6       # ±6m GPS jitter
 MAX_SPEED_KMH        = 50
 MIN_SPEED_KMH        = 12
+MAX_DELAY_MINUTES    = 20
 BUS_CAPACITY         = {       # from buses.numero_posti
     "MAGNI-001": 85,
     "MAGNI-002": 85,

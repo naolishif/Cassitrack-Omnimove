@@ -1496,3 +1496,323 @@
         const pill = e.target.closest('.route-pill[data-route-id]');
         if (pill) { toggleRoute(pill.dataset.routeId, false); renderRouteDropdown(); }
     });
+
+    const dmState = {
+        search:     '',
+        status:     '',
+        routeId:    '',
+        editingId:  null,   // null = creating, number = editing
+        deletingId: null,
+        routes:     []
+    };
+
+    /* ── Loading ──────────────────────────────────────────────────── */
+
+    async function dmLoadRoutes() {
+        try {
+            const r = await fetch(`${API}/buses/route-options`);
+            if (!r.ok) return;
+            dmState.routes = await r.json();
+
+            const options = dmState.routes
+                .map(rt => `<option value="${escHtml(rt.id)}">${escHtml(rt.label)}</option>`)
+                .join('');
+
+            document.getElementById('dmFilterRoute').innerHTML =
+                '<option value="">All routes</option><option value="UNASSIGNED">Unassigned</option>' + options;
+
+            document.getElementById('dmRoute').innerHTML =
+                '<option value="">— Unassigned —</option>' + options;
+        } catch (e) {
+            console.warn('Could not load route options', e);
+        }
+    }
+
+    async function dmLoadBuses() {
+        const body = document.getElementById('dmTableBody');
+        body.innerHTML = '<tr><td colspan="8" class="dm-empty">Loading…</td></tr>';
+
+        const params = new URLSearchParams();
+        if (dmState.search)  params.set('search',  dmState.search);
+        if (dmState.status)  params.set('status',  dmState.status);
+        if (dmState.routeId) params.set('routeId', dmState.routeId);
+
+        try {
+            const r = await fetch(`${API}/buses?${params.toString()}`);
+            if (!r.ok) throw new Error(r.status);
+            dmRenderTable(await r.json());
+        } catch (e) {
+            body.innerHTML = '<tr><td colspan="8" class="dm-empty">Could not load buses.</td></tr>';
+            document.getElementById('dmCount').textContent = '';
+        }
+    }
+
+    /* ── Rendering ────────────────────────────────────────────────── */
+
+    function dmStatusPill(status) {
+        const map = {
+            ACTIVE:      ['dm-pill-active',      'ACTIVE'],
+            INACTIVE:    ['dm-pill-inactive',    'INACTIVE'],
+            MAINTENANCE: ['dm-pill-maintenance', 'MAINTENANCE']
+        };
+        const [cls, label] = map[status] || ['dm-pill-inactive', escHtml(status || '—')];
+        return `<span class="dm-pill ${cls}">${label}</span>`;
+    }
+
+    function dmRenderTable(buses) {
+        const body = document.getElementById('dmTableBody');
+        const count = document.getElementById('dmCount');
+
+        if (!buses.length) {
+            const filtering = dmState.search || dmState.status || dmState.routeId;
+            body.innerHTML = `<tr><td colspan="8" class="dm-empty">${
+                filtering ? 'No buses match these filters.' : 'No buses yet — click “+ New bus”.'
+            }</td></tr>`;
+            count.textContent = '';
+            return;
+        }
+
+        body.innerHTML = buses.map(b => `
+        <tr>
+            <td class="dm-muted">#${b.busId}</td>
+            <td class="dm-plate">${escHtml(b.targa)}${b.wheelchairAccessible ? ' ♿' : ''}</td>
+            <td>${b.routeName ? escHtml(b.routeName) : '<span class="dm-muted">Unassigned</span>'}</td>
+            <td class="dm-num">${b.numeroPosti}</td>
+            <td>${dmStatusPill(b.status)}</td>
+            <td class="dm-muted">${b.currentVehicleId ? escHtml(b.currentVehicleId) : '—'}</td>
+            <td class="dm-center">
+                <label class="dm-switch">
+                    <input type="checkbox" data-vis-id="${b.busId}" ${b.mapVisible ? 'checked' : ''}>
+                    <span class="dm-slider"></span>
+                </label>
+            </td>
+            <td class="dm-right">
+                <button class="dm-row-btn" data-edit-id="${b.busId}">Edit</button>
+                <button class="dm-row-btn dm-row-del" data-del-id="${b.busId}"
+                        data-plate="${escHtml(b.targa)}">Delete</button>
+            </td>
+        </tr>`).join('');
+
+        count.textContent = `${buses.length} bus${buses.length === 1 ? '' : 'es'}`;
+    }
+
+    /* ── Drawer ───────────────────────────────────────────────────── */
+
+    function dmOpenDrawer() {
+        document.getElementById('dmDrawer').classList.add('open');
+        document.getElementById('dmDrawer').setAttribute('aria-hidden', 'false');
+        document.getElementById('dmDrawerBackdrop').classList.add('open');
+        setTimeout(() => document.getElementById('dmTarga').focus(), 260);
+    }
+
+    function dmCloseDrawer() {
+        document.getElementById('dmDrawer').classList.remove('open');
+        document.getElementById('dmDrawer').setAttribute('aria-hidden', 'true');
+        document.getElementById('dmDrawerBackdrop').classList.remove('open');
+        dmHideError();
+    }
+
+    function dmOpenCreate() {
+        dmState.editingId = null;
+        document.getElementById('dmDrawerTitle').textContent = 'New bus';
+        document.getElementById('dmTarga').value      = '';
+        document.getElementById('dmCapacity').value   = '';
+        document.getElementById('dmRoute').value      = '';
+        document.getElementById('dmStatus').value     = 'ACTIVE';
+        document.getElementById('dmVehicleId').value  = '';
+        document.getElementById('dmAccessible').checked = false;
+        document.getElementById('dmMapVisible').checked = true;
+        dmHideError();
+        dmOpenDrawer();
+    }
+
+    async function dmOpenEdit(id) {
+        try {
+            const r = await fetch(`${API}/buses/${id}`);
+            if (!r.ok) throw new Error(r.status);
+            const b = await r.json();
+
+            dmState.editingId = b.busId;
+            document.getElementById('dmDrawerTitle').textContent = 'Edit bus ' + b.targa;
+            document.getElementById('dmTarga').value      = b.targa || '';
+            document.getElementById('dmCapacity').value   = b.numeroPosti ?? '';
+            document.getElementById('dmRoute').value      = b.routeId || '';
+            document.getElementById('dmStatus').value     = b.status || 'ACTIVE';
+            document.getElementById('dmVehicleId').value  = b.currentVehicleId || '';
+            document.getElementById('dmAccessible').checked = !!b.wheelchairAccessible;
+            document.getElementById('dmMapVisible').checked = !!b.mapVisible;
+            dmHideError();
+            dmOpenDrawer();
+        } catch (e) {
+            alert('Could not load that bus.');
+        }
+    }
+
+    function dmShowError(msg) {
+        const el = document.getElementById('dmFormError');
+        el.textContent = msg;
+        el.classList.add('show');
+    }
+
+    function dmHideError() {
+        document.getElementById('dmFormError').classList.remove('show');
+    }
+
+    /* ── Save ─────────────────────────────────────────────────────── */
+
+    async function dmSave() {
+        dmHideError();
+
+        const targa    = document.getElementById('dmTarga').value.trim();
+        const capacity = parseInt(document.getElementById('dmCapacity').value, 10);
+
+        if (!targa)                     return dmShowError('Plate is required.');
+        if (!capacity || capacity < 1)  return dmShowError('Capacity must be at least 1.');
+
+        const payload = {
+            targa:                targa,
+            numeroPosti:          capacity,
+            routeId:              document.getElementById('dmRoute').value || null,
+            status:               document.getElementById('dmStatus').value,
+            currentVehicleId:     document.getElementById('dmVehicleId').value.trim() || null,
+            wheelchairAccessible: document.getElementById('dmAccessible').checked,
+            mapVisible:           document.getElementById('dmMapVisible').checked
+        };
+
+        const btn = document.getElementById('dmSaveBtn');
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+
+        try {
+            const editing = dmState.editingId !== null;
+            const r = await fetch(editing ? `${API}/buses/${dmState.editingId}` : `${API}/buses`, {
+                method:  editing ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify(payload)
+            });
+
+            if (!r.ok) {
+                if (r.status === 403) return dmShowError('You need FLEET_MANAGER rights to do this.');
+                const data = await r.json().catch(() => ({}));
+                return dmShowError(data.message || `Save failed (${r.status}).`);
+            }
+
+            dmCloseDrawer();
+            dmLoadBuses();
+        } catch (e) {
+            dmShowError('Could not reach the server.');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Save';
+        }
+    }
+
+    /* ── Map-visibility toggle ────────────────────────────────────── */
+
+    async function dmToggleVisibility(id, visible, checkbox) {
+        try {
+            const r = await fetch(`${API}/buses/${id}/visibility?visible=${visible}`, { method: 'PUT' });
+            if (!r.ok) throw new Error(r.status);
+        } catch (e) {
+            checkbox.checked = !visible;          // revert the switch on failure
+            alert('Could not update map visibility.');
+        }
+    }
+
+    /* ── Delete ───────────────────────────────────────────────────── */
+
+    function dmAskDelete(id, plate) {
+        dmState.deletingId = id;
+        document.getElementById('dmConfirmText').textContent =
+            `Delete bus ${plate}? This removes it from the registry permanently.`;
+        document.getElementById('dmConfirmBackdrop').classList.add('open');
+    }
+
+    function dmCloseConfirm() {
+        dmState.deletingId = null;
+        document.getElementById('dmConfirmBackdrop').classList.remove('open');
+    }
+
+    async function dmDoDelete() {
+        const id = dmState.deletingId;
+        if (id === null) return;
+        try {
+            const r = await fetch(`${API}/buses/${id}`, { method: 'DELETE' });
+            if (r.status === 403) { alert('You need FLEET_MANAGER rights to delete buses.'); return; }
+            if (!r.ok && r.status !== 204) { alert(`Delete failed (${r.status}).`); return; }
+            dmCloseConfirm();
+            dmLoadBuses();
+        } catch (e) {
+            alert('Could not reach the server.');
+        }
+    }
+
+    /* ── Filters ──────────────────────────────────────────────────── */
+
+    let dmSearchTimer = null;
+
+    function dmApplySearch(value) {
+        clearTimeout(dmSearchTimer);
+        dmSearchTimer = setTimeout(() => {
+            dmState.search = value.trim();
+            dmLoadBuses();
+        }, 250);                                  // debounce so we don't hit the API per keystroke
+    }
+
+    function dmResetFilters() {
+        dmState.search = dmState.status = dmState.routeId = '';
+        document.getElementById('dmSearch').value = '';
+        document.getElementById('dmFilterStatus').value = '';
+        document.getElementById('dmFilterRoute').value = '';
+        dmLoadBuses();
+    }
+
+    /* ── Wiring (all addEventListener — CSP-safe) ─────────────────── */
+
+    document.getElementById('topBtnDataMgmt').addEventListener('click', e => {
+        switchTopView('data-management', e.currentTarget);
+        if (!dmState.routes.length) dmLoadRoutes();
+        dmLoadBuses();
+    });
+
+    document.getElementById('dmSearch').addEventListener('input', e => dmApplySearch(e.target.value));
+    document.getElementById('dmFilterStatus').addEventListener('change', e => {
+        dmState.status = e.target.value; dmLoadBuses();
+    });
+    document.getElementById('dmFilterRoute').addEventListener('change', e => {
+        dmState.routeId = e.target.value; dmLoadBuses();
+    });
+    document.getElementById('dmResetBtn').addEventListener('click', dmResetFilters);
+    document.getElementById('dmNewBtn').addEventListener('click', dmOpenCreate);
+
+    document.getElementById('dmDrawerClose').addEventListener('click', dmCloseDrawer);
+    document.getElementById('dmCancelBtn').addEventListener('click', dmCloseDrawer);
+    document.getElementById('dmDrawerBackdrop').addEventListener('click', dmCloseDrawer);
+    document.getElementById('dmSaveBtn').addEventListener('click', dmSave);
+
+    document.getElementById('dmConfirmCancel').addEventListener('click', dmCloseConfirm);
+    document.getElementById('dmConfirmOk').addEventListener('click', dmDoDelete);
+    document.getElementById('dmConfirmBackdrop').addEventListener('click', e => {
+        if (e.target.id === 'dmConfirmBackdrop') dmCloseConfirm();
+    });
+
+    // Rows are generated at runtime → delegate from the stable <tbody>
+    document.getElementById('dmTableBody').addEventListener('click', e => {
+        const edit = e.target.closest('[data-edit-id]');
+        if (edit) { dmOpenEdit(Number(edit.dataset.editId)); return; }
+
+        const del = e.target.closest('[data-del-id]');
+        if (del) { dmAskDelete(Number(del.dataset.delId), del.dataset.plate); }
+    });
+
+    document.getElementById('dmTableBody').addEventListener('change', e => {
+        const cb = e.target.closest('input[data-vis-id]');
+        if (cb) dmToggleVisibility(Number(cb.dataset.visId), cb.checked, cb);
+    });
+
+    // Esc closes whatever is open
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('dmConfirmBackdrop').classList.contains('open')) dmCloseConfirm();
+        else if (document.getElementById('dmDrawer').classList.contains('open')) dmCloseDrawer();
+    });
