@@ -98,6 +98,9 @@ services:
       APP_BASE_URL: ${APP_BASE_URL}
       # Context path — must match the Nginx location prefix
       SERVER_SERVLET_CONTEXT_PATH: ${SERVER_SERVLET_CONTEXT_PATH:-/omnimove}
+      # Was set in .env but not forwarded, so the container fell back to the
+      # application.yml default (false) regardless of the deployment setting.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
       - "127.0.0.1:8180:8180"
     profiles:
