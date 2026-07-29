@@ -1,13 +1,17 @@
 package it.unicas.cassitrack.service;
 
 import it.unicas.cassitrack.dto.VehicleStatusDTO;
+import it.unicas.cassitrack.model.Bus;
 import it.unicas.cassitrack.model.VehiclePosition;
+import it.unicas.cassitrack.repository.BusRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -27,16 +31,21 @@ import java.util.Optional;
 public class VehicleService {
 
     private final VehicleStateCache vehicleStateCache;
+    private final BusRepository busRepository;
 
     /**
      * Returns current status of ALL active vehicles.
      * Used by: GET /api/v1/vehicles
      */
     public List<VehicleStatusDTO> getAllActiveVehicles() {
-        List<VehicleStatusDTO> list = vehicleStateCache.getActive().stream()
-                .map(this::toStatusDTO)
+        // buses.map_visible is read here rather than carried on the cached
+        // position, so toggling "On map" in Data Management takes effect on the
+        // very next poll instead of waiting for the bus to transmit again —
+        // which, on the one-message-per-minute OBU feed, could be a long wait.
+        Map<String, Boolean> visibility = mapVisibilityByVehicleId();
+        return vehicleStateCache.getActive().stream()
+                .map(pos -> toStatusDTO(pos, visibility.get(pos.getVehicleId())))
                 .toList();
-        return list;
     }
 
     /**
@@ -45,7 +54,27 @@ public class VehicleService {
      */
     public Optional<VehicleStatusDTO> getVehicleById(String vehicleId) {
         return vehicleStateCache.get(vehicleId)
-            .map(this::toStatusDTO);
+            .map(pos -> toStatusDTO(pos,
+                    busRepository.findByCurrentVehicleId(vehicleId)
+                            .map(Bus::getMapVisible)
+                            .orElse(null)));
+    }
+
+    /**
+     * vehicle_id → map_visible for the whole fleet, in one query.
+     *
+     * Keyed on current_vehicle_id because that is what telemetry arrives under.
+     * Buses with no unit assigned are simply absent, and a null result is
+     * treated as visible by the caller.
+     */
+    private Map<String, Boolean> mapVisibilityByVehicleId() {
+        Map<String, Boolean> out = new HashMap<>();
+        for (Bus b : busRepository.findAll()) {
+            if (b.getCurrentVehicleId() != null) {
+                out.put(b.getCurrentVehicleId(), b.getMapVisible());
+            }
+        }
+        return out;
     }
 
     /**
@@ -53,7 +82,7 @@ public class VehicleService {
      * This is where we'll plug in schedule adherence and ETA
      * computation once those services are built.
      */
-    private VehicleStatusDTO toStatusDTO(VehiclePosition pos) {
+    private VehicleStatusDTO toStatusDTO(VehiclePosition pos, Boolean mapVisible) {
         boolean active = vehicleStateCache.isActive(pos.getVehicleId());
 
         Integer estimatedPassengers = CrowdingService.effectivePassengers(
@@ -70,6 +99,9 @@ public class VehicleService {
 
         return VehicleStatusDTO.builder()
                 .vehicleId(pos.getVehicleId())
+                // null = no bus row / never set → treated as visible, so a bus
+                // is only hidden when someone has explicitly turned it off.
+                .mapVisible(mapVisible == null || mapVisible)
                 .busId(pos.getBusId())
                 .numeroPosti(pos.getNumeroPosti())
                 .wheelchairAccessible(pos.getWheelchairAccessible())

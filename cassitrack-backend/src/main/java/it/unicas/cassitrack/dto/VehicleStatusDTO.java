@@ -22,6 +22,15 @@ public class VehicleStatusDTO {
     @JsonProperty("vehicle_id")
     private String vehicleId;
 
+    /**
+     * Whether this bus should be drawn on the fleet map — the persisted
+     * buses.map_visible flag, toggled from Data Management. Read fresh on every
+     * request so the toggle applies immediately; null is never sent, the
+     * service resolves it to TRUE.
+     */
+    @JsonProperty("map_visible")
+    private Boolean mapVisible;
+
     /** this id is used to link the MQTT message to the relative bus in the postgres DB */
     private Integer busId;
 
