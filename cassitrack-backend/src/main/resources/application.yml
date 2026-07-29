@@ -50,8 +50,19 @@ spring:
 # ── Server ───────────────────────────────────────────────────────
 server:
   port: 8280
-  #servlet:
-  #  context-path: /
+  servlet:
+    # Nginx is the only public entry point and routes BY context path:
+    #     /cassitrack/ -> 127.0.0.1:8280
+    #     /omnimove/   -> 127.0.0.1:8180
+    # It passes the prefix through, so the app must serve under it.
+    #
+    # The default is set here rather than relying on the environment variable
+    # alone: previously this was commented out and worked only through Spring's
+    # relaxed binding of SERVER_SERVLET_CONTEXT_PATH. If that variable were ever
+    # missing the app would silently serve at "/" and every proxied request
+    # would 404 — with nothing in the log to say why. OmniMove already defaults
+    # its own path the same way.
+    context-path: ${SERVER_SERVLET_CONTEXT_PATH:/cassitrack}
 
 # ── InfluxDB ──────────────────────────────────────────────────────
 influx:
