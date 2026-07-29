@@ -167,8 +167,16 @@ def next_version(migration_dir):
     return max(used) + 1 if used else 1
 
 
-def to_sql(routes, source_name):
-    """Render the shape rows as an idempotent Flyway migration."""
+def to_sql(routes, source_name, guard_missing_routes=False):
+    """Render the shape rows as an idempotent Flyway migration.
+
+    `guard_missing_routes` wraps each INSERT so rows whose route is not in the
+    `routes` table are skipped instead of tripping the foreign key. Needed for
+    OmniMove, whose routes are not seeded by migrations at all — they arrive at
+    runtime through the NeTEx import — so on a fresh database `routes` is still
+    empty when this migration runs. CassiTrack seeds LINEA_* in V5, before the
+    geometry migration, so there the plain INSERT is correct and stays.
+    """
     out = [
         "-- ────────────────────────────────────────────────────────────────",
         "-- CASSITRACK",
@@ -185,17 +193,38 @@ def to_sql(routes, source_name):
         "",
     ]
 
+    if guard_missing_routes:
+        out += [
+            "-- NOTE: each INSERT is guarded with EXISTS on `routes`. OmniMove does",
+            "-- not seed routes in migrations — they arrive at runtime via the NeTEx",
+            "-- import — so on a fresh database `routes` is empty here and an",
+            "-- unguarded insert would fail the foreign key. Skipped geometry is not",
+            "-- lost: NetexImportService writes it on the next import.",
+            "",
+        ]
+
     for route_id, src, points, _ in routes:
         out.append(f"-- ── {route_id}  (editor id: {src}, {len(points)} points) ──")
         # Re-runnable: drop this route's old path before inserting the new one.
         out.append(f"DELETE FROM route_shapes WHERE route_id = '{route_id}';")
-        out.append("INSERT INTO route_shapes (route_id, seq, lat, lon, is_stop) VALUES")
+
         rows = [
             f"    ('{route_id}', {i}, {p['lat']:.6f}, {p['lon']:.6f}, "
             f"{'TRUE' if p.get('stop') else 'FALSE'})"
             for i, p in enumerate(points)
         ]
-        out.append(",\n".join(rows) + ";")
+
+        if guard_missing_routes:
+            out.append("INSERT INTO route_shapes (route_id, seq, lat, lon, is_stop)")
+            out.append("SELECT v.route_id, v.seq, v.lat, v.lon, v.is_stop")
+            out.append("FROM (VALUES")
+            out.append(",\n".join(rows))
+            out.append(") AS v(route_id, seq, lat, lon, is_stop)")
+            out.append(f"WHERE EXISTS (SELECT 1 FROM routes r "
+                       f"WHERE r.id = '{route_id}');")
+        else:
+            out.append("INSERT INTO route_shapes (route_id, seq, lat, lon, is_stop) VALUES")
+            out.append(",\n".join(rows) + ";")
         out.append("")
 
     return "\n".join(out)
@@ -277,27 +306,29 @@ def main():
         to_db(routes)
         return
 
-    sql = to_sql(routes, os.path.basename(args.json_file))
-
     if args.out:
-        targets = [args.out]
+        # An explicit path still needs to know which dialect to emit; infer it
+        # from the backend the path points at.
+        targets = [(args.out, "omnimove" in args.out.replace("\\", "/"))]
     else:
         names = (["cassitrack", "omnimove"] if args.target == "both"
                  else [args.target])
         # Each backend numbers its migrations independently, so the version is
         # resolved per directory rather than shared.
         targets = [
-            os.path.join(MIGRATION_DIRS[n],
-                         f"V{next_version(MIGRATION_DIRS[n])}__route_shapes_cassino.sql")
+            (os.path.join(MIGRATION_DIRS[n],
+                          f"V{next_version(MIGRATION_DIRS[n])}__route_shapes_cassino.sql"),
+             n == "omnimove")
             for n in names
         ]
 
     print()
-    for out in targets:
+    for out, guard in targets:
         os.makedirs(os.path.dirname(out), exist_ok=True)
-        with open(out, "w", encoding="utf-8") as f:
-            f.write(sql)
-        print(f"Wrote {out}")
+        with open(out, "w", encoding="utf-8", newline="\n") as f:
+            f.write(to_sql(routes, os.path.basename(args.json_file),
+                           guard_missing_routes=guard))
+        print(f"Wrote {out}" + ("  (guarded against missing routes)" if guard else ""))
     print("\nApply by restarting the backend(s) — Flyway runs on startup.")
 
 

@@ -91,11 +91,30 @@
                     ? route.path.map(p => [p.lat, p.lon])
                     : route.stops.map(s => [s.lat, s.lon]);
 
-                routePolylines[route.id] = L.polyline(latlngs,
+                const pl = L.polyline(latlngs,
                     // Solid when it traces the real roads; dashed stays the
                     // visual cue that a line is only a schematic guess.
                     {color, weight:4, opacity:.8, ...(hasPath ? {} : {dashArray:'8 8'})}
                 ).addTo(map);
+                routePolylines[route.id] = pl;
+
+                // Click a line to filter the fleet down to that route; click the
+                // same line again to clear. A 4px stroke is a small target, so a
+                // wider transparent line is laid underneath to catch the click —
+                // the visible weight stays unchanged.
+                const hit = L.polyline(latlngs,
+                    // interactive:true is explicit — a fully transparent stroke
+                    // must still receive pointer events for this to work.
+                    {color, weight:18, opacity:0, interactive:true}).addTo(map);
+                routeHitAreas[route.id] = hit;
+                [pl, hit].forEach(layer=>{
+                    layer.on('click', e=>{
+                        L.DomEvent.stopPropagation(e);   // don't let the map clear the selection
+                        toggleRouteFilter(route.id);
+                    });
+                    layer.on('mouseover', ()=>{ if(routeFilter !== route.id) pl.setStyle({weight:6}); });
+                    layer.on('mouseout',  ()=>{ if(routeFilter !== route.id) pl.setStyle({weight:4}); });
+                });
 
                 // accumula le fermate, unendo le linee che le servono
                 route.stops.forEach(s=>{
@@ -156,6 +175,7 @@
     let selectedVeh=null,lastUpdate=null;
     const routeColors = {};   // id linea -> colore, riempita all'avvio
     const routePolylines = {};// id linea -> polilinea Leaflet (per mostrare/nascondere)
+    const routeHitAreas  = {};// id linea -> polilinea invisibile e piu' spessa, solo per il click
     let lastVehicles = [];    // ultima lista /vehicles ricevuta (per filtrare percorsi/fermate)
     const stopMap = {};   // stopId -> { name, lat, lon, lines:[{name,color}] }
     let fleetSize = 4;
@@ -251,6 +271,14 @@
                 // apply them once Leaflet actually renders the popup into the DOM.
                 m.on('popupopen', e => applyDynStyles(e.popup.getElement()));
                 m.on('click',()=>selV(v.vehicle_id));
+                // Closing the popup with its × means the same thing as
+                // "← Back to fleet": drop the focus and show the whole fleet.
+                //
+                // Guarded on the bus still being the selected one. Selecting a
+                // DIFFERENT bus makes Leaflet auto-close this popup, and by then
+                // selectedVeh is already the other bus — without the guard that
+                // would immediately deselect the bus just picked.
+                m.on('popupclose',()=>{ if(selectedVeh===v.vehicle_id) selV(v.vehicle_id); });
                 markers[v.vehicle_id]=m;
             }
             markers[v.vehicle_id].setPopupContent(popupV(v));
@@ -408,6 +436,11 @@
     function selV(id){
         if(selectedVeh===id){            // click the same bus again → deselect, back to full fleet list
             selectedVeh=null;
+            // Close the popup too, so every route back to the full fleet — the
+            // card's ×, "← Back to fleet", or re-clicking the bus — leaves the
+            // map in the same state. Re-entrant safe: this fires popupclose,
+            // whose handler sees selectedVeh is already null and does nothing.
+            markers[id]?.closePopup();
         }else{
             selectedVeh=id;const v=vehicleData[id];
             if(v && !hiddenBuses.has(id)){map.flyTo([v.lat,v.lon],16,{duration:1});markers[id]?.openPopup();}
@@ -433,24 +466,56 @@
         // Routes with no bus on them — and routes whose only buses are toggled off —
         // are hidden, together with their stops.
         let showSet;
+        // `explicit` = the user narrowed the view deliberately (picked a bus, or
+        // set the route filter). Only then do we hide the other lines.
+        let explicit = false;
         if(selectedVeh && vehicleData[selectedVeh]){
             const r = vehicleData[selectedVeh].route_id;
             showSet = new Set(r ? [r] : []);
+            explicit = true;
         } else if(routeFilter){
             showSet = new Set([routeFilter]);
+            explicit = true;
         } else {
             showSet = new Set();
             lastVehicles.forEach(v=>{ if(v.route_id && !hiddenBuses.has(v.vehicle_id) && busPassesFilter(v)) showSet.add(v.route_id); });
         }
-        // Route polylines
+        // Route polylines.
+        //
+        // A route's geometry is permanent infrastructure: the road does not stop
+        // existing because no bus happens to be on it right now. Hiding a line
+        // whenever its buses were between scheduled runs made lines vanish for
+        // long stretches (LINEA_2 sat idle most of the day before V13) and read
+        // as a rendering bug rather than as "no service at this hour".
+        //
+        // So with nothing selected, every route stays drawn — dimmed when it has
+        // no active bus, full strength when it does. A deliberate selection still
+        // isolates one line, which is the point of selecting.
         Object.entries(routePolylines).forEach(([rid, pl])=>{
-            if(showSet.has(rid)){ if(!map.hasLayer(pl)) pl.addTo(map); }
-            else if(map.hasLayer(pl)) map.removeLayer(pl);
+            const active = showSet.has(rid);
+            const hit    = routeHitAreas[rid];
+            // The invisible click target follows its line exactly — otherwise a
+            // hidden route would still be clickable.
+            if(explicit && !active){
+                if(map.hasLayer(pl)) map.removeLayer(pl);
+                if(hit && map.hasLayer(hit)) map.removeLayer(hit);
+                return;
+            }
+            if(!map.hasLayer(pl)) pl.addTo(map);
+            if(hit && !map.hasLayer(hit)) hit.addTo(map);
+            // The route being filtered on is drawn thicker, so the map shows
+            // which line the sidebar list has been narrowed to.
+            const selected = routeFilter === rid;
+            pl.setStyle({opacity: active ? .8 : .25, weight: selected ? 7 : 4});
+            if(hit) hit.bringToFront();      // keep the click target on top
         });
-        // Stops: shown only if they belong to at least one visible route
+        // Stops follow their route: hidden only when a deliberate selection has
+        // filtered that route away. Otherwise they stay on the map alongside the
+        // dimmed lines, so the network is always legible.
         Object.values(stopMap).forEach(st=>{
             if(!st.marker) return;
-            const show = st.routeIds && [...st.routeIds].some(rid=>showSet.has(rid));
+            const show = !explicit
+                || (st.routeIds && [...st.routeIds].some(rid=>showSet.has(rid)));
             if(show){ if(!map.hasLayer(st.marker)) st.marker.addTo(map); }
             else if(map.hasLayer(st.marker)) map.removeLayer(st.marker);
         });
@@ -465,6 +530,25 @@
         updateFleet(Object.values(vehicleData));
     }
     function setRouteFilter(rid){ routeFilter = rid || null; refreshFilters(); }
+
+    /**
+     * Filter the fleet to one route, or clear it when that route is already
+     * the active filter — so clicking the same line twice returns to "All".
+     *
+     * Keeps the sidebar dropdown in step: the map and the select are two ways
+     * of setting the SAME filter, and they must never disagree. Also clears any
+     * selected bus, because a bus selection overrides the route filter in
+     * updateRouteVisibility() and would otherwise mask the click.
+     */
+    function toggleRouteFilter(rid){
+        const next = (routeFilter === rid) ? '' : rid;
+        selectedVeh = null;
+        const sel = document.getElementById('routeFilter');
+        if(sel) sel.value = next;
+        // setRouteFilter -> refreshFilters -> updateFleet already redraws the
+        // sidebar list and the markers, so nothing else is needed here.
+        setRouteFilter(next);
+    }
     function setServiceFilter(val){ serviceFilter = val || 'all'; refreshFilters(); }
     function setDelayThreshold(min){ delayThreshold = Math.max(0, parseInt(min, 10) || 0); refreshFilters(); }
 

@@ -19,6 +19,8 @@ import it.unicas.cassitrack.mqtt.MqttMessageHandler;
 
 import javax.net.ssl.SSLSocketFactory;
 
+import java.util.UUID;
+
 /**
  * Configures the MQTT client that listens to messages from buses.
  *
@@ -162,6 +164,44 @@ public class MqttConfig {
     //  Dormant unless mqtt.obu.enabled=true, so local dev is unaffected.
     // ─────────────────────────────────────────────────────────────────
 
+    /** The value of mqtt.obu.client-id when nobody has configured one. */
+    private static final String DEFAULT_OBU_CLIENT_ID = "cassitrack-obu-bridge";
+
+    /**
+     * The client id for the OBU connection.
+     *
+     * WHY THIS ISN'T JUST A CONSTANT
+     * ------------------------------
+     * MQTT requires client ids to be unique per broker: connecting with an id
+     * already in use makes the broker disconnect the existing holder. The OBU
+     * broker is shared — the deployed server and every developer's laptop run
+     * this same code — so a single hardcoded id makes two instances kick each
+     * other off in a loop, seen as "Lost connection: Connection lost" every few
+     * seconds with only the odd message arriving in between.
+     *
+     * CONFIG FIRST
+     * ------------
+     * A client id is an IDENTITY, so it belongs in configuration. Set
+     * MQTT_OBU_CLIENT_ID per environment (e.g. cassitrack-obu-server in
+     * .env_server, cassitrack-obu-ferran in a developer's .env) and that value
+     * is used verbatim — which keeps the broker's connection log readable and
+     * leaves the door open to per-client ACLs or cleanSession=false later.
+     *
+     * The random suffix applies ONLY when the setting is still the untouched
+     * default, so a fresh clone cannot collide with a running server before
+     * anyone has configured anything. Deliberate values are never rewritten.
+     *
+     * The id is not truncated to the old MQTT 3.1 23-character limit: the
+     * previous 29-character id connected to this broker successfully, so it
+     * does not enforce that limit.
+     */
+    private String resolveObuClientId() {
+        if (!DEFAULT_OBU_CLIENT_ID.equals(obuClientId)) {
+            return obuClientId;                       // configured deliberately — respect it
+        }
+        return obuClientId + "-" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
     /**
      * Dedicated client factory for the OBU broker. Attaches a TLS socket
      * factory automatically when the URL uses the ssl:// scheme, validating the
@@ -200,7 +240,7 @@ public class MqttConfig {
     public MqttPahoMessageDrivenChannelAdapter obuMqttInbound() {
         MqttPahoMessageDrivenChannelAdapter adapter =
                 new MqttPahoMessageDrivenChannelAdapter(
-                        obuClientId + "-inbound",
+                        resolveObuClientId(),
                         obuMqttClientFactory(),
                         obuTopic
                 );
