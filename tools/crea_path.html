@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CassiTrack — Crea e Modifica Percorsi</title>
+
+  <!-- Leaflet: libreria mappe open-source (nessuna API key richiesta) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body { margin: 0; height: 100%; font-family: system-ui, Arial, sans-serif; }
+    #map { position: absolute; inset: 0; z-index: 0; }
+
+    /* Pannello in sovrimpressione */
+    #panel {
+      position: absolute; top: 12px; right: 12px; z-index: 1000;
+      width: 320px; max-height: calc(100% - 24px); overflow: auto;
+      background: rgba(255,255,255,.96); border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.25); padding: 12px 14px;
+    }
+    #panel h2 { margin: 0 0 6px; font-size: 16px; }
+    #hint { font-size: 12px; color: #444; line-height: 1.45; margin: 6px 0 10px; }
+    #hint b { color: #000; }
+    #count { font-weight: bold; margin: 8px 0; }
+
+    .line-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px; margin: 4px 0; border-radius: 6px;
+      cursor: pointer; user-select: none; border: 1px solid #eee;
+    }
+    .line-item:hover { background: #f2f6ff; }
+    .line-item.hidden { opacity: .45; }
+    .swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+    .line-item .name { flex: 1; font-size: 14px; }
+    .line-item .del { border: none; background: #e33; color: #fff; border-radius: 4px;
+                      width: 22px; height: 22px; cursor: pointer; font-size: 14px; line-height: 1; flex: none; }
+
+    .row { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+    .row input[type=text] { flex: 1; padding: 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+    button.act { padding: 7px 10px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; color: #fff; }
+    #loadBtn { background: #37f; width: 100%; }
+    #undoBtn { background: #e67e22; width: 100%; }
+    #saveBtn { background: #2a7; }
+    #showAll { background: #37f; }
+    #hideAll { background: #888; }
+    #status { font-size: 12px; margin-top: 8px; min-height: 16px; color: #c50; }
+    .legend { font-size: 12px; color: #333; margin-top: 6px; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; margin-right: 10px; }
+    .lg-stop { width: 13px; height: 13px; border-radius: 50%; background: #fff; border: 3px solid #555; }
+    .lg-way  { width: 13px; height: 13px; border-radius: 50%; background: #555; border: 2px solid #fff; }
+
+    /* La linea segnala che è trascinabile */
+    .leaflet-interactive { cursor: grab; }
+    /* Marker di editing sulla mappa */
+    .vtx { width: 13px; height: 13px; border-radius: 50%; border: 2px solid #fff;
+           box-shadow: 0 0 3px rgba(0,0,0,.55); cursor: move; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="panel">
+    <h2>🚌 CassiTrack — Crea / Modifica Percorsi</h2>
+    <div id="hint">
+      <u>Creare un percorso</u>: <b>doppio click</b> = nuovo percorso (primo punto = capolinea) /
+      lo chiude · <b>click sinistro</b> = punto di passaggio · <b>click destro</b> = fermata.<br>
+      <u>Modificare</u>: <b>carica</b> un JSON, poi <b>trascina la linea</b> tra due fermate per
+      aggiungere un punto, trascina un pallino per spostarlo, <b>click destro</b> su un pallino
+      per eliminarlo.<br>
+      Le <b>fermate</b> (cerchi bianchi) sono fisse e non si spostano.
+    </div>
+
+    <div class="row">
+      <input id="fileInput" type="file" accept=".json,application/json" style="display:none">
+      <button id="loadBtn" class="act">📂 Carica percorsi (.json)</button>
+    </div>
+
+    <div class="legend">
+      <span><i class="lg-stop"></i> fermata (fissa)</span>
+      <span><i class="lg-way"></i> punto di passaggio (trascinabile)</span>
+    </div>
+
+    <div id="count">Nessun file caricato.</div>
+    <div id="list"></div>
+
+    <div class="row">
+      <button id="undoBtn" class="act" title="Annulla l'ultimo punto o l'ultimo percorso disegnato">↶ Annulla</button>
+    </div>
+    <div class="row">
+      <button id="showAll" class="act">Mostra tutte</button>
+      <button id="hideAll" class="act">Nascondi tutte</button>
+    </div>
+    <div class="row">
+      <input id="fname" type="text" value="percorsi_modificati" title="Nome del file da salvare">
+      <button id="saveBtn" class="act">💾 Salva</button>
+    </div>
+    <div id="status"></div>
+  </div>
+
+  <script>
+  // =====================================================================
+  //  CassiTrack — Editor di percorsi: carica un JSON, permette di
+  //  RIMODELLARE il tracciato trascinando i punti di passaggio (le fermate
+  //  restano fisse) e riesporta un nuovo JSON con le posizioni aggiornate.
+  //
+  //  Modello dati per rotta (route):
+  //    { raw, id, line, color, visible, layer, _poly,
+  //      points: [ { lat, lng, stop } ]  }   // internamente lng (Leaflet)
+  //  Il JSON usa "lon": conversione lon<->lng in load/save.
+  // =====================================================================
+
+  const CASSINO = [41.4901, 13.8311];
+  // doubleClickZoom disabilitato: il doppio click avvia / chiude un percorso
+  const map = L.map('map', { doubleClickZoom: false }).setView(CASSINO, 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap'
+  }).addTo(map);
+
+  const PALETTE = ['#e6194B','#3cb44b','#4363d8','#f58231','#911eb4',
+                   '#42d4f4','#f032e6','#bfef45','#fabed4','#469990'];
+
+  let routes = [];        // rotte caricate e/o disegnate
+  let loadedData = null;  // JSON originale (per preservare i campi non modificati)
+  let drawing = false;    // true mentre si sta disegnando un nuovo percorso
+  let current = null;     // percorso in costruzione: { id, line, color, points, layer }
+
+  const $ = (id) => document.getElementById(id);
+  const status = (msg) => { $('status').textContent = msg || ''; };
+
+  const latlngsOf = (route) => route.points.map(p => [p.lat, p.lng]);
+
+  // ------------------------------------------------------------------
+  //  Caricamento file
+  // ------------------------------------------------------------------
+  $('loadBtn').addEventListener('click', () => $('fileInput').click());
+  $('fileInput').addEventListener('change', (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { loadData(JSON.parse(reader.result), file.name); }
+      catch (e) { status('JSON non valido: ' + e.message); }
+    };
+    reader.readAsText(file);
+    ev.target.value = '';   // consente di ricaricare lo stesso file
+  });
+
+  function loadData(data, filename) {
+    // rimuovo eventuali rotte già a mappa
+    routes.forEach(r => { if (r.layer) map.removeLayer(r.layer); });
+    routes = [];
+    loadedData = data;
+
+    const buses = Array.isArray(data.buses) ? data.buses : [];
+    buses.forEach((bus, idx) => {
+      // punti: uso quelli espliciti; se assenti, derivo dalle sole fermate
+      let pts = Array.isArray(bus.points) && bus.points.length
+        ? bus.points.map(p => ({ lat: p.lat, lng: p.lon, stop: !!p.stop }))
+        : (Array.isArray(bus.stops) ? bus.stops.map(s => ({ lat: s.lat, lng: s.lon, stop: true })) : []);
+      routes.push({
+        raw: bus,
+        id: bus.id != null ? bus.id : ('BUS' + (idx + 1)),
+        line: bus.line,
+        color: bus.color || PALETTE[idx % PALETTE.length],
+        points: pts,
+        visible: true, layer: null, _poly: null
+      });
+    });
+
+    // disegno tutto e inquadro
+    const all = [];
+    routes.forEach(r => { renderRoute(r); r.points.forEach(p => all.push([p.lat, p.lng])); });
+    if (all.length) map.fitBounds(L.latLngBounds(all).pad(0.15));
+
+    // nome file d'uscita proposto
+    const base = (data.name || (filename || 'percorsi').replace(/\.json$/i, ''));
+    $('fname').value = base;
+
+    renderList();
+    const nWay = routes.reduce((a, r) => a + r.points.filter(p => !p.stop).length, 0);
+    status('Caricati ' + routes.length + ' percorsi. Punti di passaggio: ' + nWay + '.');
+  }
+
+  // ------------------------------------------------------------------
+  //  Creazione di nuovi percorsi disegnando sulla mappa.
+  //  Doppio click = nuovo percorso (primo punto = capolinea) / chiudi ·
+  //  click sinistro = punto di passaggio · click destro = fermata.
+  //  Distinguo click singolo da doppio con un piccolo timer.
+  // ------------------------------------------------------------------
+  let clickTimer = null;
+  map.on('click', (e) => {
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => { if (drawing) addDrawPoint(e.latlng, false); }, 220);
+  });
+  map.on('dblclick', (e) => {
+    clearTimeout(clickTimer);                 // annulla il click singolo pendente
+    if (!drawing) startDraw(e); else finishDraw(e);
+  });
+  map.on('contextmenu', (e) => {
+    if (!drawing) return;                     // fuori dal disegno il tasto destro non fa nulla
+    if (e.originalEvent) L.DomEvent.preventDefault(e.originalEvent);
+    addDrawPoint(e.latlng, true);             // fermata
+  });
+
+  // Numero di linea libero più piccolo (per id BUS# e campo line)
+  function nextBusId() {
+    const used = new Set();
+    routes.forEach(r => {
+      const m = String(r.id).match(/(\d+)/);
+      if (m) used.add(parseInt(m[1], 10));
+      if (typeof r.line === 'number') used.add(r.line);
+    });
+    let k = 1;
+    while (used.has(k)) k++;
+    return k;
+  }
+
+  function startDraw(e) {
+    drawing = true;
+    const k = nextBusId();
+    current = { id: 'BUS' + k, line: k, color: PALETTE[(k - 1) % PALETTE.length],
+                points: [], layer: L.layerGroup().addTo(map) };
+    if (e && e.latlng) addDrawPoint(e.latlng, true);   // primo punto = capolinea (fermata)
+    status('Nuovo ' + current.id + ': click sx = passaggio, click dx = fermata, doppio click = chiudi.');
+  }
+
+  function addDrawPoint(latlng, isStop) {
+    current.points.push({ lat: latlng.lat, lng: latlng.lng, stop: isStop });
+    drawPreview();
+  }
+
+  // Anteprima tratteggiata della linea in costruzione
+  function drawPreview() {
+    current.layer.clearLayers();
+    const latlngs = current.points.map(p => [p.lat, p.lng]);
+    L.polyline(latlngs, { color: current.color, weight: 4, dashArray: '6 6' }).addTo(current.layer);
+    current.points.forEach(p => addNodeMarker(p, current.color, current.layer));
+  }
+
+  // Marker di anteprima: fermata = cerchio bianco, passaggio = puntino
+  function addNodeMarker(p, color, layer) {
+    if (p.stop) {
+      L.circleMarker([p.lat, p.lng], { radius: 7, color: color, weight: 3, fillColor: '#fff', fillOpacity: 1 }).addTo(layer);
+    } else {
+      L.circleMarker([p.lat, p.lng], { radius: 3, color: color, weight: 1, fillColor: color, fillOpacity: 1 }).addTo(layer);
+    }
+  }
+
+  // Chiude il percorso: ultimo punto = capolinea, poi diventa una rotta editabile
+  function finishDraw(e) {
+    if (e && e.latlng) addDrawPoint(e.latlng, true);   // capolinea finale (fermata)
+    if (current.points.length < 2) {
+      current.layer.remove();
+      drawing = false; current = null;
+      status('Percorso annullato: servono almeno 2 punti.');
+      return;
+    }
+    const route = {
+      raw: null, drawn: true,
+      id: current.id, line: current.line, color: current.color,
+      points: current.points, visible: true, layer: null, _poly: null
+    };
+    current.layer.remove();            // rimuovo l'anteprima tratteggiata
+    routes.push(route);
+    renderRoute(route);                // disegno la rotta definitiva (già editabile)
+    drawing = false; current = null;
+    renderList();
+    const nStops = route.points.filter(p => p.stop).length;
+    status('Creato ' + route.id + ' (' + nStops + ' fermate). Ora è modificabile per trascinamento.');
+  }
+
+  function cancelDrawing() {
+    if (current) current.layer.remove();
+    drawing = false; current = null;
+    status('Disegno annullato.');
+  }
+
+  // ------------------------------------------------------------------
+  //  Rendering di una rotta (polyline + fermate fisse + punti trascinabili
+  //  + maniglie a metà segmento per inserire nuovi punti)
+  // ------------------------------------------------------------------
+  function vtxIcon(color) {
+    return L.divIcon({ className: '', iconSize: [13, 13], iconAnchor: [7, 7],
+      html: '<div class="vtx" style="background:' + color + '"></div>' });
+  }
+
+  // Indice del segmento (points[i]..points[i+1]) più vicino a un punto cliccato,
+  // calcolato in coordinate schermo per robustezza a qualsiasi zoom.
+  function closestSegmentIndex(route, latlng) {
+    const p = map.latLngToLayerPoint(latlng);
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < route.points.length - 1; i++) {
+      const a = map.latLngToLayerPoint([route.points[i].lat, route.points[i].lng]);
+      const b = map.latLngToLayerPoint([route.points[i + 1].lat, route.points[i + 1].lng]);
+      const d = L.LineUtil.pointToSegmentDistance(p, a, b);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  // Premendo sulla linea si INSERISCE un punto di passaggio nel segmento giusto
+  // e lo si trascina: segue il cursore fino al rilascio (un solo gesto).
+  function startLineDrag(route, e) {
+    if (drawing) return;                       // durante il disegno la linea non si trascina
+    const oe = e.originalEvent;
+    if (oe) { L.DomEvent.stopPropagation(oe); L.DomEvent.preventDefault(oe); }  // niente pan mappa
+    map.dragging.disable();
+
+    const seg = closestSegmentIndex(route, e.latlng);
+    const at = seg + 1;
+    route.points.splice(at, 0, { lat: e.latlng.lat, lng: e.latlng.lng, stop: false });
+    route._poly.setLatLngs(latlngsOf(route));
+
+    const onMove = (ev) => {
+      route.points[at].lat = ev.latlng.lat;
+      route.points[at].lng = ev.latlng.lng;
+      route._poly.setLatLngs(latlngsOf(route));
+    };
+    const onUp = () => {
+      map.off('mousemove', onMove);
+      map.off('mouseup', onUp);
+      map.dragging.enable();
+      renderRoute(route);
+      status('Punto di passaggio aggiunto a ' + route.id + ' — trascinalo ancora per rifinire.');
+    };
+    map.on('mousemove', onMove);
+    map.on('mouseup', onUp);
+  }
+
+  function renderRoute(route) {
+    if (route.layer) map.removeLayer(route.layer);
+    const layer = L.layerGroup();
+
+    // 1) linea — larga e trascinabile per inserire punti di passaggio
+    const poly = L.polyline(latlngsOf(route), { color: route.color, weight: 6, opacity: .9 });
+    poly.addTo(layer);
+    route._poly = poly;
+    poly.on('mousedown', (e) => startLineDrag(route, e));
+
+    // 2) marker dei punti: fermate fisse + passaggi trascinabili
+    let sCount = 0;
+    route.points.forEach((p, i) => {
+      if (p.stop) {
+        // FERMATA: fissa, non trascinabile
+        L.circleMarker([p.lat, p.lng], {
+          radius: 8, color: route.color, weight: 3, fillColor: '#fff', fillOpacity: 1
+        }).bindTooltip(route.id + ' · Fermata ' + (++sCount), { direction: 'top' }).addTo(layer);
+      } else {
+        // PUNTO DI PASSAGGIO: trascinabile
+        const vm = L.marker([p.lat, p.lng], { draggable: true, icon: vtxIcon(route.color),
+                                              zIndexOffset: 1000 });
+        vm.on('drag', () => {
+          const ll = vm.getLatLng();
+          route.points[i].lat = ll.lat; route.points[i].lng = ll.lng;
+          route._poly.setLatLngs(latlngsOf(route));
+        });
+        vm.on('dragend', () => renderRoute(route));
+        vm.on('contextmenu', (ev) => { L.DomEvent.stop(ev); deleteWaypoint(route, i); });
+        vm.addTo(layer);
+      }
+    });
+
+    route.layer = layer;
+    if (route.visible) layer.addTo(map);
+  }
+
+  // Elimina un punto di passaggio (mai una fermata)
+  function deleteWaypoint(route, i) {
+    if (route.points[i].stop) { status('Le fermate non si eliminano.'); return; }
+    if (route.points.length <= 2) { status('Servono almeno 2 punti.'); return; }
+    route.points.splice(i, 1);
+    renderRoute(route);
+    status('Punto di passaggio eliminato da ' + route.id + '.');
+  }
+
+  // ------------------------------------------------------------------
+  //  Elenco laterale + visibilità
+  // ------------------------------------------------------------------
+  function renderList() {
+    $('count').textContent = routes.length
+      ? 'Percorsi caricati: ' + routes.length
+      : 'Nessun file caricato.';
+    const list = $('list');
+    list.innerHTML = '';
+    routes.forEach(route => {
+      const nStops = route.points.filter(p => p.stop).length;
+      const nWay = route.points.length - nStops;
+      const item = document.createElement('div');
+      item.className = 'line-item' + (route.visible ? '' : ' hidden');
+      item.innerHTML =
+        '<span class="swatch" style="background:' + route.color + '"></span>' +
+        '<span class="name">' + route.id + ' — ' + nStops + ' fermate · ' + nWay + ' passaggi</span>' +
+        '<button class="del" title="Elimina percorso">×</button>';
+      // click sulla riga = mostra / nasconde
+      item.addEventListener('click', () => toggleRoute(route));
+      // click sulla × = elimina (con conferma), senza propagare il toggle
+      item.querySelector('.del').addEventListener('click', (ev) => {
+        ev.stopPropagation(); deleteRoute(route);
+      });
+      list.appendChild(item);
+    });
+  }
+
+  // Elimina un intero percorso, con richiesta di conferma
+  function deleteRoute(route) {
+    if (!confirm('Eliminare il percorso ' + route.id + '? L\'operazione non è annullabile.')) return;
+    if (route.layer) map.removeLayer(route.layer);
+    routes = routes.filter(r => r !== route);
+    renderList();
+    status('Percorso ' + route.id + ' eliminato.');
+  }
+
+  // ------------------------------------------------------------------
+  //  Undo: se sto disegnando, toglie l'ultimo punto (e chiude il disegno
+  //  quando i punti finiscono). Altrimenti accorcia l'ultimo percorso
+  //  DISEGNATO in questa sessione (i percorsi caricati non vengono toccati).
+  // ------------------------------------------------------------------
+  function undo() {
+    if (drawing) {
+      current.points.pop();
+      if (current.points.length === 0) cancelDrawing();
+      else { drawPreview(); status('Annullato ultimo punto (' + current.id + ').'); }
+      return;
+    }
+    const drawn = routes.filter(r => r.drawn);
+    if (!drawn.length) { status('Niente da annullare.'); return; }
+    const route = drawn[drawn.length - 1];
+    route.points.pop();
+    if (route.points.length < 2) {
+      if (route.layer) map.removeLayer(route.layer);
+      routes = routes.filter(r => r !== route);
+      status('Percorso ' + route.id + ' eliminato (undo).');
+    } else {
+      renderRoute(route);
+      status('Annullato ultimo punto di ' + route.id + '.');
+    }
+    renderList();
+  }
+  $('undoBtn').addEventListener('click', undo);
+
+  function toggleRoute(route) {
+    route.visible = !route.visible;
+    if (route.visible) route.layer.addTo(map);
+    else map.removeLayer(route.layer);
+    renderList();
+  }
+
+  $('showAll').addEventListener('click', () => {
+    routes.forEach(r => { if (!r.visible) { r.visible = true; r.layer.addTo(map); } });
+    renderList();
+  });
+  $('hideAll').addEventListener('click', () => {
+    routes.forEach(r => { if (r.visible) { r.visible = false; map.removeLayer(r.layer); } });
+    renderList();
+  });
+
+  // ------------------------------------------------------------------
+  //  Salvataggio: riesporta il JSON con i punti aggiornati.
+  //  Preserva i campi originali di ogni bus (id, line, color, ...) e le
+  //  fermate (stops) invariate; aggiorna solo "points".
+  // ------------------------------------------------------------------
+  $('saveBtn').addEventListener('click', () => {
+    if (!routes.length) { status('Nessun percorso da salvare.'); return; }
+    const name = ($('fname').value || 'percorsi').trim().replace(/\.json$/i, '');
+
+    const buses = routes.map(route => {
+      const points = route.points.map(p => ({ lat: p.lat, lon: p.lng, stop: p.stop }));
+      // le fermate NON sono state modificate: mantengo l'array originale se c'è,
+      // altrimenti (percorso disegnato) lo ricavo dai punti-fermata.
+      const stops = (route.raw && Array.isArray(route.raw.stops))
+        ? route.raw.stops
+        : points.filter(p => p.stop).map(p => ({ lat: p.lat, lon: p.lon }));
+      // preservo eventuali campi extra del bus originale, ma garantisco id/color
+      const bus = Object.assign({}, route.raw || {});
+      bus.id = route.id;
+      if (route.line !== undefined && route.line !== null) bus.line = route.line;
+      bus.color = route.color;
+      bus.points = points;
+      bus.stops = stops;
+      return bus;
+    });
+
+    const out = Object.assign({}, loadedData || {}, {
+      name: name,
+      city: (loadedData && loadedData.city) || 'Cassino',
+      buses: buses
+    });
+
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    status('Salvato ' + name + '.json (' + routes.length + ' percorsi).');
+  });
+  </script>
+</body>
+</html>

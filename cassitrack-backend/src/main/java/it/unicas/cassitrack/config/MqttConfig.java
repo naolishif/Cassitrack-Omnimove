@@ -2,6 +2,7 @@ package it.unicas.cassitrack.config;
 
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.integration.annotation.ServiceActivator;
@@ -15,6 +16,8 @@ import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
 
 import it.unicas.cassitrack.mqtt.MqttMessageHandler;
+
+import javax.net.ssl.SSLSocketFactory;
 
 /**
  * Configures the MQTT client that listens to messages from buses.
@@ -44,6 +47,22 @@ public class MqttConfig {
 
     @Value("${mqtt.topics.ble}")
     private String bleTopic;
+
+    // ── OBU broker (real ESP32 feed, e.g. ssl://devaidalab.unicas.it:8883) ──
+    @Value("${mqtt.obu.url:}")
+    private String obuBrokerUrl;
+
+    @Value("${mqtt.obu.client-id:cassitrack-obu-bridge}")
+    private String obuClientId;
+
+    @Value("${mqtt.obu.username:}")
+    private String obuUsername;
+
+    @Value("${mqtt.obu.password:}")
+    private String obuPassword;
+
+    @Value("${mqtt.obu.topic:cassitrack/obu/+/pos}")
+    private String obuTopic;
 
     /**
      * Factory that creates MQTT client connections.
@@ -82,6 +101,13 @@ public class MqttConfig {
      * Topics subscribed:
      *   cassitrack/+/position  (+ matches any vehicle_id)
      *   cassitrack/+/ble
+     *   cassitrack/obu/+/pos   (compact OBU schema, see below)
+     *
+     * The OBU topic is subscribed HERE as well as on the external broker so a
+     * simulator running against the local Mosquitto can exercise the same
+     * ingestion path without needing the real TLS broker. MqttMessageHandler
+     * decides how to parse a message from its topic, not from which connection
+     * delivered it, so the translation works identically either way.
      */
     @Bean
     public MqttPahoMessageDrivenChannelAdapter mqttInbound() {
@@ -90,7 +116,8 @@ public class MqttConfig {
                 clientId + "-inbound",
                 mqttClientFactory(),
                 positionTopic,
-                bleTopic
+                bleTopic,
+                obuTopic
             );
         adapter.setCompletionTimeout(5000);
         adapter.setConverter(new DefaultPahoMessageConverter());
@@ -120,6 +147,68 @@ public class MqttConfig {
         messageHandler.setAsync(true);
         messageHandler.setDefaultQos(1);
         return messageHandler;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    //  OBU broker path (second inbound connection)
+    //
+    //  The real ESP32 units — and the professor's simulate_bus.py — publish
+    //  to an EXTERNAL, TLS-secured broker using a different topic and a more
+    //  compact payload schema. Rather than run a separate bridge process,
+    //  cassitrack opens a second inbound connection and feeds the SAME
+    //  mqttInputChannel; MqttMessageHandler recognises the cassitrack/obu/...
+    //  topic and translates the payload via ObuPositionPayload.
+    //
+    //  Dormant unless mqtt.obu.enabled=true, so local dev is unaffected.
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Dedicated client factory for the OBU broker. Attaches a TLS socket
+     * factory automatically when the URL uses the ssl:// scheme, validating the
+     * broker certificate against the JVM default truststore — the same trust
+     * anchors as {@code mosquitto_sub --capath /etc/ssl/certs}.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "mqtt.obu.enabled", havingValue = "true")
+    public MqttPahoClientFactory obuMqttClientFactory() {
+        DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
+        MqttConnectOptions options = new MqttConnectOptions();
+        options.setServerURIs(new String[]{obuBrokerUrl});
+        options.setConnectionTimeout(30);
+        options.setKeepAliveInterval(60);
+        options.setCleanSession(true);
+        options.setAutomaticReconnect(true);
+        if (obuUsername != null && !obuUsername.isBlank()) {
+            options.setUserName(obuUsername);
+            options.setPassword(obuPassword.toCharArray());
+        }
+        if (obuBrokerUrl != null && obuBrokerUrl.startsWith("ssl://")) {
+            options.setSocketFactory(SSLSocketFactory.getDefault());
+            options.setHttpsHostnameVerificationEnabled(true);
+        }
+        factory.setConnectionOptions(options);
+        return factory;
+    }
+
+    /**
+     * Inbound adapter subscribing to the OBU topic on the external broker.
+     * Pushes into the shared mqttInputChannel so the existing handler pipeline
+     * is reused unchanged.
+     */
+    @Bean
+    @ConditionalOnProperty(name = "mqtt.obu.enabled", havingValue = "true")
+    public MqttPahoMessageDrivenChannelAdapter obuMqttInbound() {
+        MqttPahoMessageDrivenChannelAdapter adapter =
+                new MqttPahoMessageDrivenChannelAdapter(
+                        obuClientId + "-inbound",
+                        obuMqttClientFactory(),
+                        obuTopic
+                );
+        adapter.setCompletionTimeout(5000);
+        adapter.setConverter(new DefaultPahoMessageConverter());
+        adapter.setQos(1);
+        adapter.setOutputChannel(mqttInputChannel());
+        return adapter;
     }
 
 }

@@ -5,6 +5,7 @@ import com.influxdb.client.WriteApiBlocking;
 import com.influxdb.client.domain.WritePrecision;
 import com.influxdb.client.write.Point;
 import it.unicas.cassitrack.dto.MqttPositionPayload;
+import it.unicas.cassitrack.dto.ObuPositionPayload;
 import it.unicas.cassitrack.model.Bus;
 import it.unicas.cassitrack.model.VehiclePosition;
 import it.unicas.cassitrack.repository.BusRepository;
@@ -68,7 +69,14 @@ public class MqttMessageHandler implements MessageHandler {
 
         try {
             // ── Step 1: Parse ─────────────────────────────────────
-            MqttPositionPayload pos = objectMapper.readValue(payload, MqttPositionPayload.class);
+            // Two ingestion paths share this handler:
+            //   • native  cassitrack/{vehicle_id}/position → verbose schema
+            //   • OBU     cassitrack/obu/{id}/pos         → compact ESP32 schema
+            // The compact payload is adapted to the verbose one immediately, so
+            // everything downstream stays identical for both feeds.
+            MqttPositionPayload pos = isObuTopic(topic)
+                    ? objectMapper.readValue(payload, ObuPositionPayload.class).toMqttPositionPayload()
+                    : objectMapper.readValue(payload, MqttPositionPayload.class);
 
             // ── Step 2: Validate ──────────────────────────────────
             if (!isValid(pos)) {
@@ -135,6 +143,15 @@ public class MqttMessageHandler implements MessageHandler {
             log.error("Failed to process MQTT message from topic [{}]: {}", topic, e.getMessage(), e);
             securityAuditService.mqttInvalidPayload(topic, e.getMessage());
         }
+    }
+
+    /**
+     * True for messages arriving from the ESP32/OBU broker, whose topics look
+     * like {@code cassitrack/obu/BUS1/pos}. Matched on the "/obu/" segment so
+     * the check is independent of how many levels the topic has.
+     */
+    private boolean isObuTopic(String topic) {
+        return topic != null && topic.contains("/obu/");
     }
 
     private boolean isValid(MqttPositionPayload pos) {

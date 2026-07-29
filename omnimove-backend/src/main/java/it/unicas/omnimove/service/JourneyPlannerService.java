@@ -46,6 +46,15 @@ public class JourneyPlannerService {
     private final GoogleMapsService googleMapsService;
     private final it.unicas.omnimove.repository.StopRepository stopRepository;
     private final it.unicas.omnimove.repository.ScheduledStopRepository scheduledStopRepository;
+    private final it.unicas.omnimove.repository.TripRepository tripRepository;
+    private final it.unicas.omnimove.repository.RouteShapeRepository routeShapeRepository;
+
+    /**
+     * How close a shape vertex must be to a stop to count as that stop.
+     * ~1 m: the geometry is authored from the stop coordinates, not surveyed
+     * separately, so matches are exact in practice.
+     */
+    private static final double STOP_MATCH_TOLERANCE = 1e-5;
     private final it.unicas.omnimove.repository.UserPreferencesRepository preferencesRepository;
     private final GoogleApiSettingsService googleApiSettings;
 
@@ -626,12 +635,74 @@ public class JourneyPlannerService {
         int from = Math.min(oi, di);
         int to   = Math.max(oi, di);
 
+        // The stops this leg calls at, in travel order.
+        List<String> legStops = new ArrayList<>();
+        for (int i = from; i <= to; i++) legStops.add(seq.get(i).getStopId());
+
+        // Prefer the real road geometry, so the drawn leg follows the streets
+        // the bus follows. Falls back to stop-to-stop when the route has no
+        // shape (or the shape cannot be matched) — see roadPathAlong().
+        List<double[]> road = roadPathAlong(tripId, legStops);
+        if (!road.isEmpty()) return road;
+
         List<double[]> coords = new ArrayList<>();
-        for (int i = from; i <= to; i++) {
-            String sid = seq.get(i).getStopId();
+        for (String sid : legStops) {
             coords.add(new double[]{ getStopLat(sid), getStopLon(sid) });
         }
         return coords;
+    }
+
+    /**
+     * Slice the portion of a route's road geometry that this leg travels.
+     *
+     * <p>Walking rather than indexing matters: on a ring line the same stop is
+     * called at twice (LINEA_1 passes VBO, SFF and VGA on the way out and again
+     * on the way back), so "the vertex for stop X" is ambiguous on its own. By
+     * scanning forward from wherever the previous stop matched, each stop binds
+     * to the correct visit and the slice follows the direction of travel.
+     *
+     * @return the ordered points from the first stop to the last, or an EMPTY
+     *         list when the route has no shape or a stop cannot be located —
+     *         the caller then keeps the old stop-to-stop rendering.
+     */
+    private List<double[]> roadPathAlong(String tripId, List<String> legStops) {
+        if (tripId == null || legStops.size() < 2) return List.of();
+
+        String routeId = tripRepository.findById(tripId)
+                .map(t -> t.getRoute() == null ? null : t.getRoute().getId())
+                .orElse(null);
+        if (routeId == null) return List.of();
+
+        var shape = routeShapeRepository.findByRouteIdOrderBySeqAsc(routeId);
+        if (shape.size() < 2) return List.of();          // no geometry for this route
+
+        int cursor = 0, firstIdx = -1, lastIdx = -1;
+        for (String stopId : legStops) {
+            double lat = getStopLat(stopId), lon = getStopLon(stopId);
+
+            int found = -1;
+            for (int i = cursor; i < shape.size(); i++) {
+                var p = shape.get(i);
+                if (Math.abs(p.getLat() - lat) < STOP_MATCH_TOLERANCE
+                 && Math.abs(p.getLon() - lon) < STOP_MATCH_TOLERANCE) {
+                    found = i;
+                    break;
+                }
+            }
+            if (found < 0) return List.of();             // unmatched → give up cleanly
+
+            if (firstIdx < 0) firstIdx = found;
+            lastIdx = found;
+            cursor  = found + 1;
+        }
+
+        if (firstIdx < 0 || lastIdx <= firstIdx) return List.of();
+
+        List<double[]> out = new ArrayList<>(lastIdx - firstIdx + 1);
+        for (int i = firstIdx; i <= lastIdx; i++) {
+            out.add(new double[]{ shape.get(i).getLat(), shape.get(i).getLon() });
+        }
+        return out;
     }
 
     private int indexOfStop(List<it.unicas.omnimove.model.ScheduledStop> seq, String stopId) {

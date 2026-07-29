@@ -81,8 +81,21 @@
                 routeColors[route.name] = color;
 
                 // la polilinea della linea resta una per linea (ref salvata per filtro)
-                routePolylines[route.id] = L.polyline(route.stops.map(s=>[s.lat,s.lon]),
-                    {color,weight:4,opacity:.8,dashArray:'8 8'}).addTo(map);
+                //
+                // Draw the real road geometry (route_shapes) when the backend
+                // provides it: buses follow the streets, so a stop-to-stop
+                // polyline would leave them visibly off the line. Routes with
+                // no shape fall back to the original stop-to-stop rendering.
+                const hasPath = Array.isArray(route.path) && route.path.length >= 2;
+                const latlngs = hasPath
+                    ? route.path.map(p => [p.lat, p.lon])
+                    : route.stops.map(s => [s.lat, s.lon]);
+
+                routePolylines[route.id] = L.polyline(latlngs,
+                    // Solid when it traces the real roads; dashed stays the
+                    // visual cue that a line is only a schematic guess.
+                    {color, weight:4, opacity:.8, ...(hasPath ? {} : {dashArray:'8 8'})}
+                ).addTo(map);
 
                 // accumula le fermate, unendo le linee che le servono
                 route.stops.forEach(s=>{

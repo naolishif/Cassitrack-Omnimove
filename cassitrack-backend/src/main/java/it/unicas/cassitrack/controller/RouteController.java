@@ -3,6 +3,7 @@ package it.unicas.cassitrack.controller;
 import it.unicas.cassitrack.model.Route;
 import it.unicas.cassitrack.model.Stop;
 import it.unicas.cassitrack.repository.RouteRepository;
+import it.unicas.cassitrack.repository.RouteShapeRepository;
 import it.unicas.cassitrack.repository.ScheduledStopRepository;
 import it.unicas.cassitrack.repository.StopRepository;
 import it.unicas.cassitrack.repository.TripRepository;
@@ -21,6 +22,7 @@ import java.util.regex.Pattern;
 public class RouteController {
 
     private final RouteRepository routeRepository;
+    private final RouteShapeRepository routeShapeRepository;
     private final ScheduledStopRepository scheduledStopRepository;
     private final StopRepository stopRepository;
     private final TripRepository tripRepository;
@@ -29,13 +31,36 @@ public class RouteController {
     private static final Pattern COLOR_RE    = Pattern.compile("^[0-9A-Fa-f]{6}$");
 
     public record StopPoint(String id, String name, double lat, double lon) {}
+
+    /** One vertex of the road geometry. Deliberately tiny: a route path is a
+     *  few hundred of these, and they are sent on every map load. */
+    public record PathPoint(double lat, double lon) {}
+
+    /**
+     * @param stops the scheduled stops, in order — unchanged, still the basis
+     *              for stop markers and for the legacy rendering
+     * @param path  the polyline following the real streets, or an EMPTY list
+     *              when this route has no shape yet. Clients draw {@code path}
+     *              when it is non-empty and fall back to {@code stops}
+     *              otherwise, so routes without geometry keep working.
+     */
     public record RouteGeometry(String id, String name, String longName,
-                                String color, List<StopPoint> stops) {}
+                                String color, List<StopPoint> stops,
+                                List<PathPoint> path) {}
 
     @GetMapping
     public List<RouteGeometry> getRoutes() {
         Map<String, Stop> stops = new HashMap<>();
         for (Stop s : stopRepository.findAll()) stops.put(s.getId(), s);
+
+        // All road geometry in one query, grouped by route. Cheaper than a
+        // query per route, and the repository already returns it sorted by seq
+        // so the insertion order here IS the drawing order.
+        Map<String, List<PathPoint>> paths = new HashMap<>();
+        for (var sh : routeShapeRepository.findAllByOrderByRouteIdAscSeqAsc()) {
+            paths.computeIfAbsent(sh.getRouteId(), k -> new ArrayList<>())
+                 .add(new PathPoint(sh.getLat(), sh.getLon()));
+        }
 
         List<RouteGeometry> out = new ArrayList<>();
         for (Route r : routeRepository.findAll()) {
@@ -48,7 +73,8 @@ public class RouteController {
             }
             if (pts.size() >= 2)
                 out.add(new RouteGeometry(r.getId(), r.getShortName(),
-                        r.getLongName(), r.getColor(), pts));
+                        r.getLongName(), r.getColor(), pts,
+                        paths.getOrDefault(r.getId(), List.of())));
         }
         return out;
     }

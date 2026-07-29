@@ -20,4 +20,12 @@ public class LineDTO {
 
     @JacksonXmlProperty(localName = "TransportMode")
     private String transportMode;
+
+    /**
+     * Road geometry of the line, or null when the feed carries none (older
+     * CassiTrack builds). Imported into route_shapes; absence simply leaves the
+     * existing shape untouched.
+     */
+    @JacksonXmlProperty(localName = "LineString")
+    private LineStringDTO lineString;
 }

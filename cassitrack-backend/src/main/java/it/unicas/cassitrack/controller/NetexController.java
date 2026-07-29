@@ -12,7 +12,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -27,17 +30,20 @@ public class NetexController {
     private final TripRepository tripRepository;
     private final ScheduledStopRepository scheduledStopRepository;
     private final BusRepository busRepository;
+    private final RouteShapeRepository routeShapeRepository;
 
     public NetexController(StopRepository stopRepository,
                            RouteRepository routeRepository,
                            TripRepository tripRepository,
                            ScheduledStopRepository scheduledStopRepository,
-                           BusRepository busRepository) {
+                           BusRepository busRepository,
+                           RouteShapeRepository routeShapeRepository) {
         this.stopRepository = stopRepository;
         this.routeRepository = routeRepository;
         this.tripRepository = tripRepository;
         this.scheduledStopRepository = scheduledStopRepository;
         this.busRepository = busRepository;
+        this.routeShapeRepository = routeShapeRepository;
     }
 
     // ── helper: converti secondi in formato NeTEx HH:mm:ss ──────────────────
@@ -94,6 +100,13 @@ public class NetexController {
             return psa;
         }).collect(Collectors.toList());
 
+        // Road geometry, fetched once and grouped, so the loop below does not
+        // issue a query per line. Empty when no route has a shape yet.
+        Map<String, List<RouteShape>> shapesByRoute = new HashMap<>();
+        for (RouteShape sh : routeShapeRepository.findAllByOrderByRouteIdAscSeqAsc()) {
+            shapesByRoute.computeIfAbsent(sh.getRouteId(), k -> new ArrayList<>()).add(sh);
+        }
+
         List<Route> dbRoutes = routeRepository.findAll();
         List<LineDTO> netexLines = dbRoutes.stream().map(route -> {
             LineDTO dto = new LineDTO();
@@ -101,6 +114,21 @@ public class NetexController {
             dto.setName(route.getLongName());
             dto.setShortName(route.getShortName());
             // transportMode è già "bus" per default
+
+            // Publish the path as a GML-style posList so consumers (OmniMove)
+            // get the geometry with the rest of the network. Omitted entirely
+            // for lines without a shape.
+            List<RouteShape> shape = shapesByRoute.get(route.getId());
+            if (shape != null && shape.size() >= 2) {
+                StringBuilder pos = new StringBuilder(shape.size() * 22);
+                for (RouteShape p : shape) {
+                    if (pos.length() > 0) pos.append(' ');
+                    pos.append(p.getLat()).append(' ').append(p.getLon());
+                }
+                LineStringDTO ls = new LineStringDTO();
+                ls.setPosList(pos.toString());
+                dto.setLineString(ls);
+            }
             return dto;
         }).collect(Collectors.toList());
 

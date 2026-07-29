@@ -70,6 +70,18 @@ mqtt:
   topics:
     position: cassitrack/+/position    # + is a wildcard matching any vehicle_id
     ble: cassitrack/+/ble
+  # ── OBU broker (real ESP32 feed / professor's simulate_bus.py) ────
+  # Second, optional MQTT connection to the external TLS broker where the
+  # ESP32/OBU units publish the COMPACT schema (id/ts/spd/hdg/occ/bat) on
+  # cassitrack/obu/{id}/pos. Disabled by default: set MQTT_OBU_ENABLED=true
+  # (and the URL/credentials) to activate this path.
+  obu:
+    enabled: ${MQTT_OBU_ENABLED:false}
+    url: ${MQTT_OBU_URL:}                        # e.g. ssl://devaidalab.unicas.it:8883
+    client-id: ${MQTT_OBU_CLIENT_ID:cassitrack-obu-bridge}
+    username: ${MQTT_OBU_USERNAME:}
+    password: ${MQTT_OBU_PASSWORD:}
+    topic: ${MQTT_OBU_TOPIC:cassitrack/obu/+/pos}
 
 # ── JWT ───────────────────────────────────────────────────────────
 jwt:
