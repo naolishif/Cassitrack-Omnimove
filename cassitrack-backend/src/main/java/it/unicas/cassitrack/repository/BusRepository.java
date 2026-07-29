@@ -10,4 +10,10 @@ import java.util.Optional;
 public interface BusRepository extends JpaRepository<Bus, Integer> {
     // 🔍 Questo metodo cercherà nel database Postgres il pullman associato al codice dell'antenna MQTT
     Optional<Bus> findByCurrentVehicleId(String currentVehicleId);
+
+    // Uniqueness checks used by the CRUD management endpoints.
+    boolean existsByTarga(String targa);
+    boolean existsByTargaAndBusIdNot(String targa, Integer busId);
+    boolean existsByCurrentVehicleId(String currentVehicleId);
+    boolean existsByCurrentVehicleIdAndBusIdNot(String currentVehicleId, Integer busId);
 }

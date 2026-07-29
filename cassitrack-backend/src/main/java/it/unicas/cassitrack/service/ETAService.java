@@ -12,7 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,8 +40,6 @@ import java.util.stream.Collectors;
 public class ETAService {
 
     private final VehicleStateCache       vehicleStateCache;
-    private final RouteMatchingService    routeMatchingService;
-    private final StopRepository          stopRepository;
     private final ScheduledStopRepository scheduledStopRepository;
     private final RouteRepository         routeRepository;
 
@@ -105,10 +102,14 @@ public class ETAService {
                     .routeId(routeId)
                     .routeName(routeName)
                     .routeShortName(routeShortName)
-                    .crowdingLevel(estimateCrowding(bus))
+                    .crowdingLevel(CrowdingService.levelFromRatio(
+                            CrowdingService.effectivePassengers(
+                                    bus.getPassengers(), bus.getBleDeviceCount()),
+                            bus.getCapacity()))
                     .estimatedArrival(estimatedArrival)
                     .delayMinutes(delayMinutes)
                     .scheduleStatus(scheduleStatus)
+                    .delayStopName(bus.getDelayStopName())
                     .build();
 
         } catch (Exception e) {
@@ -116,16 +117,6 @@ public class ETAService {
                     bus.getVehicleId(), targetStopId, e.getMessage());
             return null;
         }
-    }
-
-    private String estimateCrowding(VehiclePosition bus) {
-        Integer pax = bus.getPassengers() != null ? bus.getPassengers()
-                : (bus.getBleDeviceCount() != null ? (int)(bus.getBleDeviceCount() * 0.6) : null);
-        if (pax == null) return null;
-        if (pax < 10)  return "LOW";
-        if (pax < 25)  return "MEDIUM";
-        if (pax < 40)  return "HIGH";
-        return "VERY_HIGH";
     }
 
     /** ETA in secondi sommando i tratti dal DB, o null se non calcolabile. */
@@ -145,23 +136,18 @@ public class ETAService {
         }
         if (seq.isEmpty()) return null;
 
-        String anchorStop = (bus.getLastStopRegisteredId() != null)
-                ? bus.getLastStopRegisteredId()
-                : (bus.getTripId() != null && bus.getLat() != null && bus.getLon() != null
-                ? routeMatchingService.findNearestStopOnTrip(bus.getTripId(), bus.getLat(), bus.getLon())
-                : null);
-        if (anchorStop == null) return null;
+        // L'ancora è la posizione nella sequenza, non l'ID della fermata.
+        // ScheduleAdherenceService la mantiene: è la stessa che produce il ritardo.
+        Integer anchorSeq = bus.getLastStopSequence();
+        if (anchorSeq == null) return null;
 
-        // Some stops appear more than once in a route (e.g. SFF on LINEA_1 and LINEA_2).
-        // Always picking the first occurrence produces a wrong anchor when the bus is
-        // actually at a later occurrence. We pick the occurrence whose scheduled
-        // arrival_seconds is closest to the current wall-clock time, which reliably
-        // identifies where in the trip the bus currently is.
-        int nowSeconds = LocalTime.now(ITALY_TZ).toSecondOfDay();
-        int anchorIdx = closestOccurrenceOf(seq, anchorStop, nowSeconds);
+        int anchorIdx = -1;
+        for (int i = 0; i < seq.size(); i++) {
+            if (seq.get(i).getStopSequence().equals(anchorSeq)) { anchorIdx = i; break; }
+        }
         if (anchorIdx < 0) return null;
 
-        if (targetStopId.equals(anchorStop)) return 0L;
+        if (targetStopId.equals(seq.get(anchorIdx).getStopId())) return 0L;
 
         // Find the next occurrence of targetStopId after the anchor.
         int targetIdx = indexOfStop(seq, targetStopId, anchorIdx + 1);
@@ -172,22 +158,7 @@ public class ETAService {
         return eta > 0 ? eta : null;
     }
 
-    /**
-     * Returns the index of the occurrence of {@code stopId} in {@code seq} whose
-     * scheduled arrival_seconds is closest to {@code nowSeconds}. This correctly
-     * handles routes where the same stop appears multiple times (loops/rings).
-     */
-    private int closestOccurrenceOf(List<ScheduledStop> seq, String stopId, int nowSeconds) {
-        int bestIdx  = -1;
-        int bestDiff = Integer.MAX_VALUE;
-        for (int i = 0; i < seq.size(); i++) {
-            if (seq.get(i).getStopId().equals(stopId)) {
-                int diff = Math.abs(seq.get(i).getArrivalSeconds() - nowSeconds);
-                if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-            }
-        }
-        return bestIdx;
-    }
+
 
     private int indexOfStop(List<ScheduledStop> seq, String stopId, int from) {
         if (stopId == null) return -1;

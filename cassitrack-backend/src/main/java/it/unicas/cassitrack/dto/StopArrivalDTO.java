@@ -59,4 +59,8 @@ public class StopArrivalDTO {
 
     @JsonProperty("schedule_status")
     private String scheduleStatus;
+
+    /** Stop where the delay was measured, for OmniMove's retrospective notice. */
+    @JsonProperty("delay_stop_name")
+    private String delayStopName;
 }

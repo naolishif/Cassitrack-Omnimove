@@ -7,6 +7,7 @@ import it.unicas.omnimove.dto.UserDTO;
 import it.unicas.omnimove.model.User;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.service.AnalyticsService;
+import it.unicas.omnimove.service.GoogleApiSettingsService;
 import it.unicas.omnimove.service.SecurityAuditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,7 @@ public class AdminController {
     private final UserRepository userRepo;
     private final PasswordEncoder passwordEncoder;
     private final AnalyticsService analyticsService;
+    private final GoogleApiSettingsService googleApiSettings;
     private final SecurityAuditService securityAuditService;
 
     private UserDTO toDTO(User u) {
@@ -144,5 +146,30 @@ public class AdminController {
         payload.put("topRoutes",        analyticsService.getTopRoutes(range));
 
         return ResponseEntity.ok(payload);
+    }
+
+    // == GET /api/v1/admin/settings/google ===============================
+    @GetMapping("/settings/google")
+    @Operation(summary = "Read the two Google Maps feature flags")
+    public ResponseEntity<?> getGoogleSettings() {
+        return ResponseEntity.ok(googleApiSettings.snapshot());
+    }
+
+    // == PUT /api/v1/admin/settings/google ===============================
+    // Body: { "google.search": true, "google.stop_eta": false }
+    @PutMapping("/settings/google")
+    @Operation(summary = "Toggle the Google Maps feature flags")
+    public ResponseEntity<?> setGoogleSettings(@RequestBody Map<String, Boolean> body) {
+        if (body == null || body.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Empty body."));
+        }
+        try {
+            body.forEach((key, value) -> {
+                if (value != null) googleApiSettings.set(key, value);
+            });
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+        return ResponseEntity.ok(googleApiSettings.snapshot());
     }
 }

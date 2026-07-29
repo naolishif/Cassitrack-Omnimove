@@ -11,6 +11,7 @@ import it.unicas.omnimove.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import it.unicas.omnimove.service.GreenIndexService;
+import it.unicas.omnimove.service.SecurityAuditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +42,7 @@ public class TravellerController {
     private final GreenIndexService greenIndexService;
     private final FavoriteRouteRepository favoriteRouteRepository;
     private final UserPreferencesRepository preferencesRepository;
+    private final SecurityAuditService securityAuditService;
 
     @PutMapping("/me")
     @Operation(summary = "Update own profile")
@@ -56,8 +58,15 @@ public class TravellerController {
         if (user == null)
             return ResponseEntity.notFound().build();
 
-        if (req.getName() != null && !req.getName().isBlank())
+        boolean nameChanged     = false;
+        boolean emailChanged    = false;
+        boolean passwordChanged = false;
+        String  oldEmail        = user.getEmail();
+
+        if (req.getName() != null && !req.getName().isBlank()) {
             user.setName(req.getName());
+            nameChanged = true;
+        }
 
         if (req.getEmail() != null && !req.getEmail().isBlank()
                 && !req.getEmail().equalsIgnoreCase(user.getEmail())) {
@@ -65,6 +74,7 @@ public class TravellerController {
                 return ResponseEntity.badRequest()
                         .body(Map.of("message", "Email already in use"));
             user.setEmail(req.getEmail());
+            emailChanged = true;
         }
 
         if (req.getPassword() != null && !req.getPassword().isBlank()) {
@@ -73,9 +83,17 @@ public class TravellerController {
                 return ResponseEntity.badRequest()
                         .body(Map.of("message", "Current password is incorrect"));
             user.setPassword(passwordEncoder.encode(req.getPassword()));
+            passwordChanged = true;
         }
 
         userRepo.save(user);
+
+        // Audit — emit the most specific event for each change
+        if (emailChanged)    securityAuditService.profileEmailChanged(oldEmail, user.getEmail());
+        if (passwordChanged) securityAuditService.passwordChanged(oldEmail);
+        if (nameChanged && !emailChanged && !passwordChanged)
+                             securityAuditService.profileUpdated(oldEmail);
+
         log.info("Traveller {} updated their profile", principal.getUsername());
         return ResponseEntity.ok(Map.of("message", "Profile updated successfully"));
     }

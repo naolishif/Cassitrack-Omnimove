@@ -52,4 +52,30 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
             "ORDER BY ss.trip.route.id, MIN(ss.stopSequence)")
     List<Object[]> findStopsGroupedByRoute();
 
+    /**
+     * Trips assigned to this bus whose service window covers {@code now}.
+     *
+     * Mirrors exactly the query the GPS simulator used to run before it stopped
+     * publishing trip_id. The schedule lives in Postgres — the bus never needs
+     * to tell us which trip it is running.
+     *
+     * Columns: [0] tripId, [1] routeId, [2] routeShortName, [3] routeLongName,
+     *          [4] startSeconds, [5] endSeconds
+     * Ordered by latest departure first (the trip that started most recently).
+     */
+    @Query("""
+        SELECT ss.trip.id, ss.trip.route.id, ss.trip.route.shortName, ss.trip.route.longName,
+               MIN(ss.arrivalSeconds), MAX(ss.arrivalSeconds)
+        FROM ScheduledStop ss
+        WHERE ss.trip.bus.busId = :busId
+        GROUP BY ss.trip.id, ss.trip.route.id, ss.trip.route.shortName, ss.trip.route.longName
+        HAVING MIN(ss.arrivalSeconds) <= :now AND MAX(ss.arrivalSeconds) >= :now
+        ORDER BY MIN(ss.arrivalSeconds) DESC
+        """)
+    List<Object[]> findActiveTripsForBus(@Param("busId") Integer busId, @Param("now") int now);
+
+    // FK guard for stop deletion: scheduled_stops.stop_id references stops(id)
+    // ON DELETE CASCADE — a delete would silently wipe timetable rows, so the
+    // controller counts references and refuses instead of relying on the DB.
+    long countByStopId(String stopId);
 }

@@ -50,7 +50,9 @@ public class RateLimiterService {
             }
 
             if (count > maxRequests) {
-                securityAuditService.rateLimitExceeded(maskKey(key), maxRequests, window);
+                // Pass the raw key — SecurityAuditService handles masking for
+                // the log line and stores the full value in the audit table.
+                securityAuditService.rateLimitExceeded(key, maxRequests, window);
                 return false;
             }
             return true;
@@ -60,26 +62,6 @@ public class RateLimiterService {
             log.warn("[RATE-LIMIT] Redis unavailable, failing open: {}", e.getMessage());
             return true;
         }
-    }
-
-    /** Masks the PII segment of a rate-limit key: "rl:login:mar@x.com" → "rl:login:m***@x.com" */
-    private String maskKey(String key) {
-        int last = key.lastIndexOf(':');
-        if (last < 0) return "***";
-        String prefix = key.substring(0, last + 1);
-        String value  = key.substring(last + 1);
-        // email
-        int at = value.indexOf('@');
-        if (at > 0) return prefix + value.charAt(0) + "***" + value.substring(at);
-        // IPv4
-        int dot = value.lastIndexOf('.');
-        if (dot > 0) return prefix + value.substring(0, dot) + ".xxx";
-        // IPv6
-        if (value.contains(":")) {
-            String[] parts = value.split(":");
-            return prefix + parts[0] + ":xxx";
-        }
-        return prefix + "***";
     }
 
     // ── Convenience methods ─────────────────────────────────────────

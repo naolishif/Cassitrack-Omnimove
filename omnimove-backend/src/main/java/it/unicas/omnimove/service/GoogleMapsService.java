@@ -13,7 +13,9 @@ import java.util.Optional;
  * Client for the Google Maps Distance Matrix API.
  *
  * Given an origin and a destination, returns the travel duration
- * accounting for REAL-TIME traffic (departure_time=now).
+ * accounting for live traffic. departure_time defaults to "now", but a
+ * future Instant can be passed to estimate traffic at the moment the
+ * vehicle actually travels each leg (used by the journey planner).
  *
  * If the API key is missing or the call fails, returns Optional.empty()
  * so the caller can fall back to haversine-based estimates.
@@ -64,17 +66,41 @@ public class GoogleMapsService {
             double destLat,   double destLon) {
         return getTravelTime(originLat, originLon, destLat, destLon, "driving");
     }
-
     public Optional<TrafficResult> getTravelTime(
             double originLat, double originLon,
             double destLat,   double destLon,
             String mode) {
+        return getTravelTime(originLat, originLon, destLat, destLon, mode, null);
+    }
+
+    /**
+     * @param departureTime istante di partenza per il traffico. null = "now".
+     *        Deve essere nel presente o futuro: Google rifiuta il passato.
+     *        Ignorato se non driving (il traffico serve solo in auto).
+     */
+    public Optional<TrafficResult> getTravelTime(
+            double originLat, double originLon,
+            double destLat,   double destLon,
+            String mode, java.time.Instant departureTime) {
 
         if (apiKey == null || apiKey.isBlank()) {
             log.debug("Google Maps API key non configurata — uso fallback");
             return Optional.empty();
         }
         boolean driving = "driving".equalsIgnoreCase(mode);
+
+        // Google rifiuta un departure_time nel passato: sotto "now" ci ripieghiamo.
+        final String departureParam;
+        if (driving) {
+            if (departureTime == null || !departureTime.isAfter(java.time.Instant.now())) {
+                departureParam = "now";
+            } else {
+                departureParam = String.valueOf(departureTime.getEpochSecond());
+            }
+        } else {
+            departureParam = null;
+        }
+
         try {
             String origins      = originLat + "," + originLon;
             String destinations = destLat   + "," + destLon;
@@ -85,8 +111,8 @@ public class GoogleMapsService {
                                 .queryParam("destinations", destinations)
                                 .queryParam("mode",         mode)
                                 .queryParam("key",          apiKey);
-                        if (driving) {   // traffico solo in auto
-                            b.queryParam("departure_time", "now")
+                        if (driving) {
+                            b.queryParam("departure_time", departureParam)
                                     .queryParam("traffic_model",  "best_guess");
                         }
                         return b.build();

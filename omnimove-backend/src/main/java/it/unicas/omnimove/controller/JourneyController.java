@@ -15,6 +15,9 @@ import it.unicas.omnimove.service.GreenIndexService;
 import it.unicas.omnimove.service.JourneyEventService;
 import it.unicas.omnimove.service.JourneyPlannerService;
 import it.unicas.omnimove.service.RateLimiterService;
+import it.unicas.omnimove.service.TrafficAwareETAService;
+import it.unicas.omnimove.service.GoogleApiSettingsService;
+import it.unicas.omnimove.dto.StopArrivalResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
@@ -52,6 +55,8 @@ public class JourneyController {
     private final GreenIndexService     greenIndexService;
     private final RateLimiterService    rateLimiter;
     private final CassitrackClient      cassitrackClient;
+    private final TrafficAwareETAService trafficAwareETAService;
+    private final GoogleApiSettingsService googleApiSettings;
 
     @GetMapping("/stops")
     @Operation(summary = "List active stops for origin/destination pickers")
@@ -105,14 +110,11 @@ public class JourneyController {
         // 1. Real-time buses from CASSITRACK (GPS-based ETA)
         List<StopArrivalDTO> realTime = cassitrackClient.getArrivalsAtStop(stopId);
 
-        // Track which trips and vehicles are already covered by live data
         Set<String> coveredTripIds = realTime.stream()
-                .map(StopArrivalDTO::getTripId)
-                .filter(Objects::nonNull)
+                .map(StopArrivalDTO::getTripId).filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Set<String> coveredVehicleIds = realTime.stream()
-                .map(StopArrivalDTO::getVehicleId)
-                .filter(Objects::nonNull)
+                .map(StopArrivalDTO::getVehicleId).filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
         // 1b. Enrich real-time entries with crowding from /vehicles
@@ -125,7 +127,7 @@ public class JourneyController {
                 a.setCrowdingLevel(vehicleCrowding.get(a.getVehicleId()));
         });
 
-        // 2. Scheduled buses — skip any trip already covered by a live bus
+        // 2. Scheduled buses - skip any trip already covered by a live bus
         List<StopArrivalDTO> scheduled = cassitrackClient.getScheduleAtStop(stopId).stream()
                 .filter(a -> {
                     if (a.getTripId() != null && coveredTripIds.contains(a.getTripId())) return false;
@@ -134,19 +136,61 @@ public class JourneyController {
                 })
                 .collect(Collectors.toList());
 
-        // 3. Merge, sort by scheduled time (fall back to ETA for live buses with no schedule), cap at limit
+        // 3. Merge, sort by scheduled time (fall back to ETA), cap at limit
         List<StopArrivalDTO> result = Stream.concat(realTime.stream(), scheduled.stream())
                 .filter(a -> a.getEstimatedArrival() != null)
                 .sorted(Comparator.comparing(a -> {
                     Instant key = a.getScheduledArrival() != null
-                            ? a.getScheduledArrival()
-                            : a.getEstimatedArrival();
+                            ? a.getScheduledArrival() : a.getEstimatedArrival();
                     return key != null ? key : java.time.Instant.MAX;
                 }))
                 .limit(effectiveLimit)
                 .collect(Collectors.toList());
 
-        return ResponseEntity.ok(result);
+        // 4. Delay enrichment, gated by the google.stop_eta flag.
+        //    Only departed buses (vehicleId != null) ever carry a delay.
+        List<StopArrivalResponse> out;
+        if (googleApiSettings.isStopEtaEnabled()) {
+            // Google ON: real-time recompute from each bus's live position.
+            var enriched = trafficAwareETAService.enrich(stopId, result);
+            out = enriched.stream().map(e -> {
+                var a = e.arrival();
+                boolean departed = a.getVehicleId() != null;
+                return StopArrivalResponse.builder()
+                        .vehicleId(a.getVehicleId())
+                        .routeId(a.getRouteId()).routeName(a.getRouteName())
+                        .routeShortName(a.getRouteShortName())
+                        .estimatedArrival(e.adjustedArrival())
+                        .scheduledArrival(a.getScheduledArrival())
+                        .scheduleStatus(a.getScheduleStatus())
+                        .crowdingLevel(a.getCrowdingLevel())
+                        .departed(departed)
+                        .realTime(e.realTime())
+                        .delayMinutes(departed ? e.delayMinutes() : null)
+                        .delayStopName(a.getDelayStopName())
+                        .build();
+            }).toList();
+        } else {
+            // Google OFF: CassiTrack's retrospective delay (C1 notice), departed buses only.
+            out = result.stream().map(a -> {
+                boolean departed = a.getVehicleId() != null;
+                return StopArrivalResponse.builder()
+                        .vehicleId(a.getVehicleId())
+                        .routeId(a.getRouteId()).routeName(a.getRouteName())
+                        .routeShortName(a.getRouteShortName())
+                        .estimatedArrival(a.getEstimatedArrival())
+                        .scheduledArrival(a.getScheduledArrival())
+                        .scheduleStatus(a.getScheduleStatus())
+                        .crowdingLevel(a.getCrowdingLevel())
+                        .departed(departed)
+                        .realTime(false)
+                        .delayMinutes(departed ? a.getDelayMinutes() : null)
+                        .delayStopName(a.getDelayStopName())
+                        .build();
+            }).toList();
+        }
+
+        return ResponseEntity.ok(out);
     }
 
     @PostMapping("/select")

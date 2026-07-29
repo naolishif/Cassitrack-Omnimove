@@ -62,6 +62,7 @@ document.querySelectorAll('.tab').forEach(t=>{
         document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
         t.classList.add('active');
         document.getElementById('pane-'+t.dataset.tab).classList.add('active');
+        if (t.dataset.tab === 'settings') loadGoogleSettings();
     });
 });
 
@@ -529,3 +530,47 @@ function updateGreenIndexChart(trend, range) {
 
 // Initial load
 loadAnalytics('1M');
+
+
+// ── Google API feature flags (Settings tab) ──────────────────────────
+async function loadGoogleSettings() {
+    try {
+        const r = await apiFetch('/admin/settings/google');
+        if (!r.ok) throw new Error('settings ' + r.status);
+        const s = await r.json();
+        setSwitch('swSearch',  s['google.search']);
+        setSwitch('swStopEta', s['google.stop_eta']);
+    } catch (e) {
+        console.warn('Could not load Google settings:', e);
+    }
+}
+
+function setSwitch(id, on) {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+
+async function toggleGoogleSetting(btn) {
+    const key = btn.dataset.key;
+    const next = btn.getAttribute('aria-checked') !== 'true';
+    btn.disabled = true;
+    try {
+        const r = await apiFetch('/admin/settings/google', {
+            method: 'PUT',
+            body: JSON.stringify({ [key]: next })
+        });
+        if (!r.ok) throw new Error('save ' + r.status);
+        const s = await r.json();
+        setSwitch('swSearch',  s['google.search']);
+        setSwitch('swStopEta', s['google.stop_eta']);
+    } catch (e) {
+        console.warn('Could not toggle setting:', e);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+document.addEventListener('click', e => {
+    const sw = e.target.closest('.switch');
+    if (sw) toggleGoogleSetting(sw);
+});

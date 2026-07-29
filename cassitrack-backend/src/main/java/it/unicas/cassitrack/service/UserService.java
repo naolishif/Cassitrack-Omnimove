@@ -19,13 +19,16 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final SecurityAuditService securityAuditService;
 
     public UserService(
             UserRepository userRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            SecurityAuditService securityAuditService
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.securityAuditService = securityAuditService;
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -124,6 +127,8 @@ public class UserService {
 
         User saved = userRepository.save(user);
         log.info("User created by admin: {}", saved.getEmail());
+        securityAuditService.adminUserCreated(getCurrentAuthenticatedUser().getEmail(),
+                saved.getEmail(), saved.getRole());
         return saved;
     }
 
@@ -177,6 +182,7 @@ public class UserService {
 
         User saved = userRepository.save(user);
         log.info("User updated by admin: {}", saved.getEmail());
+        securityAuditService.adminUserUpdated(caller.getEmail(), saved.getId(), saved.getEmail());
         return saved;
     }
 
@@ -199,6 +205,7 @@ public class UserService {
         //}
         userRepository.deleteById(id);
         log.info("User deleted: id={}", id);
+        securityAuditService.adminUserDeleted(caller.getEmail(), id, target.getEmail());
     }
 
     // ─────────────────────────────────────────────────────────────────

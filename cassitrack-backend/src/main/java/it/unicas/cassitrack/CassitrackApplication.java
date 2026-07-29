@@ -2,6 +2,7 @@ package it.unicas.cassitrack;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -14,6 +15,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @SpringBootApplication
 @EnableScheduling   // needed for scheduled tasks (ETA recomputation, alerts)
+@EnableAsync        // needed for async security audit DB writes
 public class CassitrackApplication {
 
     public static void main(String[] args) {

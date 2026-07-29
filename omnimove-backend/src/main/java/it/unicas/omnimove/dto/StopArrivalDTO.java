@@ -15,4 +15,7 @@ public class StopArrivalDTO {
     @JsonProperty("schedule_status")   private String  scheduleStatus;
     @JsonProperty("delay_minutes")     private Integer delayMinutes;
     @JsonProperty("crowding_level")    private String  crowdingLevel;
+
+    /** Stop where CassiTrack measured the retrospective delay (for the C1 notice). */
+    @JsonProperty("delay_stop_name")   private String  delayStopName;
 }

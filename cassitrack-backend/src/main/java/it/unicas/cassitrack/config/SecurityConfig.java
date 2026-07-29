@@ -113,7 +113,8 @@ public class SecurityConfig {
                                 "/cassitrack-fleetmanager.html",
                                 "/cassitrack-fleetmanager.css",
                                 "/cassitrack-fleetmanager.js",
-                                "/api/v1/analytics/**"
+                                "/api/v1/analytics/**",
+                                "/api/v1/buses/**"          // fleet CRUD (Data Management) — all methods
                         ).hasAnyAuthority("FLEET_MANAGER", "ROLE_FLEET_MANAGER")
 
                         // V-10 FIX (OWASP A01): /api/v1/ai/** was mapped to two conflicting rules;
@@ -131,9 +132,9 @@ public class SecurityConfig {
                                 "/api/v1/auth/register"
                         ).hasAnyAuthority("ADMIN", "ROLE_ADMIN")
 
-                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/vehicles/**", "/api/v1/stops/**", "/api/v1/journeys/**").hasAnyAuthority("FLEET_MANAGER", "ROLE_FLEET_MANAGER")
-                        .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/vehicles/**", "/api/v1/stops/**", "/api/v1/journeys/**").hasAnyAuthority("FLEET_MANAGER", "ROLE_FLEET_MANAGER")
-                        .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/api/v1/vehicles/**", "/api/v1/stops/**", "/api/v1/journeys/**").hasAnyAuthority("FLEET_MANAGER", "ROLE_FLEET_MANAGER")
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/vehicles/**", "/api/v1/stops/**", "/api/v1/routes/**", "/api/v1/journeys/**","/api/v1/buses/**").hasAnyAuthority("FLEET_MANAGER", "ROLE_FLEET_MANAGER")
+                        .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/vehicles/**", "/api/v1/stops/**", "/api/v1/routes/**", "/api/v1/journeys/**","/api/v1/buses/**").hasAnyAuthority("FLEET_MANAGER", "ROLE_FLEET_MANAGER")
+                        .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/api/v1/vehicles/**", "/api/v1/stops/**", "/api/v1/routes/**", "/api/v1/journeys/**","/api/v1/buses/**").hasAnyAuthority("FLEET_MANAGER", "ROLE_FLEET_MANAGER")
 
                         // ── 4. Everything else requires authentication ───────
                         .anyRequest().authenticated()

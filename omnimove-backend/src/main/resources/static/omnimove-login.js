@@ -122,30 +122,12 @@ function syncForgotButton() {
     document.getElementById('forgotBtn').style.display = _failedAttempts >= 2 ? 'block' : 'none';
 }
 
-async function showForgotPanel() {
+function showForgotPanel() {
     const email = document.getElementById('loginEmail').value.trim();
+    // Always show the form — pre-fill email if available so user can confirm before sending
     if (email) {
-        // Email already known — send request directly, no form needed
-        _emailSentMode = 'reset';
-        _lastRegisteredEmail = '';
-        hideTabs(); hideGuestSection();
-        showPanel('emailSentPanel');
-        document.getElementById('sentToEmail').textContent = email;
-        try {
-            const r = await fetch(`${OMNIMOVE}/auth/forgot-password`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email })
-            });
-            const data = await r.json();
-            showMsg(data.message || 'If that email is registered you will receive a reset link shortly.', 'ok');
-        } catch (_) {
-            showMsg('Cannot reach OMNIMOVE server. Check it is running on :8180', 'err');
-        }
-
-        // V-04 FIX: no localStorage write here — this is a forgot-password flow, not login.
+        document.getElementById('forgotEmail').value = email;
     }
-    // Fallback: no email pre-filled, show the form
     hideTabs(); hideGuestSection();
     showPanel('forgotForm');
 }
@@ -208,21 +190,32 @@ async function handleLogin(e) {
             showMsg('Welcome back, ' + (data.name || 'user') + '! Redirecting…', 'ok');
             secureRedirect(data.role || 'TRAVELLER');
         } else {
+            // Remove any existing resend button to avoid duplicates
+            document.getElementById('resendVerifyBtn')?.remove();
+
             // 403 = not verified (don't count as lockout)
             if (r.status !== 403) {
                 _failedAttempts++;
                 syncForgotButton();
             }
 
-            let errorMsg = data.message || data.error || 'Login failed';
+            let errorMsg;
+            if (r.status === 403) {
+                errorMsg = data.message || 'Your email address has not been verified yet. Please check your inbox.';
+            } else if (r.status === 401) {
+                errorMsg = data.message || 'Incorrect email or password';
+            } else {
+                errorMsg = data.message || 'Login failed. Please try again.';
+            }
             if (data.suggest_password_reset) {
-                errorMsg += '\nToo many failed attempts — use "Forgot password?" below.';
+                errorMsg += ' — Too many failed attempts, use "Forgot password?" below.';
             }
             showMsg(errorMsg, 'err');
 
             // Show inline resend link if not verified
             if (r.status === 403) {
                 const resendBtn = document.createElement('button');
+                resendBtn.id = 'resendVerifyBtn';
                 resendBtn.type = 'button';
                 resendBtn.className = 'btn-ghost';
                 resendBtn.textContent = 'Resend verification email';
@@ -246,19 +239,22 @@ async function handleLogin(e) {
 // ════════════════════════════════════════════════════════════
 async function handleRegister(e) {
     e.preventDefault();
-    clearAllFieldErrs('regName', 'regEmail', 'regPassword', 'regConfirm');
+    clearAllFieldErrs('regFirstName', 'regLastName', 'regEmail', 'regPassword', 'regConfirm');
     hideMsg();
 
-    const name    = document.getElementById('regName').value.trim();
-    const email   = document.getElementById('regEmail').value.trim();
-    const pass    = document.getElementById('regPassword').value;
-    const confirm = document.getElementById('regConfirm').value;
+    const firstName = document.getElementById('regFirstName').value.trim();
+    const lastName  = document.getElementById('regLastName').value.trim();
+    const name      = firstName && lastName ? `${firstName} ${lastName}` : '';
+    const email     = document.getElementById('regEmail').value.trim();
+    const pass      = document.getElementById('regPassword').value;
+    const confirm   = document.getElementById('regConfirm').value;
     let hasErr = false;
 
-    if (!name)    { fieldErr('regName',    'Mandatory field'); hasErr = true; }
-    if (!email)   { fieldErr('regEmail',   'Mandatory field'); hasErr = true; }
-    if (!pass)    { fieldErr('regPassword','Mandatory field'); hasErr = true; }
-    if (!confirm) { fieldErr('regConfirm', 'Mandatory field'); hasErr = true; }
+    if (!firstName) { fieldErr('regFirstName', 'Mandatory field'); hasErr = true; }
+    if (!lastName)  { fieldErr('regLastName',  'Mandatory field'); hasErr = true; }
+    if (!email)     { fieldErr('regEmail',     'Mandatory field'); hasErr = true; }
+    if (!pass)      { fieldErr('regPassword',  'Mandatory field'); hasErr = true; }
+    if (!confirm)   { fieldErr('regConfirm',   'Mandatory field'); hasErr = true; }
     if (hasErr) return;
 
     if (!isPasswordValid(pass)) {

@@ -17,4 +17,13 @@ public class JourneyOption {
     @JsonProperty("weather_warning") private String weatherWarning;
     @JsonProperty("weather_suggestion") private String weatherSuggestion;
     private List<JourneyLeg> legs;
+    @JsonProperty("delay_minutes")   private Integer delayMinutes;
+    @JsonProperty("delay_status")    private String  delayStatus;    // ON_TIME, SLIGHTLY_LATE
+    @JsonProperty("delay_real_time") private Boolean delayRealTime;
+    @JsonProperty("delay_at_stop")   private String  delayAtStop;
+    @JsonProperty("delay_label")     private String  delayLabel;     // frase pronta per la scheda
+    @JsonProperty("score_fast")   private Double scoreFast;
+    @JsonProperty("score_budget") private Double scoreBudget;
+    @JsonProperty("score_eco")    private Double scoreEco;
+
 }

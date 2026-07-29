@@ -33,6 +33,7 @@ public class NetexImportService {
     private final TripRepository tripRepository;
     private final ScheduledStopRepository scheduledStopRepository;
     private final BusRepository busRepository; // ← AGGIUNTO
+    private final RouteShapeRepository routeShapeRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -43,12 +44,14 @@ public class NetexImportService {
                               RouteRepository routeRepository,
                               TripRepository tripRepository,
                               ScheduledStopRepository scheduledStopRepository,
-                              BusRepository busRepository) { // ← AGGIUNTO
+                              BusRepository busRepository, // ← AGGIUNTO
+                              RouteShapeRepository routeShapeRepository) {
         this.stopRepository = stopRepository;
         this.routeRepository = routeRepository;
         this.tripRepository = tripRepository;
         this.scheduledStopRepository = scheduledStopRepository;
         this.busRepository = busRepository; // ← AGGIUNTO
+        this.routeShapeRepository = routeShapeRepository;
 
         XMLInputFactory xmlFactory = XMLInputFactory.newInstance();
         xmlFactory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
@@ -202,6 +205,15 @@ public class NetexImportService {
                     return route;
                 }).collect(java.util.stream.Collectors.toList());
                 routeRepository.saveAll(routes);
+
+                // 3d. Geometria stradale delle linee (opzionale).
+                // Saved after the routes so the FK on route_shapes.route_id is
+                // satisfied. A line without <LineString> leaves any existing
+                // shape untouched rather than wiping it — older CassiTrack
+                // builds simply do not publish the element.
+                for (LineDTO dto : serviceFrame.getLines()) {
+                    importRouteShape(localId(dto.getId()), dto.getLineString());
+                }
             }
 
             // 3e. Corse — ora nel TimetableFrame (standard NeTEx);
@@ -254,5 +266,57 @@ public class NetexImportService {
         }
 
         System.out.println("Importazione NeTEx completata con successo nel database di Omnimove!");
+    }
+
+    /**
+     * Persist one line's road geometry, replacing whatever was stored before.
+     *
+     * <p>The payload is a GML-style posList: "lat lon lat lon …" in path order.
+     * Replacement is wholesale rather than a diff — a path is reshaped in the
+     * route editor as a unit, so merging point by point would add complexity
+     * without buying anything.
+     *
+     * <p>A missing or malformed element is not an error: the shape is optional,
+     * and losing it must never fail an otherwise good import. In that case the
+     * previously stored geometry is left alone and the traveller map simply
+     * keeps using it.
+     *
+     * @param routeId local route id, e.g. "LINEA_1"
+     * @param ls      the LineString element, or null when the feed has none
+     */
+    private void importRouteShape(String routeId, LineStringDTO ls) {
+        if (routeId == null || ls == null || ls.getPosList() == null) return;
+
+        String[] tok = ls.getPosList().trim().split("\\s+");
+        // Coordinates come in pairs; an odd count means a truncated document.
+        if (tok.length < 4 || tok.length % 2 != 0) {
+            System.out.println("NeTEx: geometria ignorata per " + routeId
+                    + " (posList non valida, " + tok.length + " valori)");
+            return;
+        }
+
+        List<RouteShape> pts = new java.util.ArrayList<>(tok.length / 2);
+        try {
+            for (int i = 0, seq = 0; i < tok.length; i += 2, seq++) {
+                RouteShape p = new RouteShape();
+                p.setRouteId(routeId);
+                p.setSeq(seq);
+                p.setLat(Double.parseDouble(tok[i]));
+                p.setLon(Double.parseDouble(tok[i + 1]));
+                // is_stop is not carried on the feed: the traveller map cuts
+                // legs by matching stop coordinates, so the flag is redundant
+                // here. Kept false to satisfy the NOT NULL column.
+                p.setIsStop(false);
+                pts.add(p);
+            }
+        } catch (NumberFormatException e) {
+            System.out.println("NeTEx: geometria ignorata per " + routeId
+                    + " (coordinate non numeriche)");
+            return;
+        }
+
+        routeShapeRepository.deleteByRouteId(routeId);
+        routeShapeRepository.flush();      // delete before insert: same PKs
+        routeShapeRepository.saveAll(pts);
     }
 }

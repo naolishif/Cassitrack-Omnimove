@@ -139,7 +139,8 @@ services:
       MQTT_BROKER_URL: tcp://mosquitto:1883
       MQTT_USERNAME: ${MQTT_USERNAME}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
-      # MQTT OBU broker (external ESP32 feed) — set MQTT_OBU_ENABLED=true to activate
+      # MQTT OBU broker (external ESP32 / simulate_bus.py feed).
+      # Set MQTT_OBU_ENABLED=true in .env to activate the second connection.
       MQTT_OBU_ENABLED: ${MQTT_OBU_ENABLED:-false}
       MQTT_OBU_URL: ${MQTT_OBU_URL:-}
       MQTT_OBU_USERNAME: ${MQTT_OBU_USERNAME:-}

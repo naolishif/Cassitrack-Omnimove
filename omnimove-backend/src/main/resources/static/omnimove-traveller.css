@@ -153,7 +153,7 @@ body {
 .topbar {
     background: var(--bg-white);
     border-bottom: 1px solid var(--border-mid);
-    padding: 14px 28px;
+    padding: 10px 28px;
     display: flex;
     align-items: center;
     gap: 14px;
@@ -201,7 +201,7 @@ body {
     white-space: nowrap;
 }
 .search-btn:hover { background: var(--primary-dark); }
-
+.search-notice{background:#fef9c3;color:#92400e;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;font-weight:600}
 .cats { display: flex; gap: 7px; align-items: center; }
 .cat-chip {
     padding: 7px 14px;
@@ -288,6 +288,13 @@ body {
 .s-delay { background: #fee2e2; color: var(--red); }
 .s-occ   { background: #fef9c3; color: #92400e; }
 .s-ok    { background: var(--primary-light); color: var(--primary-dark); }
+.delay-on_time            { background: var(--primary-light); color: var(--primary-dark); }
+.delay-early              { background: #dbeafe; color: #1e40af; }
+.delay-slightly_late      { background: #fef9c3; color: #92400e; }
+.delay-significantly_late { background: #fee2e2; color: var(--red); }
+.delay-unknown            { background: #f1f5f9; color: var(--text-soft); }
+
+
 
 .metrics-row {
     display: grid;
@@ -884,3 +891,570 @@ body {
     transition: background 0.15s;
 }
 .stop-check-btn:hover { background: var(--primary-dark); }
+
+
+
+/* ── Step 2b: mobile topbar wrapping ── */
+@media (max-width: 768px) {
+    .topbar { flex-wrap: wrap; padding: 10px 14px; gap: 10px; }
+    .topbar-search { flex: 1 1 auto; max-width: none; }
+    .cats { flex-basis: 100%; flex-wrap: wrap; }
+    .search-btn { min-height: 44px; }
+    .search-seg input, .search-seg select { font-size: 16px; }
+}
+
+/* ── Step 3: mobile menu drawer ── */
+.hamburger  { display: none; }
+.menu-scrim { display: none; }
+
+@media (max-width: 768px) {
+    .hamburger {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        flex: 0 0 auto;
+        border: 1px solid var(--border-mid);
+        background: var(--bg-app);
+        color: var(--text-dark);
+        border-radius: 12px;
+        font-size: 18px;
+        cursor: pointer;
+    }
+    .sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 250px;
+        transform: translateX(-100%);
+        transition: transform 0.28s ease;
+        z-index: 130;
+    }
+    .sidebar.open {
+        transform: translateX(0);
+        box-shadow: 8px 0 40px rgba(15, 23, 42, 0.22);
+    }
+    .menu-scrim.open {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.45);
+        z-index: 120;
+    }
+}
+
+/* ── Step 4: mobile full-screen subpages (settings/tickets) ── */
+.mobile-back  { display: none; }
+.mobile-title { display: none; }
+
+@media (max-width: 768px) {
+    /* On non-map panes, replace the search UI with a back bar */
+    body[data-pane="tickets"] .topbar-search,
+    body[data-pane="profile"] .topbar-search,
+    body[data-pane="tickets"] .cats,
+    body[data-pane="profile"] .cats,
+    body[data-pane="tickets"] .hamburger,
+    body[data-pane="profile"] .hamburger { display: none; }
+
+    body[data-pane="tickets"] .mobile-back,
+    body[data-pane="profile"] .mobile-back {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        flex: 0 0 auto;
+        border: none;
+        background: none;
+        color: var(--text-dark);
+        font-size: 26px;
+        line-height: 1;
+        cursor: pointer;
+    }
+    body[data-pane="tickets"] .mobile-title,
+    body[data-pane="profile"] .mobile-title {
+        display: block;
+        font-size: 18px;
+        font-weight: 800;
+        color: var(--text-dark);
+    }
+
+    /* Profile fills the screen, stacked */
+    #pane-profile { flex-direction: column; }
+    .profile-scroll { padding: 16px; width: 100%; }
+
+    /* Compact hero card so nothing overflows */
+    .profile-hero-card {
+        flex-direction: column;
+        align-items: flex-start;
+        text-align: left;
+        gap: 14px;
+        padding: 18px;
+        margin-bottom: 18px;
+    }
+    .profile-avatar-lg { width: 56px; height: 56px; font-size: 26px; }
+    .profile-hero-info .pname { font-size: 18px; word-break: break-word; }
+    .profile-hero-info .pemail { word-break: break-word; }
+    .profile-stats {
+        margin-left: 0;
+        width: 100%;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+    }
+    .pstat-val { font-size: 16px; }
+
+    /* Tabs scroll horizontally */
+    .profile-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .profile-tab { white-space: nowrap; flex-shrink: 0; }
+
+    /* Tickets pane padding */
+    .tickets-inner { padding: 16px; }
+}
+
+/* ── Step 4b: slim mobile profile hero + hide logout arrow + tidy search ── */
+@media (max-width: 768px) {
+    /* Remove the → quick-logout arrow (Account page still has Log Out) */
+    .sidebar-user > button { display: none; }
+
+    /* Thin, compact hero: avatar + name on one row, small stats below */
+    .profile-hero-card {
+        flex-direction: row;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 12px 14px;
+        margin-bottom: 14px;
+        border-radius: 16px;
+    }
+    .profile-avatar-lg {
+        width: 38px;
+        height: 38px;
+        font-size: 18px;
+        border-radius: 11px;
+        border-width: 1px;
+    }
+    .profile-hero-info { flex: 1; min-width: 0; }
+    .profile-hero-info .pname {
+        font-size: 15px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .profile-hero-info .pemail {
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .profile-stats {
+        margin-left: 0;
+        width: 100%;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+    }
+    .pstat-val { font-size: 14px; }
+    .pstat-lbl { font-size: 8px; }
+
+    /* Hide the mini profile tabs — each menu option is its own full screen */
+    .profile-tabs { display: none; }
+}
+
+/* ── Step 5: profile hero only on Account / Last Routes / Favourites ── */
+@media (max-width: 768px) {
+    body[data-tab="settings"] .profile-hero-card,
+    body[data-tab="payment"]  .profile-hero-card { display: none; }
+}
+
+/* ── Step 6: readable drawer email; ← (map) + ☰ both on option pages ── */
+@media (max-width: 768px) {
+    .sidebar-user .user-info { min-width: 0; }
+    .sidebar-user .user-info .email {
+        font-size: 12px;
+        line-height: 1.35;
+        word-break: break-all;
+        white-space: normal;
+    }
+    /* Keep ☰ available on option pages so you can jump to another section */
+    body[data-pane="tickets"] .hamburger,
+    body[data-pane="profile"] .hamburger { display: flex; }
+    /* Back arrow sits first */
+    .mobile-back { order: -1; }
+}
+
+/* ── Step 6b: long emails wrap to the next line instead of overflowing ── */
+@media (max-width: 768px) {
+    #sidebarEmail, #profileEmail, #paymentEmail, #accountEmail {
+        min-width: 0;
+        max-width: 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+}
+
+/* ── Step 7: show the map (stack on mobile), tidy search, move AI button ── */
+@media (max-width: 768px) {
+    #pane-map { flex-direction: column; }
+    #map { flex: 0 0 auto; height: 45vh; width: 100%; }
+    .map-sidebar {
+        width: 100%;
+        flex: 1 1 auto;
+        min-height: 0;
+        border-left: none;
+        border-top: 1px solid var(--border-mid);
+    }
+    /* AI button on the right so it doesn't cover the eco points */
+    .ai-fab { left: auto; right: 18px; bottom: 18px; }
+    /* Compact search text */
+    .search-seg select, .search-seg input { font-size: 12px !important; }
+    .search-btn { font-size: 12px; padding: 9px 14px; }
+}
+
+/* ── Step 8: keep the map under the drawer + compact search ── */
+#map { isolation: isolate; }   /* contain Leaflet's internal z-indexes so the map can't paint over the menu */
+
+@media (max-width: 768px) {
+    /* Drawer + scrim clearly above the Leaflet map */
+    .sidebar { z-index: 2000; }
+    .menu-scrim.open { z-index: 1900; }
+
+    /* More compact search bar (shorter + smaller text) */
+    .topbar { padding: 8px 10px; gap: 8px; }
+    .search-seg { padding: 0 8px; gap: 5px; }
+    .search-seg select,
+    .search-seg input { font-size: 11px !important; padding: 8px 0 !important; }
+    .search-btn { font-size: 11px; padding: 8px 12px; }
+}
+
+/* ── Step 9: option pages show only ← (opens menu); ✕ closes the menu ── */
+.menu-close { display: none; }
+
+@media (max-width: 768px) {
+    /* Remove the ☰ from option pages — only the ← remains */
+    body[data-pane="profile"] .hamburger,
+    body[data-pane="tickets"] .hamburger { display: none; }
+
+    /* ✕ close button inside the open drawer */
+    .menu-close {
+        display: block;
+        position: absolute;
+        top: 12px; right: 12px;
+        width: 34px; height: 34px;
+        border: none;
+        background: var(--bg-app);
+        border-radius: 50%;
+        font-size: 15px;
+        color: var(--text-mid);
+        cursor: pointer;
+        z-index: 5;
+    }
+}
+
+/* ── Step 10: narrower search + Google-Maps draggable routes sheet ── */
+.sheet-handle { display: none; }
+
+@media (max-width: 768px) {
+    /* Search shrinks to share the top row with ☰ (no longer full width) */
+    .topbar-search { min-width: 0; }
+    .search-seg { min-width: 0; }
+    .search-seg select { min-width: 0; }
+
+    /* Map fills the whole pane; routes panel becomes an overlay bottom sheet */
+    #pane-map { position: relative; }
+    #map { position: absolute; inset: 0; height: auto !important; flex: none; }
+    .ai-fab { z-index: 450; }
+
+    .map-sidebar {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        width: 100%;
+        height: 40vh;
+        border-left: none;
+        border-top: none;
+        border-radius: 18px 18px 0 0;
+        box-shadow: 0 -6px 24px rgba(15, 23, 42, 0.16);
+        z-index: 400;
+        transition: height 0.25s ease;
+        touch-action: none;
+    }
+    .sheet-handle {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 10px 0 6px;
+        cursor: grab;
+        flex-shrink: 0;
+    }
+    .sheet-handle span {
+        display: block;
+        width: 42px; height: 5px;
+        border-radius: 3px;
+        background: var(--border-mid);
+    }
+    .map-sidebar .routes-list { touch-action: pan-y; }
+}
+
+/* ── Step 11: compact, Google-sized search bar on mobile ── */
+@media (max-width: 768px) {
+    .topbar { padding: 7px 10px; gap: 7px; }
+    .topbar-search { border-radius: 22px; }
+    .search-seg { padding: 0 8px; gap: 4px; }
+    .search-seg select { font-size: 12px !important; padding: 7px 0 !important; }
+    .search-seg > span { font-size: 13px; }         /* the 📍 / 🏁 icons */
+    .search-btn { padding: 7px 11px !important; font-size: 11px; }
+    .search-btn[title="Swap"] { padding: 7px 9px !important; font-size: 13px !important; }
+}
+
+/* ── Step 12: Search button as an icon so the bar fits (Google-like) ── */
+@media (max-width: 768px) {
+    .topbar-search > .search-btn:last-child {
+        font-size: 0 !important;
+        padding: 0 14px !important;
+    }
+    .topbar-search > .search-btn:last-child::after {
+        content: "→";
+        font-size: 15px;
+        font-weight: 700;
+    }
+    .search-btn[title="Swap"] { padding: 7px 8px !important; font-size: 13px !important; }
+}
+
+/* ── Step 13: smaller filter chips on mobile so they all fit ── */
+@media (max-width: 768px) {
+    .cats { gap: 6px; }
+    .cat-chip { padding: 6px 10px; font-size: 10px; }
+}
+
+/* ── Step 14: make the search bar thinner (reduce height only, keep width) ── */
+@media (max-width: 768px) {
+    .search-seg select { padding-top: 4px !important; padding-bottom: 4px !important; }
+    .search-btn { padding-top: 6px !important; padding-bottom: 6px !important; }
+}
+
+/* ── Step 15: force a slim fixed height on the origin/destination bar ── */
+@media (max-width: 768px) {
+    .topbar-search { height: 36px; align-items: stretch; }
+    .topbar-search .search-seg {
+        height: 36px;
+        align-items: center;
+    }
+    .topbar-search .search-btn {
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    .search-seg select {
+        height: 36px;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+}
+
+/* ── Step 16: chips back to original size; force a truly slim search bar ── */
+@media (max-width: 768px) {
+    /* revert the chip shrink */
+    .cats { gap: 7px; }
+    .cat-chip { padding: 7px 14px; font-size: 11px; }
+
+    /* force the origin/destination bar to a slim height */
+    .topbar-search { height: 32px !important; min-height: 32px !important; }
+    .topbar-search .search-seg { height: 32px !important; }
+    .topbar-search .search-btn { height: 32px !important; }
+    .search-seg select {
+        height: 32px !important;
+        line-height: 32px !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    .search-seg > span { line-height: 32px; }
+}
+
+/* ── Step 17: Google-Maps style stacked search (origin over destination) ── */
+@media (max-width: 768px) {
+    .topbar { align-items: flex-start; }
+    .hamburger { margin-top: 2px; }
+
+    .topbar-search {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "origin swap"
+            "dest   swap"
+            "search search";
+        height: auto !important;
+        min-height: 0 !important;
+        align-items: stretch;
+        border-radius: 14px;
+        padding: 0;
+        gap: 0;
+        max-width: none;
+    }
+
+    /* origin on top, destination below */
+    .search-seg { height: auto !important; border-right: none !important; padding: 9px 12px !important; min-width: 0; }
+    .search-seg:nth-of-type(1) { grid-area: origin; border-bottom: 1px solid var(--border-mid); }
+    .search-seg:nth-of-type(2) { grid-area: dest; }
+    .search-seg select { height: auto !important; line-height: normal !important; }
+
+    /* swap: round button on the right, vertical arrows */
+    .search-btn[title="Swap"] {
+        grid-area: swap;
+        align-self: center;
+        justify-self: center;
+        width: 34px; height: 34px !important;
+        margin-right: 6px;
+        border-radius: 50% !important;
+        background: var(--bg-white) !important;
+        color: var(--text-dark) !important;
+        border: 1px solid var(--border-mid) !important;
+        font-size: 0 !important;
+        padding: 0 !important;
+    }
+    .search-btn[title="Swap"]::after { content: "\2195"; font-size: 15px; }
+
+    /* Search button: full-width row at the bottom of the box */
+    .topbar-search > .search-btn:last-child {
+        grid-area: search;
+        width: 100%;
+        height: 38px !important;
+        border-top: 1px solid var(--border-mid);
+        border-radius: 0 0 14px 14px !important;
+        font-size: 12px !important;
+        padding: 0 !important;
+    }
+    .topbar-search > .search-btn:last-child::after { content: "" !important; }
+}
+
+/* ── Step 18: mobile Search button without the → arrow ── */
+@media (max-width: 768px) {
+    .topbar-search > .search-btn:last-child { font-size: 0 !important; }
+    .topbar-search > .search-btn:last-child::after {
+        content: "Search" !important;
+        font-size: 12px !important;
+        font-weight: 700;
+    }
+}
+
+/* ── Step 19: nicer back-arrow button ── */
+@media (max-width: 768px) {
+    body[data-pane="tickets"] .mobile-back,
+    body[data-pane="profile"] .mobile-back {
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--border-mid) !important;
+        background: var(--bg-app) !important;
+        border-radius: 12px !important;
+        color: var(--text-dark) !important;
+        font-size: 20px !important;
+    }
+}
+
+/* ── Step 20: breathing room above the search bar on mobile ── */
+@media (max-width: 768px) {
+    .topbar { padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+}
+
+/* ── Step 21: on option pages, center the title (+icon) with the back arrow ── */
+@media (max-width: 768px) {
+    body[data-pane="tickets"] .topbar,
+    body[data-pane="profile"] .topbar { align-items: center; }
+    body[data-pane="tickets"] .mobile-title,
+    body[data-pane="profile"] .mobile-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        line-height: 1;
+    }
+}
+
+/* ── Step 22: center the filter chips on mobile ── */
+@media (max-width: 768px) {
+    .cats { justify-content: center; }
+}
+
+/* ── Step 23: full-width search + ☰ floating on map + chips span search width ── */
+.map-menu-fab { display: none; }
+
+@media (max-width: 768px) {
+    /* menu floats on the map now — hide the header hamburger */
+    .hamburger { display: none !important; }
+
+    /* search fills the row */
+    .topbar-search { width: 100%; }
+
+    /* floating menu button, top-left of the map */
+    .map-menu-fab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        top: 12px; left: 12px;
+        width: 40px; height: 40px;
+        z-index: 500;
+        border: none;
+        border-radius: 10px;
+        background: var(--bg-white);
+        color: var(--text-dark);
+        font-size: 18px;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+        cursor: pointer;
+    }
+
+    /* chips fill the same width as the search (segmented look) */
+    .cats .cat-chip {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+}
+
+/* ── Step 24: autocomplete suggestion list (desktop + mobile) ── */
+.ac-list {
+    display: none;
+    position: fixed;
+    z-index: 1500;
+    background: var(--bg-white);
+    border: 1px solid var(--border-mid);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+    max-height: 250px;
+    overflow-y: auto;
+    padding: 4px;
+}
+.ac-item {
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text-dark);
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ac-item:hover { background: var(--bg-app); }
+
+/* ── Step 25: narrower search (more side margin) + sheet matched to it ── */
+@media (max-width: 768px) {
+    .topbar { padding-left: 16px; padding-right: 16px; }
+    .map-sidebar { left: 16px; right: 16px; width: auto; }
+}
+
+/* ── Step 26: Smart Routes sheet spans full width ── */
+@media (max-width: 768px) {
+    .map-sidebar { left: 0; right: 0; width: 100%; }
+}
+
+/* ── Stop popup: per-bus delay chip ────────────────────────────────── */
+.delay-chip{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:50px}
+.d-ontime{background:#d1fae5;color:#065f46}
+.d-late{background:#fee2e2;color:#991b1b}
+.d-unknown{background:#f1f5f9;color:#475569}
+.d-live{box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+.d-hist{opacity:.9}

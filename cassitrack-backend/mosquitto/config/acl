@@ -12,6 +12,11 @@
 # Subscribes to all bus positions; never publishes on the bus topics.
 user cassitrack-backend
 topic read cassitrack/#
+# Docker healthcheck (docker-compose.yml) publishes "ping" to this topic to
+# verify the broker is alive — needs write access or the container is stuck
+# permanently "unhealthy", which blocks cassitrack from starting (depends_on
+# mosquitto: condition: service_healthy).
+topic write health
 
 # ── Bus publisher (simulator OR real ESP32) ────────────────────────────────────
 # Can only publish to its own vehicle topic — cannot subscribe or spoof other buses.

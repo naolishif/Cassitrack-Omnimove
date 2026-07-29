@@ -1,6 +1,7 @@
 package it.unicas.cassitrack.dto.siri;
 
 import it.unicas.cassitrack.model.VehiclePosition;
+import it.unicas.cassitrack.service.CrowdingService;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -115,13 +116,6 @@ public class SiriMapper {
      *                  fewSeatsAvailable | standingAvailable | full
      */
     private static String computeOccupancy(Integer passengers, Integer capacity) {
-        if (passengers == null || capacity == null || capacity == 0) return null;
-        double ratio = (double) passengers / capacity;
-        if (ratio < 0.20) return "empty";
-        if (ratio < 0.50) return "manySeatsAvailable";
-        if (ratio < 0.65) return "seatsAvailable";
-        if (ratio < 0.80) return "fewSeatsAvailable";
-        if (ratio < 0.95) return "standingAvailable";
-        return "full";
+        return CrowdingService.siriOccupancy(passengers, capacity);
     }
 }

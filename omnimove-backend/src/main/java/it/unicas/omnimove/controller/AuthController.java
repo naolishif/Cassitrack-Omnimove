@@ -234,6 +234,7 @@ public class AuthController {
         userRepo.save(user);
 
         emailService.sendVerificationEmail(user.getEmail(), newToken);
+        securityAuditService.verificationEmailResent(user.getEmail());
 
         return ResponseEntity.ok(AuthResponse.builder()
                 .message("Verification email resent. Please check your inbox.")
