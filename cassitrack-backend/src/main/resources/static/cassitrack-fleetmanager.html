@@ -387,14 +387,18 @@
                         <th>Plate</th>
                         <th>Assigned route</th>
                         <th class="dm-num">Capacity</th>
-                        <th>Status</th>
+                        <!-- Registry state (is this vehicle in the fleet / laid up
+                             / in the workshop) — NOT what it is doing right now. -->
+                        <th>Fleet status</th>
+                        <!-- What it is doing right now, from the live feed. -->
+                        <th>Live</th>
                         <th>Antenna ID</th>
                         <th class="dm-center">On map</th>
                         <th class="dm-right">Actions</th>
                     </tr>
                     </thead>
                     <tbody id="dmTableBody">
-                    <tr><td colspan="8" class="dm-empty">Loading…</td></tr>
+                    <tr><td colspan="9" class="dm-empty">Loading…</td></tr>
                     </tbody>
                 </table>
             </div>

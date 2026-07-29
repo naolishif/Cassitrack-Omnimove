@@ -158,6 +158,10 @@
                 // (Leaflet lazy-renders bindPopup() strings), so the dynamic colours
                 // must be (re-)applied at that moment.
                 sm.on('popupopen', e => applyDynStyles(e.popup.getElement()));
+                // Raise it above the routes' invisible click targets straight
+                // away, so stops are clickable on the very first paint rather
+                // than only after the first vehicle poll re-runs the ordering.
+                sm.bringToFront();
                 st.marker = sm;
             });
 
@@ -181,11 +185,18 @@
     let fleetSize = 4;
 
     // ── Bus map-visibility (user story) ──────────────────────────────────────
-    // vehicle_ids currently HIDDEN from the map. The bus stays fully tracked
-    // (data keeps updating, it still appears in lists) — only its map marker is
-    // suppressed. A plain in-memory Set persists for the session but not across
-    // a refresh, exactly as required.
-    const hiddenBuses = new Set();
+    // Map visibility has ONE source of truth: buses.map_visible in the database,
+    // delivered on each vehicle payload as `map_visible`.
+    //
+    // There used to be a second, parallel mechanism here — an in-memory Set of
+    // hidden vehicle_ids driven by the 👁 button. Because the Data Management
+    // switch wrote to the database and the eye wrote to that Set, the two
+    // controls could disagree: neither reflected the other, and toggling one
+    // left the other showing the opposite state. Both now read and write the
+    // same persisted flag, so they are simply two views of one setting.
+    //
+    // A hidden bus stays fully tracked — its data keeps updating and it remains
+    // in the sidebar list, dimmed; only its map marker is suppressed.
 
     // ── Route filter (Fleet Monitor) ─────────────────────────────────────────
     // When set to a route id, only buses on that route are shown on the map and
@@ -209,18 +220,66 @@
     function applyBusVisibility(id){
         const m = markers[id];
         if(!m) return;
-        const visible = !hiddenBuses.has(id) && busPassesFilter(vehicleData[id]);
+        const visible = !isBusHidden(id) && busPassesFilter(vehicleData[id]);
         if(visible){ if(!map.hasLayer(m)) m.addTo(map); }
         else if(map.hasLayer(m)) map.removeLayer(m);
     }
 
-    // Flip a bus's visibility and keep BOTH surfaces (map sidebar + Data
-    // Management table) in sync — they both read the same hiddenBuses Set.
-    function toggleBusVisibility(id){
-        if(hiddenBuses.has(id)) hiddenBuses.delete(id); else hiddenBuses.add(id);
+    /**
+     * Is this bus hidden from the map?
+     *
+     * Reads buses.map_visible, delivered on the vehicle payload — the single
+     * flag behind both the Data Management "On map" switch and the sidebar 👁
+     * button. Absent or true means visible, so a bus is only hidden when
+     * somebody has explicitly turned it off.
+     */
+    function isBusHidden(id){
+        const v = vehicleData[id];
+        return !!v && v.map_visible === false;   // absent/true → visible
+    }
+
+    /**
+     * Flip a bus's map visibility from the sidebar 👁 button.
+     *
+     * Writes the same buses.map_visible flag the Data Management switch uses,
+     * through the same endpoint — so the two controls can never disagree, and
+     * the choice survives a page reload.
+     *
+     * Applied optimistically for an instant response, then reverted if the
+     * server rejects it. The next /vehicles poll replaces the object wholesale
+     * with the server's, so the local value is confirmed or corrected within
+     * one refresh and cannot drift.
+     */
+    async function toggleBusVisibility(id){
+        const v = vehicleData[id];
+        if(!v) return;
+        if(v.bus_id == null && v.busId == null){
+            // No registry row behind this vehicle: nothing to persist against.
+            alert('This vehicle is not linked to a bus in the registry, so its map visibility cannot be saved.');
+            return;
+        }
+        const busId   = v.busId != null ? v.busId : v.bus_id;
+        const nextVis = isBusHidden(id);   // hidden -> show, visible -> hide
+
+        const before = v.map_visible;
+        v.map_visible = nextVis;                 // optimistic
         applyBusVisibility(id);
-        updateRouteVisibility();   // a toggled-off bus also hides its route/stops (if it was the last one)
+        updateRouteVisibility();                 // may be the route's last visible bus
         updateFleet(Object.values(vehicleData));
+
+        try{
+            const r = await fetch(`${API}/buses/${busId}/visibility?visible=${nextVis}`, {method:'PUT'});
+            if(!r.ok) throw new Error(r.status);
+            // Keep the Data Management table honest if it has already been loaded.
+            const b = dmState.buses.find(x => x.busId === busId);
+            if(b) b.mapVisible = nextVis;
+        }catch(e){
+            v.map_visible = before;              // revert
+            applyBusVisibility(id);
+            updateRouteVisibility();
+            updateFleet(Object.values(vehicleData));
+            alert('Could not update map visibility.');
+        }
     }
 
     // CSP FIX (A05): schedule_status is a fixed 5-value domain (see SC above), so
@@ -288,7 +347,7 @@
             // Suppress the marker if this bus is hidden (data above still updated → bus stays tracked).
             applyBusVisibility(v.vehicle_id);
             // Focus follow: keep the map centred on the selected bus as it moves.
-            if (selectedVeh === v.vehicle_id && !hiddenBuses.has(v.vehicle_id))
+            if (selectedVeh === v.vehicle_id && !isBusHidden(v.vehicle_id))
                 map.panTo([v.lat, v.lon], { animate: true, duration: 0.6 });
         });
         // refresh which routes/stops are shown (buses may have moved on/off routes,
@@ -378,7 +437,7 @@
             const pax=v.estimated_passengers?'~'+v.estimated_passengers:'—';
             const cp=crowdPct(v),cc=crowdColor(v.crowding_level);
             const rc=routeColor(v.route_id);
-            const hidden=hiddenBuses.has(v.vehicle_id);
+            const hidden=isBusHidden(v.vehicle_id);
             const d=document.createElement('div');
             d.className='vcard'+(selectedVeh===v.vehicle_id?' selected':'')+(hidden?' hidden-bus':'');
             d.innerHTML=`<div class="vcard-stripe" data-status="${st}"></div><div class="vcard-top"><div class="vcard-id" data-fg="${rc}">${escHtml(v.vehicle_id)}</div><div class="vcard-actions"><div class="chip" data-status="${st}">${l}</div><button type="button" class="vis-toggle" data-hidden="${hidden}" aria-label="Toggle map visibility" title="${hidden?'Hidden from map — click to show':'Visible on map — click to hide'}">${hidden?'🚫':'👁'}</button></div></div><div class="vcard-grid"><div class="vitem"><div class="vitem-lbl">Speed</div><div class="vitem-val">${spd} km/h</div></div><div class="vitem"><div class="vitem-lbl">Passengers</div><div class="vitem-val">${pax}</div></div><div class="vitem"><div class="vitem-lbl">Crowding</div><div class="vitem-val">${escHtml(v.crowding_level)||'—'}</div></div><div class="vitem"><div class="vitem-lbl">Route</div><div class="vitem-val" data-fg="${rc}">${escHtml(v.route_name)||'—'}</div></div></div><div class="vadh" data-status="${st}">${adherenceText(v)}</div><div class="cbar"><div class="cbar-fill" data-bg="${cc}" data-width-pct="${cp}"></div></div>`;
@@ -399,7 +458,7 @@
         const l   = SL[v.schedule_status]||'LIVE';
         const rc  = routeColor(v.route_id);
         const cp  = crowdPct(v.crowding_level), cc = cp>70?'#EF4444':cp>40?'#F59E0B':'#22C55E';
-        const hidden   = hiddenBuses.has(v.vehicle_id);
+        const hidden   = isBusHidden(v.vehicle_id);
         const delayTxt = v.delay_minutes>0 ? `+${v.delay_minutes}m` : 'In orario';
         const eta = v.eta_seconds ? Math.round(v.eta_seconds/60)+' min' : '—';
         const el  = document.createElement('div');
@@ -443,7 +502,7 @@
             markers[id]?.closePopup();
         }else{
             selectedVeh=id;const v=vehicleData[id];
-            if(v && !hiddenBuses.has(id)){map.flyTo([v.lat,v.lon],16,{duration:1});markers[id]?.openPopup();}
+            if(v && !isBusHidden(id)){map.flyTo([v.lat,v.lon],16,{duration:1});markers[id]?.openPopup();}
         }
         updateRouteVisibility();
         updateFleet(Object.values(vehicleData));
@@ -478,7 +537,7 @@
             explicit = true;
         } else {
             showSet = new Set();
-            lastVehicles.forEach(v=>{ if(v.route_id && !hiddenBuses.has(v.vehicle_id) && busPassesFilter(v)) showSet.add(v.route_id); });
+            lastVehicles.forEach(v=>{ if(v.route_id && !isBusHidden(v.vehicle_id) && busPassesFilter(v)) showSet.add(v.route_id); });
         }
         // Route polylines.
         //
@@ -507,7 +566,10 @@
             // which line the sidebar list has been narrowed to.
             const selected = routeFilter === rid;
             pl.setStyle({opacity: active ? .8 : .25, weight: selected ? 7 : 4});
-            if(hit) hit.bringToFront();      // keep the click target on top
+            // NOTE: deliberately no hit.bringToFront() here. Raising the click
+            // targets put them above the stop circles — which are SVG paths in
+            // the same pane — and made the stops unclickable. The stops are
+            // raised instead, just below.
         });
         // Stops follow their route: hidden only when a deliberate selection has
         // filtered that route away. Otherwise they stay on the map alongside the
@@ -516,7 +578,16 @@
             if(!st.marker) return;
             const show = !explicit
                 || (st.routeIds && [...st.routeIds].some(rid=>showSet.has(rid)));
-            if(show){ if(!map.hasLayer(st.marker)) st.marker.addTo(map); }
+            if(show){
+                if(!map.hasLayer(st.marker)) st.marker.addTo(map);
+                // Stops must sit ABOVE the routes' invisible click targets.
+                // A circleMarker is an SVG path, so it shares the overlay pane
+                // with the polylines — without this the 18px hit area laid over
+                // each line swallows the click and stops become unclickable.
+                // Done after the polyline loop so the ordering is final: small
+                // precise targets win over the broad line ones.
+                st.marker.bringToFront();
+            }
             else if(map.hasLayer(st.marker)) map.removeLayer(st.marker);
         });
     }
@@ -1480,7 +1551,10 @@
         routeId:    '',
         editingId:  null,   // null = creating, number = editing
         deletingId: null,
-        routes:     []
+        routes:     [],
+        // Last loaded bus list. Kept so a visibility toggle can resolve
+        // busId -> antenna id without re-querying the API.
+        buses:      []
     };
 
     /* ── Loading ──────────────────────────────────────────────────── */
@@ -1507,7 +1581,7 @@
 
     async function dmLoadBuses() {
         const body = document.getElementById('dmTableBody');
-        body.innerHTML = '<tr><td colspan="8" class="dm-empty">Loading…</td></tr>';
+        body.innerHTML = '<tr><td colspan="9" class="dm-empty">Loading…</td></tr>';
 
         const params = new URLSearchParams();
         if (dmState.search)  params.set('search',  dmState.search);
@@ -1517,14 +1591,41 @@
         try {
             const r = await fetch(`${API}/buses?${params.toString()}`);
             if (!r.ok) throw new Error(r.status);
-            dmRenderTable(await r.json());
+            dmState.buses = await r.json();
+            dmRenderTable(dmState.buses);
         } catch (e) {
-            body.innerHTML = '<tr><td colspan="8" class="dm-empty">Could not load buses.</td></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="dm-empty">Could not load buses.</td></tr>';
             document.getElementById('dmCount').textContent = '';
         }
     }
 
     /* ── Rendering ────────────────────────────────────────────────── */
+
+    /**
+     * What the bus is doing RIGHT NOW, from the live feed — deliberately
+     * separate from the registry `status` column beside it.
+     *
+     * `status` answers "is this vehicle part of the working fleet?"
+     * (ACTIVE / INACTIVE / MAINTENANCE — set by the fleet manager, persisted).
+     * This answers "is it out there on a run?" and is derived from telemetry,
+     * so a serviceable ACTIVE bus parked between scheduled runs correctly reads
+     * ACTIVE + NO TRIP rather than the two being conflated.
+     *
+     * Reads the same vehicleData the Fleet Monitor polls, so it costs no extra
+     * request; it refreshes whenever the Data Management table is reloaded.
+     */
+    function dmLivePill(b) {
+        if (!b.currentVehicleId)
+            return '<span class="dm-muted">no unit</span>';   // nothing transmits for this bus
+
+        const v = vehicleData[b.currentVehicleId];
+        if (!v)
+            return '<span class="dm-pill dm-pill-inactive">OFFLINE</span>';   // unit fitted, silent
+
+        return v.trip_id
+            ? '<span class="dm-pill dm-pill-active">ON TRIP</span>'
+            : '<span class="dm-pill dm-pill-maintenance">NO TRIP</span>';     // moving or idle, unscheduled
+    }
 
     function dmStatusPill(status) {
         const map = {
@@ -1542,7 +1643,7 @@
 
         if (!buses.length) {
             const filtering = dmState.search || dmState.status || dmState.routeId;
-            body.innerHTML = `<tr><td colspan="8" class="dm-empty">${
+            body.innerHTML = `<tr><td colspan="9" class="dm-empty">${
                 filtering ? 'No buses match these filters.' : 'No buses yet — click “+ New bus”.'
             }</td></tr>`;
             count.textContent = '';
@@ -1556,6 +1657,7 @@
             <td>${b.routeName ? escHtml(b.routeName) : '<span class="dm-muted">Unassigned</span>'}</td>
             <td class="dm-num">${b.numeroPosti}</td>
             <td>${dmStatusPill(b.status)}</td>
+            <td>${dmLivePill(b)}</td>
             <td class="dm-muted">${b.currentVehicleId ? escHtml(b.currentVehicleId) : '—'}</td>
             <td class="dm-center">
                 <label class="dm-switch">
@@ -1690,6 +1792,21 @@
         try {
             const r = await fetch(`${API}/buses/${id}/visibility?visible=${visible}`, { method: 'PUT' });
             if (!r.ok) throw new Error(r.status);
+
+            // The database is updated, but the map reads map_visible from the
+            // /vehicles poll — so without this the change only showed up on the
+            // next refresh, up to ~15 s later. Apply it to the local state at
+            // once so switching to Fleet Monitor already shows the result.
+            // The next poll then confirms the same value; nothing fights.
+            const bus = dmState.buses.find(b => b.busId === id);
+            const vid = bus && bus.currentVehicleId;
+            if (bus) bus.mapVisible = visible;                  // keep the table honest too
+            if (vid && vehicleData[vid]) {
+                vehicleData[vid].map_visible = visible;
+                applyBusVisibility(vid);       // add/remove the marker now
+                updateRouteVisibility();       // its route may gain/lose its last bus
+                updateFleet(Object.values(vehicleData));   // sidebar counts + list
+            }
         } catch (e) {
             checkbox.checked = !visible;          // revert the switch on failure
             alert('Could not update map visibility.');
