@@ -14,4 +14,5 @@ public class JourneyLeg {
     @JsonProperty("distance_metres") private Double distanceMetres;
     @JsonProperty("stop_coords")  private List<double[]> stopCoords;
     private String instruction;
+    @JsonProperty("route_id") private String routeId;
 }

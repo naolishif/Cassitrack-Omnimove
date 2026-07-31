@@ -243,4 +243,41 @@ public class JourneyController {
 
         return ResponseEntity.ok(Map.of("message", "Journey recorded"));
     }
+
+    /**
+     * GET /api/v1/journeys/live-buses?route_ids=LINEA-16,LINEA-3
+     *
+     * Returns live positions of buses operating on the given routes.
+     * Fetches all active vehicles from CassiTrack and filters by route_id.
+     * Returns empty list (never an error) when CassiTrack is unreachable,
+     * so the frontend can handle the stale-data case gracefully.
+     *
+     * Public endpoint — no auth required (same policy as /vehicles on CassiTrack).
+     */
+    @GetMapping("/live-buses")
+    @Operation(summary = "Live bus positions for a set of routes")
+    public ResponseEntity<List<VehicleDTO>> liveBuses(
+            @RequestParam(name = "route_ids", required = false, defaultValue = "") String routeIds) {
+
+        Set<String> filter = Stream.of(routeIds.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
+
+        List<VehicleDTO> vehicles = cassitrackClient.getActiveVehicles();
+
+        if (!filter.isEmpty()) {
+            vehicles = vehicles.stream()
+                    .filter(v -> v.getRouteId() != null && filter.contains(v.getRouteId()))
+                    .collect(Collectors.toList());
+        }
+
+        // Drop vehicles whose last_seen is older than 5 minutes
+        Instant cutoff = Instant.now().minusSeconds(5 * 60);
+        vehicles = vehicles.stream()
+                .filter(v -> v.getLastSeen() != null && v.getLastSeen().isAfter(cutoff))
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(vehicles);
+    }
 }

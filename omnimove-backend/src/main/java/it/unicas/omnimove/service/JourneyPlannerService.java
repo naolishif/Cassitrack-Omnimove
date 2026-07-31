@@ -311,6 +311,7 @@ public class JourneyPlannerService {
                     .durationMinutes(busMin).distanceMetres(busMetres)
                     .instruction(lineLabel)
                     .stopCoords(stopCoordsBetween(tripId, nearestStop, destStop))
+                    .routeId(line.getRouteId())
                     .build());
         } else {
             Transfer t = findBestTransfer(nearestStop, destStop);
@@ -351,6 +352,7 @@ public class JourneyPlannerService {
                         .durationMinutes(l1Min).distanceMetres(m1)
                         .instruction(t.l1Label())
                         .stopCoords(stopCoordsBetween(t.l1TripId(), nearestStop, t.stop()))
+                        .routeId(t.l1RouteId())
                         .build());
                 busLegs.add(JourneyLeg.builder().mode("WAIT")
                         .from(fmtStop(t.stop())).to(fmtStop(t.stop()))
@@ -361,6 +363,7 @@ public class JourneyPlannerService {
                         .durationMinutes(l2Min).distanceMetres(m2)
                         .instruction(t.l2Label())
                         .stopCoords(stopCoordsBetween(t.l2TripId(), t.stop(), destStop))
+                        .routeId(t.l2RouteId())
                         .build());
             } else {
                 log.warn("BUS: nessuna linea diretta né cambio trovato tra {} e {}", nearestStop, destStop);

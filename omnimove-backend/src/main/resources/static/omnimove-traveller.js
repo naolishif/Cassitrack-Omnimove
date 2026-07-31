@@ -694,8 +694,57 @@ function renderRoutes(data) {
     }).join('');
 }
 
-// selectMode — only highlights the card and shows the Start Journey banner.
-// The actual map drawing happens in startJourney so GPS is resolved first.
+// ── Route preview (shown on card selection, before Start Journey) ──
+
+function clearRoutePreview() {
+    (window._previewLayers || []).forEach(l => map.removeLayer(l));
+    window._previewLayers = [];
+}
+
+function showRoutePreview(mode, legs) {
+    clearRoutePreview();
+    window._previewLayers = [];
+
+    const origin = window._currentOrigin;
+    const dest   = window._currentDest;
+    if (!origin || !dest) return;
+
+    const color  = LINE_COLORS[mode] || '#0f172a';
+
+    if (mode === 'BUS' && legs && legs.length > 0) {
+        const busColors = ['#0f172a', '#3b82f6', '#7c3aed'];
+        let colorIdx = 0;
+        legs.forEach(leg => {
+            if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
+                const legColor = busColors[colorIdx++ % busColors.length];
+                const coords = leg.stop_coords.map(c => [c[0], c[1]]);
+                window._previewLayers.push(
+                    L.polyline(coords, { color: legColor, weight: 4, opacity: 0.75, dashArray: '8,4' }).addTo(map)
+                );
+            } else if (leg.mode === 'WALK' && leg.stop_coords && leg.stop_coords.length >= 2) {
+                const coords = leg.stop_coords.map(c => [c[0], c[1]]);
+                window._previewLayers.push(
+                    L.polyline(coords, { color: '#94a3b8', weight: 3, opacity: 0.6, dashArray: '5,6' }).addTo(map)
+                );
+            }
+        });
+        const allCoords = legs
+            .filter(l => l.stop_coords)
+            .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
+        if (allCoords.length > 1) map.fitBounds(allCoords, { padding: [50, 50] });
+    } else {
+        window._previewLayers.push(
+            L.polyline(
+                [[origin.lat, origin.lon], [dest.lat, dest.lon]],
+                { color, weight: 4, opacity: 0.7, dashArray: mode === 'WALK' ? '8,8' : '8,4' }
+            ).addTo(map)
+        );
+        map.fitBounds([[origin.lat, origin.lon], [dest.lat, dest.lon]], { padding: [50, 50] });
+    }
+}
+
+// selectMode — highlights the card, previews the route on the map, and shows the Start Journey banner.
+// Full GPS resolution + solid lines happen in startJourney.
 function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
     selectedJourney = {
         mode, label, greenIndex,
@@ -741,6 +790,9 @@ function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
     document.querySelector('.routes-list').appendChild(banner);
 
     if (!window.matchMedia('(max-width: 768px)').matches) showToast(`${modeEmoji} ${label} selected — tap Start Journey`);
+
+    // Show dashed preview on map immediately
+    showRoutePreview(mode, selectedJourney.legs || []);
 }
 
 async function startJourney() {
@@ -790,8 +842,12 @@ async function startJourney() {
         if (window._stopMarkers) window._stopMarkers.forEach(m => map.removeLayer(m));
 
         // 4) Pulisci i layer del viaggio precedente
+        clearRoutePreview();
         ['_routeLine','_routeLineGps','_journeyDestMarker','_journeyOriginMarker','_journeyGpsMarker']
             .forEach(k => { if (window[k]) { map.removeLayer(window[k]); window[k] = null; } });
+        clearInterval(window._busPollInterval);
+        window._busPollInterval = null;
+        if (typeof clearBusMarkers === 'function') clearBusMarkers();
 
         const { mode, label, greenIndex, distanceKm } = selectedJourney;
         const color = LINE_COLORS[mode] || '#0f172a';
@@ -949,6 +1005,20 @@ async function startJourney() {
 
         showToast(`Journey started! ${durationMin} min to destination`);
 
+        // 11) Live bus markers (BUS journeys only)
+        if (mode === 'BUS') {
+            clearInterval(window._busPollInterval);
+            window._busMarkers = window._busMarkers || [];
+            const routeIds = (selectedJourney.legs || [])
+                .filter(l => l.mode === 'BUS' && l.route_id)
+                .map(l => l.route_id);
+            if (routeIds.length > 0) {
+                window._activeBusRouteIds = routeIds;
+                fetchAndRenderBusMarkers();
+                window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+            }
+        }
+
     } catch (err) {
         console.error('startJourney failed:', err);
         showToast('⚠️ Impossibile avviare il percorso', true);
@@ -957,8 +1027,93 @@ async function startJourney() {
     }
 }
 
+// ── Live bus markers ──────────────────────────────────────────────
+
+const BUS_MARKER_HTML = `
+<div style="
+  background:#0f172a;color:white;
+  width:32px;height:32px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);
+  font-size:16px;cursor:pointer">🚌</div>`;
+
+function clearBusMarkers() {
+    (window._busMarkers || []).forEach(m => map.removeLayer(m));
+    window._busMarkers = [];
+    hideStaleNotice();
+}
+
+function renderBusMarkers(vehicles) {
+    clearBusMarkers();
+    vehicles.forEach(v => {
+        if (v.lat == null || v.lon == null) return;
+        const delayTxt = v.delay_minutes == null
+            ? 'Delay unknown'
+            : v.delay_minutes <= 0 ? 'On time' : `${v.delay_minutes} min late`;
+        const etaTxt = v.eta_seconds != null
+            ? `${Math.round(v.eta_seconds / 60)} min`
+            : '—';
+        const popup = `
+            <b>🚌 ${v.vehicle_id || '—'}</b><br>
+            Route: ${v.route_name || v.route_id || '—'}<br>
+            Delay: ${delayTxt}<br>
+            Next stop: ${v.next_stop_name || '—'} · ETA ${etaTxt}`;
+        const icon = L.divIcon({ html: BUS_MARKER_HTML, className: '', iconSize: [32, 32], iconAnchor: [16, 16] });
+        const marker = L.marker([v.lat, v.lon], { icon }).addTo(map).bindPopup(popup);
+        window._busMarkers.push(marker);
+    });
+}
+
+function showStaleNotice() {
+    if (document.getElementById('bus-stale-notice')) return;
+    const el = document.createElement('div');
+    el.id = 'bus-stale-notice';
+    el.style.cssText = [
+        'position:absolute;bottom:80px;left:50%;transform:translateX(-50%)',
+        'background:rgba(30,30,30,0.88);color:#fff;border-radius:10px',
+        'padding:8px 14px;font-size:12px;font-weight:600;z-index:1000',
+        'display:flex;align-items:center;gap:8px;white-space:nowrap;pointer-events:auto'
+    ].join(';');
+    el.innerHTML = '⚠️ Live bus data unavailable — positions may be outdated'
+        + ' <span onclick="this.parentElement.remove()" style="cursor:pointer;opacity:0.7;margin-left:4px">✕</span>';
+    const mapEl = document.getElementById('map');
+    if (mapEl) mapEl.appendChild(el);
+}
+
+function hideStaleNotice() {
+    const el = document.getElementById('bus-stale-notice');
+    if (el) el.remove();
+}
+
+async function fetchAndRenderBusMarkers() {
+    const routeIds = window._activeBusRouteIds || [];
+    if (!routeIds.length) return;
+    try {
+        const vehicles = await apiFetch(
+            '/journeys/live-buses?route_ids=' + routeIds.map(encodeURIComponent).join(',')
+        );
+        const list = Array.isArray(vehicles) ? vehicles : [];
+        if (list.length > 0) {
+            hideStaleNotice();
+            renderBusMarkers(list);
+        } else {
+            clearBusMarkers();
+            showStaleNotice();
+        }
+    } catch (e) {
+        console.warn('Live bus fetch failed:', e);
+        clearBusMarkers();
+        showStaleNotice();
+    }
+}
+
 function endJourney() {
     clearInterval(window._etaInterval);
+    clearInterval(window._busPollInterval);
+    window._busPollInterval = null;
+    clearBusMarkers();
+    clearRoutePreview();
+    window._activeBusRouteIds = [];
     selectedJourney = null;
     window._journeyStarting = false;
 
