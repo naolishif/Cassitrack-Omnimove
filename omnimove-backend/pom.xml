@@ -17,8 +17,6 @@
   <description>OMNIMOVE — Multimodal Journey Planner for Cassino</description>
     <properties>
         <java.version>17</java.version>
-        <maven.compiler.source>25</maven.compiler.source>
-        <maven.compiler.target>25</maven.compiler.target>
         <!-- Pin patched versions not yet bundled in Spring Boot 3.5.5 BOM -->
         <tomcat.version>10.1.55</tomcat.version>
         <spring-security.version>6.5.9</spring-security.version>
