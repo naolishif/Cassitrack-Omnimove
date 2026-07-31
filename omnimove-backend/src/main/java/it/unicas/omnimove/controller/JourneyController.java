@@ -26,13 +26,22 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import it.unicas.omnimove.client.CassitrackClient;
+import it.unicas.omnimove.dto.BusTelemetryDTO;
 import it.unicas.omnimove.dto.VehicleDTO;
+import it.unicas.omnimove.model.Trip;
+import it.unicas.omnimove.repository.TripRepository;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -57,6 +66,9 @@ public class JourneyController {
     private final CassitrackClient      cassitrackClient;
     private final TrafficAwareETAService trafficAwareETAService;
     private final GoogleApiSettingsService googleApiSettings;
+    private final StringRedisTemplate   redisTemplate;
+    private final TripRepository        tripRepository;
+    private final ObjectMapper          objectMapper;
 
     @GetMapping("/stops")
     @Operation(summary = "List active stops for origin/destination pickers")
@@ -247,12 +259,14 @@ public class JourneyController {
     /**
      * GET /api/v1/journeys/live-buses?route_ids=LINEA-16,LINEA-3
      *
-     * Returns live positions of buses operating on the given routes.
-     * Fetches all active vehicles from CassiTrack and filters by route_id.
-     * Returns empty list (never an error) when CassiTrack is unreachable,
-     * so the frontend can handle the stale-data case gracefully.
+     * Returns live positions of active buses, optionally filtered by route.
      *
-     * Public endpoint — no auth required (same policy as /vehicles on CassiTrack).
+     * Data source: OmniMove's own Redis cache (bus:latest:*), which is populated
+     * every ~5 seconds via the SSE stream from CassiTrack. Route resolution is
+     * done against OmniMove's own NeTEx DB (trips → route) — no CassiTrack HTTP
+     * call needed, so this always works even if CassiTrack REST API is slow.
+     *
+     * A bus is considered stale if its GPS timestamp is older than 5 minutes.
      */
     @GetMapping("/live-buses")
     @Operation(summary = "Live bus positions for a set of routes")
@@ -264,19 +278,54 @@ public class JourneyController {
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toSet());
 
-        List<VehicleDTO> vehicles = cassitrackClient.getActiveVehicles();
+        Set<String> keys = redisTemplate.keys("bus:latest:*");
+        if (keys == null || keys.isEmpty()) return ResponseEntity.ok(Collections.emptyList());
 
-        if (!filter.isEmpty()) {
-            vehicles = vehicles.stream()
-                    .filter(v -> v.getRouteId() != null && filter.contains(v.getRouteId()))
-                    .collect(Collectors.toList());
+        Instant staleThreshold = Instant.now().minusSeconds(300); // 5 min
+        List<VehicleDTO> vehicles = new ArrayList<>();
+
+        for (String key : keys) {
+            String json = redisTemplate.opsForValue().get(key);
+            if (json == null) continue;
+            try {
+                BusTelemetryDTO t = objectMapper.readValue(json, BusTelemetryDTO.class);
+
+                // Skip stale data
+                if (t.getTimestamp() != null && t.getTimestamp().isBefore(staleThreshold)) continue;
+
+                // Resolve route from OmniMove's own NeTEx DB via tripId
+                String routeId   = null;
+                String routeName = null;
+                if (t.getTripId() != null) {
+                    Optional<Trip> tripOpt = tripRepository.findById(t.getTripId());
+                    if (tripOpt.isPresent() && tripOpt.get().getRoute() != null) {
+                        routeId   = tripOpt.get().getRoute().getId();
+                        routeName = tripOpt.get().getRoute().getShortName();
+                    }
+                }
+
+                // Apply route filter (no filter = show all active buses)
+                if (!filter.isEmpty() && (routeId == null || !filter.contains(routeId))) continue;
+
+                VehicleDTO dto = new VehicleDTO();
+                dto.setVehicleId(t.getBusId());
+                dto.setLat(t.getLatitude() != 0 ? (double) t.getLatitude() : null);
+                dto.setLon(t.getLongitude() != 0 ? (double) t.getLongitude() : null);
+                dto.setSpeedKmh((double) t.getSpeed());
+                dto.setRouteId(routeId);
+                dto.setRouteName(routeName);
+                dto.setDelayMinutes(t.getDelay());
+                dto.setNextStopName(t.getNextStop());
+                dto.setIsActive(true);
+                dto.setLastSeen(t.getTimestamp());
+                vehicles.add(dto);
+
+            } catch (Exception e) {
+                // log and skip malformed entries
+                org.slf4j.LoggerFactory.getLogger(getClass())
+                        .warn("Failed to parse Redis key {}: {}", key, e.getMessage());
+            }
         }
-
-        // Drop vehicles whose last_seen is older than 5 minutes
-        Instant cutoff = Instant.now().minusSeconds(5 * 60);
-        vehicles = vehicles.stream()
-                .filter(v -> v.getLastSeen() != null && v.getLastSeen().isAfter(cutoff))
-                .collect(Collectors.toList());
 
         return ResponseEntity.ok(vehicles);
     }

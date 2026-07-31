@@ -347,8 +347,9 @@ async function showStopArrivals(stopId, stopName) {
             '/journeys/stops/' + encodeURIComponent(stopId) + '/arrivals?limit=10');
         if (!r.ok) throw new Error(r.status);
         const arrivals = await r.json();
+        const routeCount = new Set(arrivals.map(a => a.route_short_name || a.route_name)).size;
         subtitle.textContent = arrivals.length
-            ? `Next ${arrivals.length} bus${arrivals.length > 1 ? 'es' : ''}`
+            ? `${routeCount} line${routeCount !== 1 ? 's' : ''} · next departures`
             : 'No upcoming buses found';
         renderArrivals(list, arrivals);
     } catch(e) {
@@ -382,43 +383,73 @@ function delayLine(a) {
     return `<span class="delay-chip d-hist d-late">Was ${m} min late${at}</span>`;
 }
 
+// Deterministic color per route short-name (consistent across renders)
+const ROUTE_PALETTE = ['#d32f2f','#1565c0','#2e7d32','#e65100','#6a1b9a','#00695c','#37474f','#ad1457','#0277bd','#558b2f'];
+function routeColor(name) {
+    let h = 0;
+    for (const c of (name || '')) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+    return ROUTE_PALETTE[Math.abs(h) % ROUTE_PALETTE.length];
+}
+
+function etaText(isoString, now) {
+    if (!isoString) return '—';
+    const diff = Math.round((new Date(isoString).getTime() - now) / 1000);
+    if (diff <= 0) return 'Now';
+    if (diff < 60) return `${diff} sec`;
+    return `${Math.round(diff / 60)} min`;
+}
+
 function renderArrivals(list, arrivals) {
     if (!arrivals.length) { list.innerHTML = ''; return; }
     const now = Date.now();
-    list.innerHTML = arrivals.map(a => {
-        const eta     = a.estimated_arrival ? new Date(a.estimated_arrival).getTime() : now;
-        const diffMin = Math.max(0, Math.round((eta - now) / 60000));
-        const diffSec = Math.max(0, Math.round((eta - now) / 1000));
-        const etaText  = diffMin > 0 ? `${diffMin} min` : diffSec > 0 ? `${diffSec} sec` : 'Now';
-        const etaClass = diffMin <= 2 ? 'red' : diffMin <= 5 ? 'amber' : '';
-        const status    = a.schedule_status || '';
-        const cardClass = CARD_CLASS[status] || '';
-        const statusBadge = (status && status !== 'UNKNOWN' && STATUS_BG[status])
-            ? `<span class="arrival-badge" style="${STATUS_BG[status]}">${STATUS_LABEL[status] || escHtml(status)}</span>`
+
+    // Group by route short-name, preserving order of first appearance
+    const groups = new Map();
+    for (const a of arrivals) {
+        const key = a.route_short_name || a.route_name || '?';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(a);
+    }
+
+    list.innerHTML = [...groups.entries()].map(([shortName, group]) => {
+        const color   = routeColor(shortName);
+        const first   = group[0];
+        const second  = group[1];
+        const t1      = etaText(first.estimated_arrival, now);
+        const t2      = second ? etaText(second.estimated_arrival, now) : null;
+        const timesHtml = t2
+            ? `<span class="tmb-t1">${t1}</span><span class="tmb-sep"> | </span><span class="tmb-t2">${t2}</span>`
+            : `<span class="tmb-t1">${t1}</span>`;
+
+        const isLive = first.real_time || first.departed;
+        const rtHtml = isLive
+            ? `<span class="tmb-rt live">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>
+                </svg> Real time</span>`
+            : `<span class="tmb-rt sched">🕐 Scheduled</span>`;
+
+        const direction = first.route_name ? escHtml(first.route_name) : '';
+
+        // Delay note on first arrival only (if live and delayed)
+        let delayHtml = '';
+        if (isLive && first.delay_minutes != null && first.delay_minutes > 0) {
+            delayHtml = `<span class="tmb-delay">${first.delay_minutes} min late</span>`;
+        }
+
+        // Crowding on first arrival
+        const crowding = first.crowding_level;
+        const crowdHtml = (crowding && CROWDING_BG[crowding])
+            ? `<span class="tmb-crowd" style="${CROWDING_BG[crowding]}">Crowding: ${CROWDING_LABEL[crowding]}</span>`
             : '';
-        const crowding = a.crowding_level;
-        const crowdBadge = (crowding && CROWDING_BG[crowding])
-            ? `<span class="arrival-badge" style="${CROWDING_BG[crowding]}">Crowding: ${CROWDING_LABEL[crowding]}</span>`
-            : '';
-        const routeShort = escHtml(a.route_short_name || a.route_name || '?');
-        const routeLong  = (a.route_short_name && a.route_name) ? escHtml(a.route_name) : '';
-        const schTime = a.scheduled_arrival
-            ? new Date(a.scheduled_arrival).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})
-            : '—';
-        const estTime = a.estimated_arrival
-            ? new Date(a.estimated_arrival).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})
-            : '—';
-        return `<div class="arrival-card ${cardClass}">
-            <div class="arrival-top">
-                <div class="arrival-route-info">
-                    <span class="arrival-route-short">${routeShort}</span>
-                    ${routeLong ? `<span class="arrival-route-long">${routeLong}</span>` : ''}
-                </div>
-                <span class="arrival-eta ${etaClass}">${etaText}</span>
-            </div>
-            <div class="arrival-meta">
-                ${statusBadge}${crowdBadge}${delayLine(a)}
-                <span class="arrival-times">Sched: ${schTime} · ETA: ${estTime}</span>
+
+        return `<div class="tmb-route-row">
+            <div class="tmb-badge" style="background:${color}">${escHtml(shortName)}</div>
+            <div class="tmb-info">
+                <div class="tmb-times">${timesHtml}</div>
+                <div class="tmb-meta">${rtHtml}${delayHtml}${crowdHtml}</div>
+                ${direction ? `<div class="tmb-dir">→ ${direction}</div>` : ''}
             </div>
         </div>`;
     }).join('');
@@ -699,6 +730,13 @@ function renderRoutes(data) {
 function clearRoutePreview() {
     (window._previewLayers || []).forEach(l => map.removeLayer(l));
     window._previewLayers = [];
+    // NOTE: stop marker restoration is handled by endJourney and renderRoutes,
+    // not here — clearRoutePreview is also called from startJourney where stops
+    // must stay hidden.
+    clearInterval(window._busPollInterval);
+    window._busPollInterval = null;
+    clearBusMarkers();
+    window._activeBusRouteIds = [];
 }
 
 function showRoutePreview(mode, legs) {
@@ -709,7 +747,10 @@ function showRoutePreview(mode, legs) {
     const dest   = window._currentDest;
     if (!origin || !dest) return;
 
-    const color  = LINE_COLORS[mode] || '#0f172a';
+    // Hide all generic stop markers — we'll show only relevant ones for BUS
+    (window._stopMarkers || []).forEach(m => map.removeLayer(m));
+
+    const color = LINE_COLORS[mode] || '#0f172a';
 
     if (mode === 'BUS' && legs && legs.length > 0) {
         const busColors = ['#0f172a', '#3b82f6', '#7c3aed'];
@@ -719,8 +760,18 @@ function showRoutePreview(mode, legs) {
                 const legColor = busColors[colorIdx++ % busColors.length];
                 const coords = leg.stop_coords.map(c => [c[0], c[1]]);
                 window._previewLayers.push(
-                    L.polyline(coords, { color: legColor, weight: 4, opacity: 0.75, dashArray: '8,4' }).addTo(map)
+                    L.polyline(coords, { color: legColor, weight: 4, opacity: 0.85 }).addTo(map)
                 );
+                // White stop dots along the route
+                coords.forEach((c, i) => {
+                    const isEnd = i === 0 || i === coords.length - 1;
+                    window._previewLayers.push(
+                        L.circleMarker(c, {
+                            radius: isEnd ? 7 : 5,
+                            color: legColor, fillColor: '#ffffff', fillOpacity: 1, weight: 2
+                        }).addTo(map)
+                    );
+                });
             } else if (leg.mode === 'WALK' && leg.stop_coords && leg.stop_coords.length >= 2) {
                 const coords = leg.stop_coords.map(c => [c[0], c[1]]);
                 window._previewLayers.push(
@@ -732,6 +783,15 @@ function showRoutePreview(mode, legs) {
             .filter(l => l.stop_coords)
             .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
         if (allCoords.length > 1) map.fitBounds(allCoords, { padding: [50, 50] });
+
+        // Start live bus markers — filter by route if IDs are available,
+        // otherwise show all active buses as fallback.
+        const routeIds = legs
+            .filter(l => l.mode === 'BUS' && l.route_id)
+            .map(l => l.route_id);
+        window._activeBusRouteIds = routeIds; // may be empty = no filter = all buses
+        fetchAndRenderBusMarkers();
+        window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
     } else {
         window._previewLayers.push(
             L.polyline(
@@ -1005,18 +1065,15 @@ async function startJourney() {
 
         showToast(`Journey started! ${durationMin} min to destination`);
 
-        // 11) Live bus markers (BUS journeys only)
-        if (mode === 'BUS') {
-            clearInterval(window._busPollInterval);
-            window._busMarkers = window._busMarkers || [];
+        // 11) Live bus markers — polling already started in showRoutePreview.
+        //     Restart here only if somehow not running (e.g. Start Journey without preview).
+        if (mode === 'BUS' && !window._busPollInterval) {
             const routeIds = (selectedJourney.legs || [])
                 .filter(l => l.mode === 'BUS' && l.route_id)
                 .map(l => l.route_id);
-            if (routeIds.length > 0) {
-                window._activeBusRouteIds = routeIds;
-                fetchAndRenderBusMarkers();
-                window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
-            }
+            window._activeBusRouteIds = routeIds;
+            fetchAndRenderBusMarkers();
+            window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
         }
 
     } catch (err) {
@@ -1087,21 +1144,27 @@ function hideStaleNotice() {
 
 async function fetchAndRenderBusMarkers() {
     const routeIds = window._activeBusRouteIds || [];
-    if (!routeIds.length) return;
+    // Empty routeIds = no route filter = show all active buses
+    const qs = routeIds.length > 0
+        ? '?route_ids=' + routeIds.map(encodeURIComponent).join(',')
+        : '';
+    console.log('[BUS] fetchAndRenderBusMarkers → route_ids:', routeIds, '| qs:', qs || '(none)');
     try {
-        const vehicles = await apiFetch(
-            '/journeys/live-buses?route_ids=' + routeIds.map(encodeURIComponent).join(',')
-        );
-        const list = Array.isArray(vehicles) ? vehicles : [];
-        if (list.length > 0) {
+        const r = await apiFetch('/journeys/live-buses' + qs);
+        console.log('[BUS] HTTP status:', r.status);
+        if (!r.ok) throw new Error(r.status);
+        const list = await r.json();
+        console.log('[BUS] vehicles from API:', list);
+        if (Array.isArray(list) && list.length > 0) {
             hideStaleNotice();
             renderBusMarkers(list);
         } else {
+            console.warn('[BUS] empty list → showing stale notice');
             clearBusMarkers();
             showStaleNotice();
         }
     } catch (e) {
-        console.warn('Live bus fetch failed:', e);
+        console.warn('[BUS] Live bus fetch failed:', e);
         clearBusMarkers();
         showStaleNotice();
     }

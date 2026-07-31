@@ -892,6 +892,72 @@ body {
 }
 .stop-check-btn:hover { background: var(--primary-dark); }
 
+/* ── TMB-style stop arrivals ─────────────────────────────────────── */
+.tmb-route-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+}
+.tmb-route-row:last-child { border-bottom: none; }
+.tmb-badge {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: white;
+    font-size: 15px;
+    font-weight: 800;
+    flex-shrink: 0;
+    letter-spacing: -0.5px;
+}
+.tmb-info { flex: 1; min-width: 0; }
+.tmb-times {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-dark);
+    line-height: 1.1;
+}
+.tmb-t1 { color: var(--text-dark); }
+.tmb-sep { color: var(--text-soft); font-weight: 400; }
+.tmb-t2 { color: var(--text-soft); }
+.tmb-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 3px;
+}
+.tmb-rt {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.tmb-rt.live  { color: #1d4ed8; }
+.tmb-rt.sched { color: var(--text-soft); }
+.tmb-delay {
+    font-size: 11px;
+    font-weight: 600;
+    color: #ef4444;
+}
+.tmb-crowd {
+    font-size: 9px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 5px;
+}
+.tmb-dir {
+    font-size: 12px;
+    color: var(--text-soft);
+    font-weight: 500;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 
 
 /* ── Step 2b: mobile topbar wrapping ── */
