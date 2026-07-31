@@ -1,0 +1,21 @@
+# Mosquitto password file — TEMPLATE (no real credentials).
+#
+# The real `passwd` file is intentionally NOT tracked in git (see .gitignore):
+# it holds credential hashes and must be generated PER ENVIRONMENT.
+#
+# Generate it inside the running broker container:
+#   docker exec -it cassitrack-mosquitto \
+#     mosquitto_passwd -c /mosquitto/config/passwd cassitrack-backend
+#   docker exec -it cassitrack-mosquitto \
+#     mosquitto_passwd    /mosquitto/config/passwd cassitrack-bus
+#
+# Then set the matching values in cassitrack-backend/.env:
+#   MQTT_USERNAME=cassitrack-backend   MQTT_PASSWORD=<generated>
+# and in the GPS simulator / ESP32 firmware:
+#   MQTT_USERNAME=cassitrack-bus       MQTT_PASSWORD=<generated>
+#
+# Finally restart the broker:  docker compose restart mosquitto
+#
+# Format (one per line):  <username>:<PBKDF2-SHA512 hash produced by mosquitto_passwd>
+# cassitrack-backend:$7$...redacted...
+# cassitrack-bus:$7$...redacted...

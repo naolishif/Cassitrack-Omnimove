@@ -31,6 +31,12 @@ omnimove-backend/env
 mosquitto/data/
 mosquitto/log/
 
+# MQTT broker credentials — NEVER commit the real password file.
+# Provision it per environment (see mosquitto/config/passwd.example).
+# ⚠️  The hashes were tracked in earlier commits: rotate the MQTT passwords and
+#     scrub git history (git filter-repo --path cassitrack-backend/mosquitto/config/passwd --invert-paths).
+**/mosquitto/config/passwd
+
 # Python
 __pycache__/
 *.pyc

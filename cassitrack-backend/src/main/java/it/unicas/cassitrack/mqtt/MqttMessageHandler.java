@@ -58,6 +58,10 @@ public class MqttMessageHandler implements MessageHandler {
     private static final double LON_MIN = 13.70;
     private static final double LON_MAX = 14.00;
     private static final long MAX_AGE_SECONDS = 300;
+    // Small tolerance for clock skew between the unit and the server. Anything
+    // dated further in the future than this is rejected so it cannot poison the
+    // InfluxDB time-series (which is written at the payload timestamp).
+    private static final long MAX_FUTURE_SKEW_SECONDS = 60;
 
     @Override
     @ServiceActivator(inputChannel = "mqttInputChannel")
@@ -163,7 +167,9 @@ public class MqttMessageHandler implements MessageHandler {
         if (pos.getTimestamp() == null) return false;
 
         long ageSeconds = Instant.now().getEpochSecond() - pos.getTimestamp().getEpochSecond();
-        return ageSeconds <= MAX_AGE_SECONDS;
+        // Reject stale fixes AND future-dated ones (negative age beyond the
+        // allowed clock skew) — the latter would otherwise pass the upper bound.
+        return ageSeconds <= MAX_AGE_SECONDS && ageSeconds >= -MAX_FUTURE_SKEW_SECONDS;
     }
 
     /**

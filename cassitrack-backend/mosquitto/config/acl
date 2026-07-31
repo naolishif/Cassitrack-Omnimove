@@ -25,3 +25,7 @@ topic write health
 user cassitrack-bus
 topic write cassitrack/+/position
 topic write cassitrack/+/ble
+# Compact OBU schema (cassitrack/obu/{id}/pos): the backend also subscribes to
+# this topic on the LOCAL broker so a simulator can exercise the OBU path without
+# the external TLS broker. Grant write here or those publishes are ACL-denied.
+topic write cassitrack/obu/+/pos

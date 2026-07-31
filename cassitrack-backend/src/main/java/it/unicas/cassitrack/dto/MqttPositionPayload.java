@@ -1,5 +1,6 @@
 package it.unicas.cassitrack.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
@@ -30,8 +31,13 @@ import java.time.Instant;
  *   "battery_voltage": 12.4,
  *   "firmware_version": "1.0.0"
  * }
+ *
+ * Unknown fields are ignored (like {@link ObuPositionPayload}) so that a
+ * firmware update adding a new field does not break ingestion of the whole
+ * message.
  */
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class MqttPositionPayload {
 
     // ── Identity ────────────────────────────────────────────────
