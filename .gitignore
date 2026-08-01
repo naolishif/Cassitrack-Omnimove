@@ -16,6 +16,7 @@ target/
 .env
 *.env
 env
+.env_server
 **/env
 **/.env
 cassitrack-backend/env
