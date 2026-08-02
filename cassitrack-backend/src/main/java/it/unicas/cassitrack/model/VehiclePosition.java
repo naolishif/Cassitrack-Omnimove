@@ -64,6 +64,19 @@ public class VehiclePosition {
     /** Istante del fix in cui quella distanza minima è stata osservata. */
     private Instant approachMinTimestamp;
 
+    // ── Fix precedente ──────────────────────────────────────────
+    /**
+     * L'ultimo fix ricevuto prima di questo.
+     *
+     * Serve a ricostruire il TRATTO percorso fra due invii. Un OBU che
+     * trasmette una volta al minuto salta le fermate che attraversa fra un
+     * invio e l'altro: senza il punto di partenza del tratto non c'è modo di
+     * accorgersi che ci è passato sopra.
+     */
+    private Double  prevFixLat;
+    private Double  prevFixLon;
+    private Instant prevFixAt;
+
     /** The stop it is heading to — derived server-side from the trip sequence */
     private String  nextStopId;
     private String  tripId;

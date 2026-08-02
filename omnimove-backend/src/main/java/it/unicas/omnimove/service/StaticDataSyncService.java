@@ -64,6 +64,28 @@ public class StaticDataSyncService {
      */
     private Map<String, Long> lastSeen = null;
 
+    /**
+     * Set when the startup import gave up, cleared once this service has
+     * imported successfully.
+     *
+     * Without it the recovery is silently wrong: the first successful poll
+     * would adopt CassiTrack's counters as "already loaded", see no change
+     * from then on, and leave travellers on data from before the restart until
+     * a fleet manager happened to edit something.
+     *
+     * Volatile because it is written by the ApplicationReadyEvent thread and
+     * read by the scheduler thread.
+     */
+    private volatile boolean fullImportOwed = false;
+
+    /**
+     * Called by the startup importer when it has exhausted its retries, to hand
+     * responsibility for the catch-up import over to this poller.
+     */
+    public void markFullImportOwed() {
+        fullImportOwed = true;
+    }
+
     public StaticDataSyncService(NetexImportService netexImportService) {
         this.netexImportService = netexImportService;
     }
@@ -113,27 +135,37 @@ public class StaticDataSyncService {
             return;
         }
 
-        // First poll after startup: the boot import already loaded this data,
-        // so just remember where we are.
-        if (lastSeen == null) {
+        // Why the debt is checked before anything else: the startup importer can
+        // still be burning through its retries while this poller is already
+        // running. If /version answers but /netex does not, an ordinary first
+        // poll would record a baseline, and the debt raised moments later would
+        // then be unreachable behind the "nothing changed" check below.
+        String reason = null;
+        if (fullImportOwed) {
+            reason = "startup import never completed — importing now";
+        } else if (lastSeen == null) {
+            // First poll after a healthy startup: the boot import already
+            // loaded this data, so just remember where we are.
             lastSeen = Collections.unmodifiableMap(current);
             System.out.println("[OMNIMOVE] Static-data baseline recorded: " + current);
             return;
-        }
-
-        if (current.equals(lastSeen)) {
+        } else if (current.equals(lastSeen)) {
             return;                       // nothing changed — the common case
+        } else {
+            reason = "changed in CassiTrack " + describeChange(lastSeen, current);
         }
 
-        System.out.println("[OMNIMOVE] Static data changed in CassiTrack "
-                + describeChange(lastSeen, current) + " — re-importing NeTEx...");
+        System.out.println("[OMNIMOVE] Static data " + reason + " — re-importing NeTEx...");
         try {
             netexImportService.importDataFromCassitrack();
             // Only advance the baseline once the import has actually committed,
             // so a failure part-way is retried rather than silently skipped.
             lastSeen = Collections.unmodifiableMap(current);
+            fullImportOwed = false;
             System.out.println("[OMNIMOVE] Re-import complete.");
         } catch (Exception e) {
+            // fullImportOwed deliberately left set: the debt is only cleared by
+            // an import that actually committed.
             System.err.println("[OMNIMOVE] Re-import failed (" + e.getMessage()
                     + "); will retry on the next change check.");
         }

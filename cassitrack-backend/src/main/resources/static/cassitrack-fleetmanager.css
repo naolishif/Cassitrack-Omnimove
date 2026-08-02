@@ -1048,6 +1048,41 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .dm-center { text-align: center; }
 .dm-plate { font-family: var(--mono); font-weight: 700; color: var(--light); }
 .dm-muted { color: var(--dim); }
+.dm-mono  { font-family: var(--mono); }
+
+/* Active Trips: the secondary lines under a progress bar (stop count, next stop).
+   A class rather than style="" because CSP has no 'unsafe-inline' in style-src. */
+.trip-sub { font-size: 10px; color: var(--dim); margin-top: 3px; line-height: 1.35; }
+.dm-table td .cbar { min-width: 90px; }
+
+/* A finished run: still listed for 15 minutes, but visibly no longer live. */
+.trip-done > td { opacity: .62; }
+.dm-table tbody tr.trip-done:hover > td { opacity: 1; }
+.trip-pill-done {
+    color: var(--accent);
+    border-color: rgba(59,130,246,.35);
+    background: rgba(59,130,246,.10);
+}
+
+/* Marks a stop count inferred from the timetable rather than observed. */
+.trip-inferred {
+    font-style: italic;
+    opacity: .75;
+    cursor: help;
+    border-bottom: 1px dotted var(--dim);
+}
+
+/* Read-only context rows in the trip drawer — same rhythm as .dm-input,
+   without looking like something you can type into. */
+.dm-readonly {
+    margin: 0 0 14px;
+    padding: 9px 11px;
+    background: rgba(255,255,255,.02);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+}
 
 .dm-empty {
     text-align: center;

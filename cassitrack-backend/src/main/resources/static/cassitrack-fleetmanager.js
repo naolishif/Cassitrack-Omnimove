@@ -48,6 +48,11 @@
         SIGNIFICANTLY_LATE:'#EF4444',EARLY:'#06B6D4',UNKNOWN:'#4B5563',
         NO_TRIP:'#F59E0B'
     };
+    // UNKNOWN reads "LIVE": the bus is transmitting but has not reached a stop
+    // yet, so there is nothing to compare against the timetable. Once it passes
+    // its first stop the status becomes a real one and — because the backend
+    // carries the last measurement across trip boundaries — never falls back
+    // here again for the rest of the service day.
     const SL = {ON_TIME:'ON TIME',SLIGHTLY_LATE:'SLIGHTLY LATE',SIGNIFICANTLY_LATE:'LATE',EARLY:'EARLY',UNKNOWN:'LIVE',NO_TRIP:'⚠️ NO TRIP'};
     const MODE_ICON = {BUS:'🚌',WALK:'🚶',BIKE:'🚲',SCOOTER:'🛴',CAR:'🚗',WAIT:'⏳'};
     const MODE_COL  = {BUS:'#3B82F6',WALK:'#22C55E',BIKE:'#22C55E',SCOOTER:'#F59E0B',CAR:'#EF4444',WAIT:'#4B5563'};
@@ -359,7 +364,7 @@
         // CSP FIX (A05): schedule_status -> fixed-domain data-status (static CSS).
         // routeColor()/crowding-bar values stay genuinely dynamic -> data-fg/data-bg.
         const st = !v.trip_id ? 'NO_TRIP' : (SC[v.schedule_status] ? v.schedule_status : 'UNKNOWN');
-        const l=SL[v.schedule_status]||'LIVE';
+        const l=SL[v.schedule_status]||SL.UNKNOWN;
         const routeCol = routeColor(v.route_id);
         const cp=crowdPct(v),cc=crowdColor(v.crowding_level);
         const delayTxt = (typeof v.delay_minutes === 'number')
@@ -455,7 +460,7 @@
     // Detail panel shown in the side tab when a single bus is selected.
     function buildBusDetail(v){
         const st  = !v.trip_id ? 'NO_TRIP' : (SC[v.schedule_status] ? v.schedule_status : 'UNKNOWN');
-        const l   = SL[v.schedule_status]||'LIVE';
+        const l   = SL[v.schedule_status]||SL.UNKNOWN;
         const rc  = routeColor(v.route_id);
         const cp  = crowdPct(v.crowding_level), cc = cp>70?'#EF4444':cp>40?'#F59E0B':'#22C55E';
         const hidden   = isBusHidden(v.vehicle_id);
@@ -671,6 +676,10 @@
         if(viewId === 'fleet-monitor'){
             setTimeout(()=>map.invalidateSize(),200);
         }
+        // Navigating away from Data Management leaves the Active Trips panel
+        // marked active but invisible — keep its 30 s poll from running on a
+        // screen nobody is looking at.
+        if(viewId !== 'data-management'){ tripsStopAutoRefresh(); tripHideDrawer(); }
     }
  
     // ── Data Management sub-navigation (Buses / Stops / …) ────────────────────
@@ -681,8 +690,18 @@
         if(panel) panel.classList.add('active');
         document.querySelectorAll('.dm-subtab').forEach(b=>b.classList.remove('active'));
         if(btn) btn.classList.add('active');
+        // Active Trips polls every 30 s, so the timer follows the panel: leaving
+        // the tab must stop it, or every visit would stack another interval.
+        // An open edit drawer belongs to that panel too.
+        tripsStopAutoRefresh();
+        tripHideDrawer();
+
         if(panelId === 'dm-panel-stops') loadStops();
         else if(panelId === 'dm-panel-routes') loadRoutes();
+        else if(panelId === 'dm-panel-trips'){
+            tripsLoad();               // route names come with the trip rows
+            tripsStartAutoRefresh();
+        }
         // Buses now render through the US-01 registry UI (dmLoadBuses), not the
         // superseded bm* table. dmLoadRoutes() fills the route filter/assign lists.
         else if(panelId === 'dm-panel-buses'){
@@ -1353,10 +1372,25 @@
                 const counts = d.status_counts || {};
                 const total  = d.total_active || 0;
                 const onTime = (counts.ON_TIME || 0) + (counts.EARLY || 0);
-                const pct    = total > 0 ? Math.round(onTime / total * 100) : 0;
-                document.getElementById('kpiOnTimePct').textContent = `${pct}%`;
+
+                // Punctuality is only meaningful for buses we have actually
+                // measured. A bus is UNKNOWN until it has been observed passing
+                // a stop — there is nothing yet to compare against the
+                // timetable — so counting it in the denominator scores it as
+                // "not on time", which is a claim we have no basis for.
+                const measured = onTime
+                               + (counts.SLIGHTLY_LATE || 0)
+                               + (counts.SIGNIFICANTLY_LATE || 0);
+                const unmeasured = Math.max(0, total - measured);
+
+                const pct = measured > 0 ? Math.round(onTime / measured * 100) : 0;
+                document.getElementById('kpiOnTimePct').textContent =
+                    measured > 0 ? `${pct}%` : '—';
                 document.getElementById('kpiOnTimeSub').textContent =
-                    `${onTime}/${total} buses on schedule`;
+                    measured > 0
+                        ? `${onTime}/${measured} measured`
+                          + (unmeasured ? ` · ${unmeasured} not yet seen` : '')
+                        : (total ? `${total} buses, none measured yet` : 'no buses running');
             }
 
             // Fleet donut from live vehicles
@@ -1472,6 +1506,31 @@
     if(dmTabStops) dmTabStops.addEventListener('click', e => switchDmPanel('dm-panel-stops', e.currentTarget));
     const dmTabRoutes = document.getElementById('dmTabRoutes');
     if(dmTabRoutes) dmTabRoutes.addEventListener('click', e => switchDmPanel('dm-panel-routes', e.currentTarget));
+    const dmTabTrips = document.getElementById('dmTabTrips');
+    if(dmTabTrips) dmTabTrips.addEventListener('click', e => switchDmPanel('dm-panel-trips', e.currentTarget));
+
+    // Active Trips: manual refresh, and Edit delegated to the tbody because the
+    // rows are replaced wholesale every 30 s.
+    const tripsRefreshBtn = document.getElementById('tripsRefreshBtn');
+    if(tripsRefreshBtn) tripsRefreshBtn.addEventListener('click', () => {
+        tripsLoad();
+        tripsStartAutoRefresh();   // restart the clock so the next poll is a full 30 s away
+    });
+    const tripsTableBody = document.getElementById('tripsTableBody');
+    if(tripsTableBody) tripsTableBody.addEventListener('click', e => {
+        const btn = e.target.closest('[data-trip-edit]');
+        if(btn) tripOpenEdit(btn.dataset.tripEdit);
+    });
+
+    // Active Trips: edit drawer
+    const tripDrawerClose = document.getElementById('tripDrawerClose');
+    if(tripDrawerClose) tripDrawerClose.addEventListener('click', tripCloseDrawer);
+    const tripCancelBtn = document.getElementById('tripCancelBtn');
+    if(tripCancelBtn) tripCancelBtn.addEventListener('click', tripCloseDrawer);
+    const tripDrawerBackdrop = document.getElementById('tripDrawerBackdrop');
+    if(tripDrawerBackdrop) tripDrawerBackdrop.addEventListener('click', tripCloseDrawer);
+    const tripSaveBtn = document.getElementById('tripSaveBtn');
+    if(tripSaveBtn) tripSaveBtn.addEventListener('click', tripSave);
 
     // Data Management > buses CRUD is wired further down (dm* handlers) — the
     // superseded bm* inline-form wiring was removed with its panel.
@@ -1625,6 +1684,268 @@
         return v.trip_id
             ? '<span class="dm-pill dm-pill-active">ON TRIP</span>'
             : '<span class="dm-pill dm-pill-maintenance">NO TRIP</span>';     // moving or idle, unscheduled
+    }
+
+    /* ── Active Trips ────────────────────────────────────────────────
+       Operational view: what the timetable says should be running now, and
+       how each trip is actually progressing. Driven by the timetable rather
+       than by telemetry, so a scheduled trip whose bus has gone silent still
+       appears — flagged NO SIGNAL, which is the row worth noticing.
+
+       A trip that has been seen reaching its last stop is marked COMPLETED and
+       stays listed for 15 minutes, so the end of a run can be reviewed instead
+       of disappearing the moment it happens. */
+
+    const TRIPS_COLSPAN = 10;
+    const TRIPS_REFRESH_MS = 30000;
+    let tripsTimer = null;      // 30 s auto-refresh, only while the tab is open
+
+    function tripsStartAutoRefresh() {
+        tripsStopAutoRefresh();                       // never stack intervals
+        tripsTimer = setInterval(tripsLoad, TRIPS_REFRESH_MS);
+    }
+
+    function tripsStopAutoRefresh() {
+        if (tripsTimer) { clearInterval(tripsTimer); tripsTimer = null; }
+    }
+
+    // Last payload, so the edit drawer can render a trip's details without
+    // refetching — and so a refresh landing mid-edit cannot change them.
+    let tripsLast = [];
+
+    async function tripsLoad() {
+        const body = document.getElementById('tripsTableBody');
+        if (!body) return;
+        try {
+            const r = await fetch(`${API}/trips/active`);
+            if (!r.ok) throw new Error(r.status);
+            tripsLast = await r.json();
+            tripsRender(tripsLast);
+        } catch (e) {
+            body.innerHTML = `<tr><td colspan="${TRIPS_COLSPAN}" class="dm-empty">`
+                           + 'Could not load active trips.</td></tr>';
+            document.getElementById('tripsCount').textContent = '';
+        }
+    }
+
+    function tripsRender(trips) {
+        const body  = document.getElementById('tripsTableBody');
+        const count = document.getElementById('tripsCount');
+        const when  = document.getElementById('tripsUpdated');
+
+        if (!trips.length) {
+            // Not an error: outside service hours nothing is scheduled, which is
+            // a legitimate answer rather than an empty-state failure.
+            body.innerHTML = `<tr><td colspan="${TRIPS_COLSPAN}" class="dm-empty">`
+                           + 'No trips scheduled at this time.</td></tr>';
+            count.textContent = '';
+            when.textContent  = 'checked ' + new Date().toLocaleTimeString();
+            return;
+        }
+
+        body.innerHTML = trips.map(t => `
+        <tr class="${t.status === 'COMPLETED' ? 'trip-done' : ''}">
+            <td class="dm-muted dm-mono">${escHtml(t.trip_id)}</td>
+            <td>${escHtml(t.route_name) || '<span class="dm-muted">—</span>'}</td>
+            <td>${t.plate ? `<span class="dm-plate">${escHtml(t.plate)}</span>`
+                          : '<span class="dm-muted">unassigned</span>'}</td>
+            <td class="dm-mono dm-muted">${t.vehicle_id
+                    ? escHtml(t.vehicle_id)
+                    : '<span class="dm-muted">no antenna</span>'}</td>
+            <td class="dm-mono">${escHtml(t.start_time)}</td>
+            <td class="dm-mono dm-muted">${escHtml(t.end_time)}</td>
+            <td class="dm-mono">${tripsActualEndCell(t)}</td>
+            <td>${tripsProgressCell(t)}</td>
+            <td>${tripsStatusPill(t)}</td>
+            <td class="dm-right">
+                <button class="dm-row-btn" data-trip-edit="${escHtml(t.trip_id)}">Edit</button>
+            </td>
+        </tr>`).join('');
+
+        const running = trips.filter(t => t.status !== 'COMPLETED').length;
+        const done    = trips.length - running;
+        count.textContent = `${running} running`
+                          + (done ? ` · ${done} just finished` : '');
+        when.textContent  = 'updated ' + new Date().toLocaleTimeString();
+        applyDynStyles(body);     // CSP-safe: widths are data-attributes, set via CSSOM
+    }
+
+    /**
+     * Actual finish, against the scheduled one.
+     *
+     * Blank while a trip is still running. Blank ALSO when a trip ended without
+     * being witnessed at its final stop — the bus passed too far away, or the
+     * arrival never reached InfluxDB. "We did not see it finish" and "it has
+     * not finished" look the same here, which is a real limitation of measuring
+     * completion from observed arrivals.
+     */
+    function tripsActualEndCell(t) {
+        if (!t.actual_end_time) return '<span class="dm-muted">—</span>';
+        const diff = tripsMinutesBetween(t.end_time, t.actual_end_time);
+        const tag  = (diff === null || diff === 0) ? ''
+            : `<div class="trip-sub">${diff > 0 ? '+' : ''}${diff}m vs sched.</div>`;
+        return `${escHtml(t.actual_end_time)}${tag}`;
+    }
+
+    /** "HH:mm" − "HH:mm" in minutes; null if either is unparseable. */
+    function tripsMinutesBetween(scheduled, actual) {
+        const p = s => {
+            const m = /^(\d{2}):(\d{2})$/.exec(s || '');
+            return m ? (+m[1]) * 60 + (+m[2]) : null;
+        };
+        const a = p(actual), s = p(scheduled);
+        if (a === null || s === null) return null;
+        return a - s;
+    }
+
+    /** Progress measured in stops actually reached, not time elapsed. */
+    function tripsProgressCell(t) {
+        const pct = Math.max(0, Math.min(100, t.progress_pct || 0));
+        const colour = t.status === 'COMPLETED' ? '#3B82F6'
+                     // A silent bus keeps whatever progress it last reported;
+                     // the bar is dimmed so a stalled trip does not read as a
+                     // healthy one.
+                     : (!t.live ? '#4B5563'
+                     : (t.status === 'SIGNIFICANTLY_LATE' ? '#EF4444'
+                     : (t.status === 'SLIGHTLY_LATE' ? '#F59E0B' : '#22C55E')));
+
+        // A count inferred from the clock ("by now it should have passed stop
+        // 4") is marked, because it otherwise looks exactly like a measured one.
+        const counted = t.progress_observed
+            ? `${t.stops_done}/${t.stops_total} stops`
+            : `~${t.stops_done}/${t.stops_total} stops <span class="trip-inferred"
+                 title="Estimated from the timetable — no arrival observed yet">est.</span>`;
+
+        const next = t.next_stop_name
+            ? `<div class="trip-sub">next: ${escHtml(t.next_stop_name)}</div>`
+            : '';
+        return `<div class="cbar"><div class="cbar-fill" data-bg="${colour}" data-width-pct="${pct}"></div></div>
+                <div class="trip-sub">${counted}</div>${next}`;
+    }
+
+    function tripsStatusPill(t) {
+        const d = t.delay_minutes;
+        const delay = (typeof d === 'number' && d !== 0)
+            ? ` <span class="dm-muted">${d > 0 ? '+' : ''}${d}m</span>` : '';
+
+        if (t.status === 'COMPLETED')
+            return `<span class="dm-pill trip-pill-done">COMPLETED</span>${delay}`;
+        if (t.status === 'NO_SIGNAL' || !t.live)
+            return '<span class="dm-pill dm-pill-inactive">NO SIGNAL</span>';
+
+        const label = {
+            ON_TIME: 'ON TIME', EARLY: 'EARLY', SLIGHTLY_LATE: 'SLIGHTLY LATE',
+            SIGNIFICANTLY_LATE: 'LATE', NO_TRIP: 'NO TRIP', UNKNOWN: 'LIVE'
+        }[t.status] || escHtml(t.status || '—');
+        const cls = (t.status === 'ON_TIME' || t.status === 'EARLY') ? 'dm-pill-active'
+                  : (t.status === 'UNKNOWN' ? 'dm-pill-inactive' : 'dm-pill-maintenance');
+        return `<span class="dm-pill ${cls}">${label}</span>${delay}`;
+    }
+
+    /* ── Active Trips: edit drawer ──────────────────────────────────── */
+
+    let tripEditing = null;      // trip_id currently open in the drawer
+
+    function tripOpenDrawer() {
+        document.getElementById('tripDrawer').classList.add('open');
+        document.getElementById('tripDrawer').setAttribute('aria-hidden', 'false');
+        document.getElementById('tripDrawerBackdrop').classList.add('open');
+    }
+
+    /** DOM only. Safe to call while panels are being switched. */
+    function tripHideDrawer() {
+        const d = document.getElementById('tripDrawer');
+        if (!d) return;
+        d.classList.remove('open');
+        d.setAttribute('aria-hidden', 'true');
+        document.getElementById('tripDrawerBackdrop').classList.remove('open');
+        document.getElementById('tripFormError').textContent = '';
+        tripEditing = null;
+    }
+
+    function tripCloseDrawer() {
+        tripHideDrawer();
+        // The 30 s poll is paused while editing so the row cannot move underneath
+        // the operator; resume only if the panel is still the visible one.
+        const panel = document.getElementById('dm-panel-trips');
+        if (panel && panel.classList.contains('active')) tripsStartAutoRefresh();
+    }
+
+    async function tripOpenEdit(tripId) {
+        const t = tripsLast.find(x => x.trip_id === tripId);
+        if (!t) return;
+
+        tripEditing = tripId;
+        tripsStopAutoRefresh();   // don't let a refresh redraw under the form
+
+        document.getElementById('tripDrawerTitle').textContent = 'Edit trip';
+        document.getElementById('tripFormId').textContent      = t.trip_id;
+        document.getElementById('tripFormRoute').textContent   = t.route_name || '—';
+        document.getElementById('tripFormWindow').textContent  =
+            `${t.start_time} – ${t.end_time}`
+            + (t.actual_end_time ? `  (finished ${t.actual_end_time})` : '');
+        document.getElementById('tripFormProgress').textContent =
+            `${t.stops_done}/${t.stops_total} stops`
+            + (t.progress_observed ? '' : ' (estimated)');
+        document.getElementById('tripFormError').textContent = '';
+
+        const sel = document.getElementById('tripFormBus');
+        sel.innerHTML = '<option value="">Loading…</option>';
+        tripOpenDrawer();
+
+        try {
+            const r = await fetch(`${API}/trips/${encodeURIComponent(tripId)}/available-buses`);
+            if (!r.ok) throw new Error(r.status);
+            const buses = await r.json();
+
+            if (!buses.length) {
+                sel.innerHTML = '<option value="">No bus is free for this window</option>';
+                return;
+            }
+            sel.innerHTML = buses.map(b => {
+                const notes = [];
+                if (b.current)                notes.push('current');
+                if (b.status !== 'ACTIVE')    notes.push(String(b.status).toLowerCase());
+                if (b.no_antenna)             notes.push('no antenna');
+                const suffix = notes.length ? ` — ${notes.join(', ')}` : '';
+                return `<option value="${b.bus_id}" ${b.current ? 'selected' : ''}>`
+                     + `${escHtml(b.plate)}${escHtml(suffix)}</option>`;
+            }).join('');
+        } catch (e) {
+            sel.innerHTML = '<option value="">Could not load buses</option>';
+        }
+    }
+
+    /**
+     * Save the reassignment.
+     *
+     * Only the bus can change, so this is a single PUT rather than a full trip
+     * update — the route and the timetable are owned elsewhere.
+     */
+    async function tripSave() {
+        if (!tripEditing) return;
+        const busId = parseInt(document.getElementById('tripFormBus').value, 10);
+        const err   = document.getElementById('tripFormError');
+
+        if (!Number.isInteger(busId)) {
+            err.textContent = 'Choose a bus first.';
+            return;
+        }
+
+        try {
+            const r = await fetch(
+                `${API}/trips/${encodeURIComponent(tripEditing)}/bus?busId=${busId}`,
+                { method: 'PUT' });
+            if (!r.ok) {
+                const data = await r.json().catch(() => ({}));
+                err.textContent = data.message || `Save failed (${r.status}).`;
+                return;
+            }
+            tripCloseDrawer();
+            tripsLoad();      // reflect it immediately rather than waiting 30 s
+        } catch (e) {
+            err.textContent = 'Could not reach the server.';
+        }
     }
 
     function dmStatusPill(status) {

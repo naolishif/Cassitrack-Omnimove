@@ -55,6 +55,63 @@ public class RouteMatchingService {
     }
 
     /**
+     * Quanto si è avvicinato alla fermata il TRATTO percorso fra due fix, e in
+     * che punto del tratto.
+     *
+     * @param metres distanza minima fra la fermata e il segmento A→B
+     * @param t      posizione del punto più vicino lungo il segmento, 0 = A, 1 = B
+     */
+    public record SegmentApproach(double metres, double t) {}
+
+    /**
+     * Il passaggio da una fermata va cercato sul PERCORSO fra due fix, non sui
+     * fix stessi.
+     *
+     * Un OBU che trasmette una volta al minuto a 25 km/h lascia buchi di circa
+     * 420 m: la fermata viene superata *fra* due invii e nessuno dei due cade
+     * abbastanza vicino da contare come arrivo. Misurando invece la distanza
+     * dal segmento che li unisce, la fermata superata risulta a pochi metri
+     * dal percorso, come deve essere.
+     *
+     * Il segmento è una retta: fra due fix il bus ha in realtà seguito la
+     * strada. È un'approssimazione accettabile perché serve solo a stabilire
+     * SE la fermata è stata superata, non a ricostruire la traiettoria.
+     *
+     * {@code t} permette di datare l'arrivo per interpolazione invece di
+     * attribuirlo all'istante di uno dei due fix: con 60 s di intervallo,
+     * sbagliare estremo significa sbagliare il ritardo di un minuto intero.
+     */
+    public SegmentApproach approachToStopAlongSegment(String stopId,
+                                                      double aLat, double aLon,
+                                                      double bLat, double bLon) {
+        Stop s = stopRepository.findById(stopId).orElse(null);
+        if (s == null || s.getLat() == null || s.getLon() == null) return null;
+
+        // Proiezione equirettangolare centrata sulla fermata: su distanze di
+        // poche centinaia di metri l'errore è trascurabile e permette di
+        // lavorare in metri con la geometria piana.
+        double lat0 = Math.toRadians(s.getLat());
+        double mPerDegLat = 111_132.0;
+        double mPerDegLon = 111_320.0 * Math.cos(lat0);
+
+        double ax = (aLon - s.getLon()) * mPerDegLon, ay = (aLat - s.getLat()) * mPerDegLat;
+        double bx = (bLon - s.getLon()) * mPerDegLon, by = (bLat - s.getLat()) * mPerDegLat;
+
+        double dx = bx - ax, dy = by - ay;
+        double len2 = dx * dx + dy * dy;
+
+        // Fix fermo o duplicato: il segmento degenera in un punto.
+        if (len2 < 1e-9) return new SegmentApproach(Math.hypot(ax, ay), 1.0);
+
+        // Proiezione della fermata (origine) sul segmento, vincolata agli estremi.
+        double t = -(ax * dx + ay * dy) / len2;
+        t = Math.max(0.0, Math.min(1.0, t));
+
+        double cx = ax + t * dx, cy = ay + t * dy;
+        return new SegmentApproach(Math.hypot(cx, cy), t);
+    }
+
+    /**
      * Aggancio iniziale: quando non sappiamo ancora dove sia il bus lungo la corsa
      * (avvio del servizio, cambio corsa), si sceglie l'occorrenza il cui orario di
      * tabella è più vicino all'ora corrente. Su un anello questo è l'unico criterio

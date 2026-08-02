@@ -5,6 +5,7 @@ import it.unicas.cassitrack.model.ScheduledStop;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -73,6 +74,85 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
         ORDER BY MIN(ss.arrivalSeconds) DESC
         """)
     List<Object[]> findActiveTripsForBus(@Param("busId") Integer busId, @Param("now") int now);
+
+    /**
+     * Every trip in service right now, across the whole fleet — the same window
+     * as findActiveTripsForBus but not filtered to one vehicle.
+     *
+     * A trip counts as running when the current time of day falls between its
+     * first and last scheduled arrival. Note this is the TIMETABLE's view: it
+     * lists what is supposed to be running, which is exactly what an operations
+     * view needs — a scheduled trip with no bus reporting is itself the
+     * interesting case, and would be invisible if this were driven by telemetry.
+     *
+     * Columns: [0] tripId, [1] routeId, [2] routeShortName, [3] routeLongName,
+     *          [4] startSeconds, [5] endSeconds, [6] busId, [7] totalStops
+     * Ordered by departure time, earliest first.
+     *
+     * The joins are spelled out as LEFT JOINs on purpose. Writing the path
+     * inline (ss.trip.bus.busId) would make Hibernate emit an INNER JOIN, which
+     * would silently drop exactly the rows this view exists to surface: trips
+     * with no bus assigned. [6] is therefore null for an unassigned trip.
+     */
+    @Query("""
+        SELECT t.id, r.id, r.shortName, r.longName,
+               MIN(ss.arrivalSeconds), MAX(ss.arrivalSeconds),
+               b.busId, COUNT(ss)
+        FROM ScheduledStop ss
+             JOIN ss.trip t
+             LEFT JOIN t.route r
+             LEFT JOIN t.bus b
+        GROUP BY t.id, r.id, r.shortName, r.longName, b.busId
+        HAVING MIN(ss.arrivalSeconds) <= :now AND MAX(ss.arrivalSeconds) >= :now
+        ORDER BY MIN(ss.arrivalSeconds) ASC
+        """)
+    List<Object[]> findActiveTrips(@Param("now") int now);
+
+    /**
+     * The same summary rows as {@link #findActiveTrips}, for specific trips.
+     *
+     * Needed because a trip that finished early has already fallen outside the
+     * "now" window, yet the Active Trips view keeps showing it for a few minutes
+     * and still needs its route, bus and scheduled times to render the row.
+     *
+     * Columns: identical to findActiveTrips.
+     */
+    @Query("""
+        SELECT t.id, r.id, r.shortName, r.longName,
+               MIN(ss.arrivalSeconds), MAX(ss.arrivalSeconds),
+               b.busId, COUNT(ss)
+        FROM ScheduledStop ss
+             JOIN ss.trip t
+             LEFT JOIN t.route r
+             LEFT JOIN t.bus b
+        WHERE t.id IN :tripIds
+        GROUP BY t.id, r.id, r.shortName, r.longName, b.busId
+        ORDER BY MIN(ss.arrivalSeconds) ASC
+        """)
+    List<Object[]> findTripSummaries(@Param("tripIds") Collection<String> tripIds);
+
+    /**
+     * Buses already working a trip that overlaps the window [from, to].
+     *
+     * Two trips overlap when each starts before the other ends — the standard
+     * interval test. Used to decide which vehicles are genuinely free to take
+     * over a trip, rather than merely idle at this instant.
+     *
+     * Returns one row per overlapping trip, so a bus with several appears
+     * several times; the caller deduplicates.
+     */
+    @Query("""
+        SELECT b.busId
+        FROM ScheduledStop ss
+             JOIN ss.trip t
+             JOIN t.bus b
+        WHERE t.id <> :excludeTripId
+        GROUP BY t.id, b.busId
+        HAVING MIN(ss.arrivalSeconds) <= :to AND MAX(ss.arrivalSeconds) >= :from
+        """)
+    List<Integer> findBusIdsBusyBetween(@Param("from") int from,
+                                        @Param("to") int to,
+                                        @Param("excludeTripId") String excludeTripId);
 
     // FK guard for stop deletion: scheduled_stops.stop_id references stops(id)
     // ON DELETE CASCADE — a delete would silently wipe timetable rows, so the

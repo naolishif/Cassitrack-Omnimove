@@ -351,6 +351,7 @@
             <button type="button" class="dm-subtab bm-subnav-btn active" id="dmTabBuses">Buses</button>
             <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabStops">Stops</button>
             <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabRoutes">Routes</button>
+            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTrips">Active Trips</button>
         </div>
 
         <!-- ══════════ BUSES PANEL (US-01 registry) ══════════ -->
@@ -526,6 +527,39 @@
             </div>
         </div><!-- /dm-panel-routes -->
 
+        <!-- ══════════ ACTIVE TRIPS PANEL ══════════ -->
+        <!-- Read-mostly operational view: what the timetable says should be
+             running right now, and how each one is actually getting on. -->
+        <div id="dm-panel-trips" class="dm-panel">
+            <div class="dm-toolbar">
+                <span class="dm-footer" id="tripsCount"></span>
+                <span class="dm-footer dm-muted" id="tripsUpdated"></span>
+                <button class="dm-btn dm-btn-ghost" id="tripsRefreshBtn">Refresh now</button>
+            </div>
+
+            <div class="dm-table-wrap">
+                <table class="dm-table">
+                    <thead>
+                    <tr>
+                        <th>Trip ID</th>
+                        <th>Route</th>
+                        <th>Plate</th>
+                        <th>Antenna</th>
+                        <th>Start</th>
+                        <th>End (sched.)</th>
+                        <th>End (real)</th>
+                        <th>Progress</th>
+                        <th>Status</th>
+                        <th class="dm-right">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody id="tripsTableBody">
+                    <tr><td colspan="10" class="dm-empty">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div><!-- /dm-panel-trips -->
+
     </div>
 
     <!-- ── Form drawer (slides in from the right) — Buses only ── -->
@@ -575,6 +609,50 @@
         <div class="dm-drawer-foot">
             <button class="dm-btn dm-btn-ghost" id="dmCancelBtn">Cancel</button>
             <button class="dm-btn dm-btn-primary" id="dmSaveBtn">Save</button>
+        </div>
+    </aside>
+
+    <!-- ── Trip drawer — reassignment (Active Trips) ──
+         Separate from the bus drawer above: the two share styling but nothing
+         else, and one drawer serving both would need every field toggled. -->
+    <div class="dm-drawer-backdrop" id="tripDrawerBackdrop"></div>
+
+    <aside class="dm-drawer" id="tripDrawer" aria-hidden="true">
+        <div class="dm-drawer-head">
+            <h3 id="tripDrawerTitle">Edit trip</h3>
+            <button class="dm-icon-btn" id="tripDrawerClose" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="dm-drawer-body">
+            <!-- Read-only context. The route and the timetable are not editable
+                 here: changing a trip's route would orphan every one of its
+                 scheduled stops, which belongs in the timetable editor. -->
+            <label class="dm-label">Trip</label>
+            <p class="dm-readonly dm-mono" id="tripFormId">—</p>
+
+            <label class="dm-label">Route</label>
+            <p class="dm-readonly" id="tripFormRoute">—</p>
+
+            <label class="dm-label">Scheduled window</label>
+            <p class="dm-readonly dm-mono" id="tripFormWindow">—</p>
+
+            <label class="dm-label">Progress</label>
+            <p class="dm-readonly" id="tripFormProgress">—</p>
+
+            <label class="dm-label" for="tripFormBus">Assigned bus</label>
+            <select id="tripFormBus" class="dm-input dm-select">
+                <option value="">Loading…</option>
+            </select>
+            <p class="dm-hint" id="tripFormBusHint">
+                Only buses with no other trip during this window are listed.
+            </p>
+
+            <p class="dm-error" id="tripFormError"></p>
+        </div>
+
+        <div class="dm-drawer-foot">
+            <button class="dm-btn dm-btn-ghost" id="tripCancelBtn">Cancel</button>
+            <button class="dm-btn dm-btn-primary" id="tripSaveBtn">Save</button>
         </div>
     </aside>
 
