@@ -70,6 +70,19 @@ cassitrack:
     token: ${CASSITRACK_API_TOKEN}
   netex:
     url: ${CASSITRACK_NETEX_URL:http://localhost:8280/cassitrack/api/static/netex}
+  # ── Static-data change detection ────────────────────────────────
+  # The NeTEx import above rebuilds everything and is expensive, so it is not
+  # run on a timer. Instead a cheap endpoint (five change counters kept by
+  # database triggers in CassiTrack) is polled, and the full import runs only
+  # when one of the counters moves.
+  #
+  # version-url is left blank on purpose: the service derives it from
+  # cassitrack.netex.url by swapping the last path segment (.../static/netex ->
+  # .../static/version), so there is one fewer URL to keep in step across
+  # environments. Set it only to point somewhere non-standard.
+  static:
+    version-url: ${CASSITRACK_VERSION_URL:}
+    poll-interval-ms: ${CASSITRACK_POLL_INTERVAL_MS:60000}
 
 # ── Anthropic Claude API ──────────────────────────────────────
 anthropic:

@@ -31,19 +31,22 @@ public class NetexController {
     private final ScheduledStopRepository scheduledStopRepository;
     private final BusRepository busRepository;
     private final RouteShapeRepository routeShapeRepository;
+    private final DataVersionRepository dataVersionRepository;
 
     public NetexController(StopRepository stopRepository,
                            RouteRepository routeRepository,
                            TripRepository tripRepository,
                            ScheduledStopRepository scheduledStopRepository,
                            BusRepository busRepository,
-                           RouteShapeRepository routeShapeRepository) {
+                           RouteShapeRepository routeShapeRepository,
+                           DataVersionRepository dataVersionRepository) {
         this.stopRepository = stopRepository;
         this.routeRepository = routeRepository;
         this.tripRepository = tripRepository;
         this.scheduledStopRepository = scheduledStopRepository;
         this.busRepository = busRepository;
         this.routeShapeRepository = routeShapeRepository;
+        this.dataVersionRepository = dataVersionRepository;
     }
 
     // ── helper: converti secondi in formato NeTEx HH:mm:ss ──────────────────
@@ -53,6 +56,47 @@ public class NetexController {
         int m = (seconds % 3600) / 60;
         int s = seconds % 60;
         return String.format("%02d:%02d:%02d", h, m, s);
+    }
+
+    /**
+     * Change counters for the static-data tables — the cheap companion to
+     * /netex.
+     *
+     * A consumer that mirrors this data (OmniMove) polls this endpoint instead
+     * of re-downloading the whole NeTEx document to find out whether anything
+     * moved. Rebuilding that document reads every stop, route, trip and
+     * scheduled stop; this reads five rows from data_version, whose counters
+     * are maintained by database triggers (see V15__data_version.sql).
+     *
+     * Response:
+     *   { "routes": 3, "stops": 1, "trips": 7,
+     *     "scheduled_stops": 7, "route_shapes": 2 }
+     *
+     * A number changing means "re-import"; the numbers themselves carry no
+     * meaning beyond being different from last time. `buses` is deliberately
+     * absent — it changes on every map-visibility toggle, which OmniMove does
+     * not consume.
+     *
+     * Same X-Api-Key as /netex (NFR-11): this exposes no data, but there is no
+     * reason to leave a polling target open either.
+     */
+    @GetMapping(value = "/version", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Long> getStaticDataVersion(
+            @RequestHeader(value = "X-Api-Key", required = false) String receivedToken,
+            HttpServletResponse response) {
+
+        if (!MessageDigest.isEqual(
+                expectedToken.getBytes(StandardCharsets.UTF_8),
+                (receivedToken != null ? receivedToken : "").getBytes(StandardCharsets.UTF_8))) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            return null;
+        }
+
+        Map<String, Long> out = new HashMap<>();
+        for (DataVersion v : dataVersionRepository.findAll()) {
+            out.put(v.getTableName(), v.getVersion());
+        }
+        return out;
     }
 
     @GetMapping(value = "/netex", produces = MediaType.APPLICATION_XML_VALUE)
