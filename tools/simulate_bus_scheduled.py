@@ -417,6 +417,14 @@ class ScheduledBus:
                 self.trip_i += 1
                 self.state = "idle"
                 self.spd = 0.0
+                # `node` and `leg` are indices into the CURRENT trip's route
+                # shape. trip_i has just moved on, and the next duty may be on a
+                # different route with a different polyline — leaving the old
+                # index in place makes position() read a vertex of the new shape
+                # at the old offset, i.e. a point nowhere near the bus. Park it
+                # at the new trip's origin straight away instead of waiting for
+                # the next tick, which would publish that bogus position.
+                self._start_trip_at(now)
             else:
                 self.state = "dwell"
                 self.timer = max(5.0, STOP_DWELL +

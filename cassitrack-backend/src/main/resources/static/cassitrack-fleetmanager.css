@@ -1023,6 +1023,9 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .dm-table thead th {
     position: sticky;
     top: 0;
+    /* Above the rows: cells scrolling underneath must not paint over the
+       header, which they do at equal stacking order once a row is tinted. */
+    z-index: 2;
     background: var(--panel2);
     color: var(--dim);
     font-family: var(--mono);
@@ -1055,14 +1058,45 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .trip-sub { font-size: 10px; color: var(--dim); margin-top: 3px; line-height: 1.35; }
 .dm-table td .cbar { min-width: 90px; }
 
-/* A finished run: still listed for 15 minutes, but visibly no longer live. */
-.trip-done > td { opacity: .62; }
-.dm-table tbody tr.trip-done:hover > td { opacity: 1; }
-.trip-pill-done {
-    color: var(--accent);
-    border-color: rgba(59,130,246,.35);
-    background: rgba(59,130,246,.10);
+/* Phase tinting: the day should read at a glance — what is over, what is
+   happening, what is still to come. Hovering restores full contrast so a
+   dimmed row is still readable when you actually look at it. */
+.trip-done   > td { opacity: .55; }
+.trip-future > td { opacity: .82; }
+.trip-active > td { background: rgba(34,197,94,.05); }
+.dm-table tbody tr.trip-done:hover > td,
+.dm-table tbody tr.trip-future:hover > td { opacity: 1; }
+
+.trip-pill-done   { color: var(--accent); border-color: rgba(59,130,246,.35); background: rgba(59,130,246,.10); }
+.trip-pill-active { color: var(--green);  border-color: rgba(34,197,94,.35);  background: rgba(34,197,94,.10); }
+.trip-pill-future { color: var(--dim);    border-color: rgba(75,85,99,.45);   background: rgba(75,85,99,.12); }
+
+
+/* Filter bar: many controls on one row, wrapping on narrow screens. */
+.dm-toolbar-sub { padding-top: 0; margin-top: -4px; }
+.dm-filter { width: auto; min-width: 118px; flex: 0 0 auto; }
+.dm-search { width: auto; min-width: 210px; flex: 1 1 210px; }
+
+/* A field that is present but not editable right now — visibly inert, still
+   readable, so the value it holds is not mistaken for missing. */
+.dm-input-locked, .dm-input:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+    background: rgba(255,255,255,.02);
 }
+
+/* An irreversible consequence deserves more than a hint. */
+.dm-warn {
+    margin: 14px 0 0;
+    padding: 10px 12px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--amber);
+    background: rgba(245,158,11,.08);
+    border: 1px solid rgba(245,158,11,.35);
+    border-radius: 6px;
+}
+.dm-warn strong { color: var(--light); }
 
 /* Marks a stop count inferred from the timetable rather than observed. */
 .trip-inferred {
@@ -1298,7 +1332,15 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
    Routes are simple scrolling blocks. */
 .dm-panel { display: none; min-height: 0; }
 .dm-panel.active { display: block; overflow: auto; }
-#dm-panel-buses.active { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+
+/* Panels whose table must keep its header visible while scrolling.
+   The generic rule above scrolls the PANEL, which drags .dm-table-wrap — the
+   element the sticky header is anchored to — up and out of view with it. These
+   two make the panel a fixed-height flex column instead, so .dm-table-wrap
+   (flex:1, overflow:auto) becomes the scroll container and `position: sticky`
+   on the header behaves. */
+#dm-panel-buses.active,
+#dm-panel-trips.active { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
 
 /* ── Stops / Routes panels ─────────────────────────────────────────────────
    These two still render through the original markup and their JS builders

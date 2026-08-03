@@ -132,6 +132,30 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     List<Object[]> findTripSummaries(@Param("tripIds") Collection<String> tripIds);
 
     /**
+     * Every trip in the timetable, in departure order.
+     *
+     * The timetable has no service date — arrival_seconds is seconds since
+     * midnight — so "every trip" IS the service day, the same one every day.
+     * That is what the Trips tab lists. It is a bounded set (tens of rows for
+     * this network), so it is fetched whole and filtered in the browser rather
+     * than pushing status, route, bus and free-text filters into SQL.
+     *
+     * Columns: identical to findActiveTrips.
+     */
+    @Query("""
+        SELECT t.id, r.id, r.shortName, r.longName,
+               MIN(ss.arrivalSeconds), MAX(ss.arrivalSeconds),
+               b.busId, COUNT(ss)
+        FROM ScheduledStop ss
+             JOIN ss.trip t
+             LEFT JOIN t.route r
+             LEFT JOIN t.bus b
+        GROUP BY t.id, r.id, r.shortName, r.longName, b.busId
+        ORDER BY MIN(ss.arrivalSeconds) ASC
+        """)
+    List<Object[]> findAllTripSummaries();
+
+    /**
      * Buses already working a trip that overlaps the window [from, to].
      *
      * Two trips overlap when each starts before the other ends — the standard
@@ -151,6 +175,31 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
         HAVING MIN(ss.arrivalSeconds) <= :to AND MAX(ss.arrivalSeconds) >= :from
         """)
     List<Integer> findBusIdsBusyBetween(@Param("from") int from,
+                                        @Param("to") int to,
+                                        @Param("excludeTripId") String excludeTripId);
+
+    /**
+     * Trips of one bus that would clash with the window [from, to].
+     *
+     * Used before moving a departure. LINEA_3 is the cautionary tale: its
+     * timetable asked one vehicle to start a run four minutes before the
+     * previous one ended, and the resulting confusion took a long time to
+     * trace. Rescheduling by hand should not be able to recreate that.
+     *
+     * Columns: [0] tripId, [1] startSeconds, [2] endSeconds
+     */
+    @Query("""
+        SELECT t.id, MIN(ss.arrivalSeconds), MAX(ss.arrivalSeconds)
+        FROM ScheduledStop ss
+             JOIN ss.trip t
+             JOIN t.bus b
+        WHERE b.busId = :busId AND t.id <> :excludeTripId
+        GROUP BY t.id
+        HAVING MIN(ss.arrivalSeconds) <= :to AND MAX(ss.arrivalSeconds) >= :from
+        ORDER BY MIN(ss.arrivalSeconds) ASC
+        """)
+    List<Object[]> findConflictingTrips(@Param("busId") Integer busId,
+                                        @Param("from") int from,
                                         @Param("to") int to,
                                         @Param("excludeTripId") String excludeTripId);
 

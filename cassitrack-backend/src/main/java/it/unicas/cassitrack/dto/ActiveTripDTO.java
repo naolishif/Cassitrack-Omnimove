@@ -91,11 +91,26 @@ public class ActiveTripDTO {
 
     // ── Live status ─────────────────────────────────────────────────
     /**
-     * ON_TIME / SLIGHTLY_LATE / SIGNIFICANTLY_LATE / EARLY / UNKNOWN, plus two
-     * states the live feed does not produce:
-     *   COMPLETED — the bus was observed at the final stop; the row lingers a
-     *               few minutes so an operator can see how the run ended
+     * Where the trip is in its life: NOT_STARTED, ACTIVE or FINISHED.
+     *
+     * Deliberately separate from {@link #status}. This one is always known —
+     * it follows from the clock and from whether we saw the bus reach the last
+     * stop — whereas punctuality can be unmeasured. Conflating them is what
+     * made a finished trip and a running one look alike.
+     *
+     * A trip is FINISHED either because it was observed reaching its final
+     * stop (possibly early) or because its scheduled window has elapsed.
+     */
+    @JsonProperty("phase")
+    private String phase;
+
+    /**
+     * HOW the trip is running: ON_TIME / SLIGHTLY_LATE / SIGNIFICANTLY_LATE /
+     * EARLY / UNKNOWN, plus two the live feed does not produce:
+     *   COMPLETED — the bus was observed at the final stop
      *   NO_SIGNAL — the assigned bus is not reporting at all
+     *
+     * Meaningless before departure; null when phase is NOT_STARTED.
      */
     @JsonProperty("status")
     private String status;

@@ -1522,6 +1522,35 @@
         if(btn) tripOpenEdit(btn.dataset.tripEdit);
     });
 
+    // Trips filters. All client-side over the day's rows already in memory, so
+    // every one of these is instant and none of them refetches.
+    const tripsFilterInputs = [
+        ['tripsSearch', 'search', 'input'],
+        ['tripsPhase',  'phase',  'change'],
+        ['tripsStatus', 'status', 'change'],
+        ['tripsSpan',   'span',   'change'],
+        ['tripsRoute',  'route',  'change'],
+        ['tripsBus',    'bus',    'change']
+    ];
+    tripsFilterInputs.forEach(([id, key, evt]) => {
+        const el = document.getElementById(id);
+        if(!el) return;
+        el.addEventListener(evt, e => {
+            const v = e.target.value;
+            tripsFilter[key] = key === 'search' ? v.trim().toLowerCase() : v;
+            tripsApplyFilter();
+        });
+    });
+    const tripsClearBtn = document.getElementById('tripsClearBtn');
+    if(tripsClearBtn) tripsClearBtn.addEventListener('click', () => {
+        Object.keys(tripsFilter).forEach(k => tripsFilter[k] = '');
+        tripsFilterInputs.forEach(([id]) => {
+            const el = document.getElementById(id);
+            if(el) el.value = '';
+        });
+        tripsApplyFilter();
+    });
+
     // Active Trips: edit drawer
     const tripDrawerClose = document.getElementById('tripDrawerClose');
     if(tripDrawerClose) tripDrawerClose.addEventListener('click', tripCloseDrawer);
@@ -1531,6 +1560,8 @@
     if(tripDrawerBackdrop) tripDrawerBackdrop.addEventListener('click', tripCloseDrawer);
     const tripSaveBtn = document.getElementById('tripSaveBtn');
     if(tripSaveBtn) tripSaveBtn.addEventListener('click', tripSave);
+    const tripsNewBtn = document.getElementById('tripsNewBtn');
+    if(tripsNewBtn) tripsNewBtn.addEventListener('click', tripOpenCreate);
 
     // Data Management > buses CRUD is wired further down (dm* handlers) — the
     // superseded bm* inline-form wiring was removed with its panel.
@@ -1696,7 +1727,7 @@
        stays listed for 15 minutes, so the end of a run can be reviewed instead
        of disappearing the moment it happens. */
 
-    const TRIPS_COLSPAN = 10;
+    const TRIPS_COLSPAN = 11;
     const TRIPS_REFRESH_MS = 30000;
     let tripsTimer = null;      // 30 s auto-refresh, only while the tab is open
 
@@ -1709,23 +1740,90 @@
         if (tripsTimer) { clearInterval(tripsTimer); tripsTimer = null; }
     }
 
-    // Last payload, so the edit drawer can render a trip's details without
-    // refetching — and so a refresh landing mid-edit cannot change them.
+    // Last payload, so filtering costs nothing and the edit drawer can render a
+    // trip's details without refetching.
     let tripsLast = [];
+
+    const tripsFilter = { search: '', phase: '', status: '', span: '', route: '', bus: '' };
 
     async function tripsLoad() {
         const body = document.getElementById('tripsTableBody');
         if (!body) return;
         try {
-            const r = await fetch(`${API}/trips/active`);
+            // The whole service day in one call. It is a few dozen rows, so
+            // filtering happens in the browser — instant, and no round-trip per
+            // keystroke in the search box.
+            const r = await fetch(`${API}/trips`);
             if (!r.ok) throw new Error(r.status);
             tripsLast = await r.json();
-            tripsRender(tripsLast);
+            tripsFillFilterOptions(tripsLast);
+            tripsApplyFilter();
         } catch (e) {
             body.innerHTML = `<tr><td colspan="${TRIPS_COLSPAN}" class="dm-empty">`
-                           + 'Could not load active trips.</td></tr>';
+                           + 'Could not load trips.</td></tr>';
             document.getElementById('tripsCount').textContent = '';
         }
+    }
+
+    /** Route and bus lists come from the data, so they never offer an empty choice. */
+    function tripsFillFilterOptions(trips) {
+        const fill = (id, pairs, current) => {
+            const sel = document.getElementById(id);
+            if (!sel) return;
+            const first = sel.options[0] ? sel.options[0].outerHTML : '';
+            sel.innerHTML = first + pairs
+                .map(([v, label]) => `<option value="${escHtml(v)}">${escHtml(label)}</option>`)
+                .join('');
+            sel.value = current;          // survive the 30 s refresh
+        };
+
+        const routes = [...new Map(trips.filter(t => t.route_id)
+            .map(t => [t.route_id, t.route_name || t.route_id])).entries()]
+            .sort((a, b) => a[1].localeCompare(b[1]));
+
+        const buses = [...new Map(trips.filter(t => t.bus_id != null)
+            .map(t => [String(t.bus_id),
+                       t.plate + (t.vehicle_id ? ` (${t.vehicle_id})` : '')])).entries()]
+            .sort((a, b) => a[1].localeCompare(b[1]));
+
+        fill('tripsRoute', routes, tripsFilter.route);
+        fill('tripsBus',   buses,  tripsFilter.bus);
+    }
+
+    /** Minutes since midnight, local time — the same clock the timetable uses. */
+    function tripsNowMinutes() {
+        const d = new Date();
+        return d.getHours() * 60 + d.getMinutes();
+    }
+
+    function tripsMatches(t) {
+        const f = tripsFilter;
+        if (f.phase  && t.phase  !== f.phase)  return false;
+        if (f.status && t.status !== f.status) return false;
+        if (f.route  && t.route_id !== f.route) return false;
+        if (f.bus    && String(t.bus_id) !== f.bus) return false;
+
+        if (f.span) {
+            const start = tripsMinutesBetween('00:00', t.start_time);
+            if (start === null) return false;
+            const now = tripsNowMinutes();
+            if (f.span === 'past') {
+                if (start >= now) return false;
+            } else if (start < now || start > now + parseInt(f.span, 10)) {
+                return false;
+            }
+        }
+
+        if (f.search) {
+            const hay = [t.trip_id, t.route_name, t.route_id, t.plate, t.vehicle_id]
+                .filter(Boolean).join(' ').toLowerCase();
+            if (!hay.includes(f.search)) return false;
+        }
+        return true;
+    }
+
+    function tripsApplyFilter() {
+        tripsRender(tripsLast.filter(tripsMatches));
     }
 
     function tripsRender(trips) {
@@ -1734,17 +1832,20 @@
         const when  = document.getElementById('tripsUpdated');
 
         if (!trips.length) {
-            // Not an error: outside service hours nothing is scheduled, which is
-            // a legitimate answer rather than an empty-state failure.
+            // Distinguish "nothing matches your filter" from "no service":
+            // the first is undone by clearing, the second is a fact about the day.
+            const filtered = Object.values(tripsFilter).some(Boolean);
             body.innerHTML = `<tr><td colspan="${TRIPS_COLSPAN}" class="dm-empty">`
-                           + 'No trips scheduled at this time.</td></tr>';
+                           + (filtered ? 'No trips match these filters.'
+                                       : 'No trips in the timetable.')
+                           + '</td></tr>';
             count.textContent = '';
             when.textContent  = 'checked ' + new Date().toLocaleTimeString();
             return;
         }
 
         body.innerHTML = trips.map(t => `
-        <tr class="${t.status === 'COMPLETED' ? 'trip-done' : ''}">
+        <tr class="${tripsRowClass(t)}">
             <td class="dm-muted dm-mono">${escHtml(t.trip_id)}</td>
             <td>${escHtml(t.route_name) || '<span class="dm-muted">—</span>'}</td>
             <td>${t.plate ? `<span class="dm-plate">${escHtml(t.plate)}</span>`
@@ -1756,16 +1857,21 @@
             <td class="dm-mono dm-muted">${escHtml(t.end_time)}</td>
             <td class="dm-mono">${tripsActualEndCell(t)}</td>
             <td>${tripsProgressCell(t)}</td>
-            <td>${tripsStatusPill(t)}</td>
+            <td>${tripsPhasePill(t)}</td>
+            <td>${tripsStatusPill(t) || '<span class="dm-muted">—</span>'}</td>
             <td class="dm-right">
                 <button class="dm-row-btn" data-trip-edit="${escHtml(t.trip_id)}">Edit</button>
             </td>
         </tr>`).join('');
 
-        const running = trips.filter(t => t.status !== 'COMPLETED').length;
-        const done    = trips.length - running;
-        count.textContent = `${running} running`
-                          + (done ? ` · ${done} just finished` : '');
+        const n = p => trips.filter(t => t.phase === p).length;
+        const parts = [];
+        if (n('ACTIVE'))      parts.push(`${n('ACTIVE')} active`);
+        if (n('NOT_STARTED')) parts.push(`${n('NOT_STARTED')} not started`);
+        if (n('FINISHED'))    parts.push(`${n('FINISHED')} finished`);
+        count.textContent = parts.join(' · ')
+                          + (trips.length !== tripsLast.length
+                              ? `   (${trips.length} of ${tripsLast.length})` : '');
         when.textContent  = 'updated ' + new Date().toLocaleTimeString();
         applyDynStyles(body);     // CSP-safe: widths are data-attributes, set via CSSOM
     }
@@ -1800,6 +1906,11 @@
 
     /** Progress measured in stops actually reached, not time elapsed. */
     function tripsProgressCell(t) {
+        // A trip that has not departed has no progress to show. An empty bar
+        // at 0/12 would read as "stuck at the terminus" rather than "later".
+        if (t.phase === 'NOT_STARTED')
+            return `<span class="dm-muted">${t.stops_total} stops</span>`;
+
         const pct = Math.max(0, Math.min(100, t.progress_pct || 0));
         const colour = t.status === 'COMPLETED' ? '#3B82F6'
                      // A silent bus keeps whatever progress it last reported;
@@ -1823,7 +1934,28 @@
                 <div class="trip-sub">${counted}</div>${next}`;
     }
 
+    /** Row tint by phase, so the shape of the day reads without squinting. */
+    function tripsRowClass(t) {
+        if (t.phase === 'FINISHED')    return 'trip-done';
+        if (t.phase === 'NOT_STARTED') return 'trip-future';
+        return 'trip-active';
+    }
+
+    function tripsPhasePill(t) {
+        const map = {
+            ACTIVE:      ['trip-pill-active', 'ACTIVE'],
+            NOT_STARTED: ['trip-pill-future', 'NOT STARTED'],
+            FINISHED:    ['trip-pill-done',   'FINISHED']
+        };
+        const [cls, label] = map[t.phase] || ['dm-pill-inactive', '—'];
+        return `<span class="dm-pill ${cls}">${label}</span>`;
+    }
+
     function tripsStatusPill(t) {
+        // Before departure there is nothing to say about punctuality, and the
+        // phase pill beside it already says the trip has not left.
+        if (!t.status) return '';
+
         const d = t.delay_minutes;
         const delay = (typeof d === 'number' && d !== 0)
             ? ` <span class="dm-muted">${d > 0 ? '+' : ''}${d}m</span>` : '';
@@ -1844,7 +1976,84 @@
 
     /* ── Active Trips: edit drawer ──────────────────────────────────── */
 
-    let tripEditing = null;      // trip_id currently open in the drawer
+    let tripEditing = null;      // trip_id open in the drawer, null while creating
+    let tripMode    = 'edit';    // 'edit' | 'create'
+
+    /**
+     * Show the fields belonging to one mode and hide the other's.
+     *
+     * Toggled through the CSSOM rather than a style="" attribute, because the
+     * page's CSP drops 'unsafe-inline' from style-src.
+     */
+    function tripSetMode(mode) {
+        tripMode = mode;
+        const editOnly   = document.getElementById('tripFormEditOnly');
+        const createOnly = document.getElementById('tripFormCreateOnly');
+        if (editOnly)   editOnly.style.display   = mode === 'edit'   ? '' : 'none';
+        if (createOnly) createOnly.style.display = mode === 'create' ? '' : 'none';
+
+        // The permanence warning applies to both, but says different things.
+        const warn = document.getElementById('tripFormPermanentWarning');
+        if (warn) warn.innerHTML = mode === 'create'
+            ? '<strong>This trip is permanent.</strong> The timetable has no per-day '
+              + 'version, so this run is added to <em>every day</em>, not just today.'
+            : '<strong>This change is permanent.</strong> The timetable has no per-day '
+              + 'version, so this trip will run with the new settings <em>every day</em>, '
+              + 'not just today. For a one-off swap during a breakdown, wait for the '
+              + 'disruption feature.';
+    }
+
+    /**
+     * New trip.
+     *
+     * Routes are offered only where a trip already exists, because the new
+     * trip's timings are copied from one — a route with no template cannot be
+     * scheduled, and listing it would produce an error instead of a trip.
+     */
+    async function tripOpenCreate() {
+        tripEditing = null;
+        tripSetMode('create');
+        tripsStopAutoRefresh();
+
+        document.getElementById('tripDrawerTitle').textContent = 'New trip';
+        document.getElementById('tripFormError').textContent   = '';
+
+        const dep = document.getElementById('tripFormDeparture');
+        dep.disabled = false;
+        dep.classList.remove('dm-input-locked');
+        dep.value = '';
+        document.getElementById('tripFormDepartureHint').textContent =
+            'The bus must be free, with at least 15 minutes either side of its other trips.';
+        document.getElementById('tripFormBusHint').textContent =
+            'Any bus may be chosen; the turnaround check runs when you save.';
+
+        const routes = [...new Map(tripsLast.filter(t => t.route_id)
+            .map(t => [t.route_id, t.route_name || t.route_id])).entries()]
+            .sort((a, b) => a[1].localeCompare(b[1]));
+        document.getElementById('tripFormRouteSelect').innerHTML =
+            '<option value="">— Choose a route —</option>'
+            + routes.map(([id, label]) =>
+                `<option value="${escHtml(id)}">${escHtml(label)}</option>`).join('');
+
+        // Every bus, not just free ones: "free" depends on a departure time the
+        // operator has not chosen yet.
+        const sel = document.getElementById('tripFormBus');
+        sel.innerHTML = '<option value="">Loading…</option>';
+        tripOpenDrawer();
+        try {
+            const buses = await (await fetch(`${API}/buses`)).json();
+            sel.innerHTML = '<option value="">— Choose a bus —</option>'
+                + buses.map(b => {
+                    const notes = [];
+                    if (b.status !== 'ACTIVE')  notes.push(String(b.status).toLowerCase());
+                    if (!b.currentVehicleId)    notes.push('no antenna');
+                    const suffix = notes.length ? ` — ${notes.join(', ')}` : '';
+                    return `<option value="${b.busId}">${escHtml(b.targa)}${escHtml(suffix)}</option>`;
+                }).join('');
+        } catch (e) {
+            sel.innerHTML = '<option value="">Could not load buses</option>';
+        }
+    }
 
     function tripOpenDrawer() {
         document.getElementById('tripDrawer').classList.add('open');
@@ -1861,6 +2070,7 @@
         document.getElementById('tripDrawerBackdrop').classList.remove('open');
         document.getElementById('tripFormError').textContent = '';
         tripEditing = null;
+        tripMode    = 'edit';   // next open starts from a known state
     }
 
     function tripCloseDrawer() {
@@ -1876,14 +2086,32 @@
         if (!t) return;
 
         tripEditing = tripId;
+        tripSetMode('edit');
         tripsStopAutoRefresh();   // don't let a refresh redraw under the form
 
+        document.getElementById('tripFormBusHint').textContent =
+            'Only buses with no other trip during this window are listed.';
         document.getElementById('tripDrawerTitle').textContent = 'Edit trip';
         document.getElementById('tripFormId').textContent      = t.trip_id;
         document.getElementById('tripFormRoute').textContent   = t.route_name || '—';
         document.getElementById('tripFormWindow').textContent  =
             `${t.start_time} – ${t.end_time}`
             + (t.actual_end_time ? `  (finished ${t.actual_end_time})` : '');
+
+        // Departure is editable only before the bus leaves. Moving a run that
+        // is already under way would shift stops the bus has physically passed,
+        // silently changing the meaning of every delay measured against them.
+        const dep  = document.getElementById('tripFormDeparture');
+        const hint = document.getElementById('tripFormDepartureHint');
+        const canMove = t.phase === 'NOT_STARTED';
+        dep.value    = t.start_time || '';
+        dep.disabled = !canMove;
+        dep.classList.toggle('dm-input-locked', !canMove);
+        hint.textContent = canMove
+            ? 'The whole trip shifts by the same amount, so its running time is unchanged.'
+            : (t.phase === 'ACTIVE'
+                ? 'This trip is already running and cannot be rescheduled.'
+                : 'This trip has finished and cannot be rescheduled.');
         document.getElementById('tripFormProgress').textContent =
             `${t.stops_done}/${t.stops_total} stops`
             + (t.progress_observed ? '' : ' (estimated)');
@@ -1917,30 +2145,95 @@
     }
 
     /**
-     * Save the reassignment.
+     * Create the trip.
      *
-     * Only the bus can change, so this is a single PUT rather than a full trip
-     * update — the route and the timetable are owned elsewhere.
+     * All three fields are required and validated here only for the obvious
+     * omissions — the turnaround and midnight rules live on the server, which
+     * is the only place that can see the rest of the timetable.
+     */
+    async function tripSaveNew() {
+        const err     = document.getElementById('tripFormError');
+        const routeId = document.getElementById('tripFormRouteSelect').value;
+        const busId   = parseInt(document.getElementById('tripFormBus').value, 10);
+        const dep     = document.getElementById('tripFormDeparture').value;
+
+        if (!routeId)                 { err.textContent = 'Choose a route.';          return; }
+        if (!Number.isInteger(busId)) { err.textContent = 'Choose a bus.';            return; }
+        if (!dep)                     { err.textContent = 'Choose a departure time.'; return; }
+        err.textContent = '';
+
+        try {
+            const r = await fetch(`${API}/trips`, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ route_id: routeId, bus_id: busId, departure: dep })
+            });
+            if (!r.ok) {
+                const data = await r.json().catch(() => ({}));
+                err.textContent = data.message || `Could not create the trip (${r.status}).`;
+                return;
+            }
+            tripCloseDrawer();
+            tripsLoad();
+        } catch (e) {
+            err.textContent = 'Could not reach the server.';
+        }
+    }
+
+    /**
+     * Save the bus and, for a trip that has not left, the departure time.
+     *
+     * Two endpoints rather than one: they are independent changes with
+     * different rules, and the server rejects a departure move on a running
+     * trip regardless of what the form allows.
+     *
+     * The bus goes FIRST on purpose. The departure endpoint refuses a time that
+     * would overlap another trip of the same bus, so it has to run against the
+     * bus the trip is going to have, not the one it is leaving behind.
      */
     async function tripSave() {
+        if (tripMode === 'create') return tripSaveNew();
         if (!tripEditing) return;
-        const busId = parseInt(document.getElementById('tripFormBus').value, 10);
         const err   = document.getElementById('tripFormError');
+        const busId = parseInt(document.getElementById('tripFormBus').value, 10);
+        const dep   = document.getElementById('tripFormDeparture');
+        const t     = tripsLast.find(x => x.trip_id === tripEditing);
 
         if (!Number.isInteger(busId)) {
             err.textContent = 'Choose a bus first.';
             return;
         }
+        err.textContent = '';
+
+        const put = async (url) => {
+            const r = await fetch(url, { method: 'PUT' });
+            if (r.ok) return null;
+            const data = await r.json().catch(() => ({}));
+            return data.message || `Save failed (${r.status}).`;
+        };
 
         try {
-            const r = await fetch(
-                `${API}/trips/${encodeURIComponent(tripEditing)}/bus?busId=${busId}`,
-                { method: 'PUT' });
-            if (!r.ok) {
-                const data = await r.json().catch(() => ({}));
-                err.textContent = data.message || `Save failed (${r.status}).`;
-                return;
+            const id = encodeURIComponent(tripEditing);
+
+            if (!t || busId !== t.bus_id) {
+                const msg = await put(`${API}/trips/${id}/bus?busId=${busId}`);
+                if (msg) { err.textContent = msg; return; }
             }
+
+            // Only send a time the user actually changed: an unchanged value is
+            // a no-op server-side, but sending it would surface a "already
+            // departed" error on trips nobody was trying to move.
+            if (!dep.disabled && dep.value && t && dep.value !== t.start_time) {
+                const msg = await put(`${API}/trips/${id}/departure?time=${encodeURIComponent(dep.value)}`);
+                if (msg) {
+                    // The bus change above may already have gone through, so say
+                    // what did and did not happen rather than just "failed".
+                    err.textContent = msg + ' The bus change was saved.';
+                    tripsLoad();
+                    return;
+                }
+            }
+
             tripCloseDrawer();
             tripsLoad();      // reflect it immediately rather than waiting 30 s
         } catch (e) {

@@ -97,6 +97,15 @@ public class NetexImportService {
         }
     }
 
+    /**
+     * "" and "   " mean "absent" in an XML document; NULL means it in a
+     * database. Anything unique-constrained must make that translation, or two
+     * genuinely empty values collide with each other.
+     */
+    private static String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s;
+    }
+
     @Transactional
     public void importDataFromCassitrack() {
         System.out.println("Inizio scaricamento dati NeTEx da Cassitrack...");
@@ -146,7 +155,13 @@ public class NetexImportService {
         if (resourceFrame != null && resourceFrame.getVehicles() != null) {
             List<Bus> buses = resourceFrame.getVehicles().stream().map(dto -> {
                 Bus bus = new Bus();
-                bus.setCurrentVehicleId(dto.getPrivateCode());
+                // A bus with no on-board unit has current_vehicle_id NULL in
+                // CassiTrack, but a null PrivateCode crosses the wire as an
+                // empty XML element and arrives here as "". Postgres tolerates
+                // many NULLs in a unique index and exactly one '', so leaving
+                // it blank made the SECOND antenna-less bus abort the whole
+                // import with buses_current_vehicle_id_key.
+                bus.setCurrentVehicleId(blankToNull(dto.getPrivateCode()));
                 if (dto.getExtensions() != null) {
                     bus.setLicensePlate(dto.getExtensions().getTarga());
                     bus.setNumberSeats(dto.getExtensions().getNumeroPosti());

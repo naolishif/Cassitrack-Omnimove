@@ -39,6 +39,15 @@ public class TripController {
     private final TripRepository tripRepository;
     private final BusRepository busRepository;
 
+    @GetMapping(produces = "application/json")
+    @Operation(summary = "Every trip in the service day, in departure order",
+            description = "Each row carries a phase (NOT_STARTED / ACTIVE / FINISHED) "
+                        + "so the client can filter without a second call. The timetable "
+                        + "has no service date, so this is the same day every day.")
+    public List<ActiveTripDTO> getDayTrips() {
+        return activeTripService.getDayTrips();
+    }
+
     @GetMapping(value = "/active", produces = "application/json")
     @Operation(summary = "Trips scheduled to be running right now",
             description = "Timetable-driven: a scheduled trip whose bus is silent is "
@@ -95,6 +104,69 @@ public class TripController {
                 "trip_id", tripId,
                 "bus_id",  busId,
                 "plate",   bus.getTarga() == null ? "" : bus.getTarga()));
+    }
+
+    /**
+     * Add a trip to the timetable.
+     *
+     * The stop pattern is copied from an existing trip on the same route, so
+     * the new run keeps the route's timings; only its departure differs. The
+     * bus must be free, with a 15-minute turnaround either side.
+     */
+    @PostMapping(produces = "application/json")
+    @Operation(summary = "Create a trip (FLEET_MANAGER only)",
+            description = "Permanent: the timetable has no service date, so this adds "
+                        + "a run to every day.")
+    public ResponseEntity<Map<String, Object>> createTrip(@RequestBody Map<String, Object> body) {
+        String routeId = body.get("route_id") == null ? null : String.valueOf(body.get("route_id"));
+        Object busRaw  = body.get("bus_id");
+        String time    = body.get("departure") == null ? null : String.valueOf(body.get("departure"));
+
+        if (routeId == null || routeId.isBlank())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a route.");
+        if (busRaw == null)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a bus.");
+        if (time == null || time.isBlank())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose a departure time.");
+
+        Integer busId;
+        int seconds;
+        try {
+            busId   = Integer.valueOf(String.valueOf(busRaw));
+            seconds = java.time.LocalTime.parse(time).toSecondOfDay();
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Bus must be an id and departure must look like HH:mm.");
+        }
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(activeTripService.createTrip(routeId, busId, seconds));
+    }
+
+    /**
+     * Move a trip's departure. Only trips that have not yet started.
+     *
+     * Every stop shifts by the same amount, so the run time is preserved. The
+     * change is permanent — the timetable has no per-day version — and the
+     * trip id keeps its original number, because that id is what ties the
+     * InfluxDB arrival history and OmniMove's copy back to this run.
+     */
+    @PutMapping(value = "/{tripId}/departure", produces = "application/json")
+    @Operation(summary = "Reschedule a not-yet-started trip (FLEET_MANAGER only)")
+    public ResponseEntity<Map<String, Object>> rescheduleDeparture(
+            @PathVariable String tripId,
+            @RequestParam String time) {
+
+        int seconds;
+        try {
+            java.time.LocalTime t = java.time.LocalTime.parse(time);   // HH:mm or HH:mm:ss
+            seconds = t.toSecondOfDay();
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Departure must look like HH:mm — got '" + time + "'.");
+        }
+
+        return ResponseEntity.ok(activeTripService.rescheduleDeparture(tripId, seconds));
     }
 
     /** Readable message instead of a bare 500 — same pattern as BusController. */

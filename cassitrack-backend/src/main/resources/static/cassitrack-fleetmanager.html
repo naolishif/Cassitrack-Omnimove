@@ -351,7 +351,7 @@
             <button type="button" class="dm-subtab bm-subnav-btn active" id="dmTabBuses">Buses</button>
             <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabStops">Stops</button>
             <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabRoutes">Routes</button>
-            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTrips">Active Trips</button>
+            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTrips">Trips</button>
         </div>
 
         <!-- ══════════ BUSES PANEL (US-01 registry) ══════════ -->
@@ -532,9 +532,52 @@
              running right now, and how each one is actually getting on. -->
         <div id="dm-panel-trips" class="dm-panel">
             <div class="dm-toolbar">
+                <input type="search" id="tripsSearch" class="dm-input dm-search"
+                       placeholder="Search trip, route, plate or antenna…">
+
+                <!-- Phase is a different question from punctuality: where the trip
+                     is in its life, versus how it is running. Two filters. -->
+                <select id="tripsPhase" class="dm-input dm-select dm-filter">
+                    <option value="">All phases</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="NOT_STARTED">Not started</option>
+                    <option value="FINISHED">Finished</option>
+                </select>
+
+                <select id="tripsStatus" class="dm-input dm-select dm-filter">
+                    <option value="">Any status</option>
+                    <option value="ON_TIME">On time</option>
+                    <option value="EARLY">Early</option>
+                    <option value="SLIGHTLY_LATE">Slightly late</option>
+                    <option value="SIGNIFICANTLY_LATE">Late</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="NO_SIGNAL">No signal</option>
+                    <option value="UNKNOWN">Live (unmeasured)</option>
+                </select>
+
+                <select id="tripsSpan" class="dm-input dm-select dm-filter">
+                    <option value="">Whole day</option>
+                    <option value="60">Next hour</option>
+                    <option value="180">Next 3 hours</option>
+                    <option value="past">Earlier today</option>
+                </select>
+
+                <select id="tripsRoute" class="dm-input dm-select dm-filter">
+                    <option value="">All routes</option>
+                </select>
+
+                <select id="tripsBus" class="dm-input dm-select dm-filter">
+                    <option value="">All buses</option>
+                </select>
+
+                <button class="dm-btn dm-btn-ghost" id="tripsClearBtn">Clear</button>
+                <button class="dm-btn dm-btn-ghost" id="tripsRefreshBtn">Refresh now</button>
+                <button class="dm-btn dm-btn-primary" id="tripsNewBtn">+ New trip</button>
+            </div>
+
+            <div class="dm-toolbar dm-toolbar-sub">
                 <span class="dm-footer" id="tripsCount"></span>
                 <span class="dm-footer dm-muted" id="tripsUpdated"></span>
-                <button class="dm-btn dm-btn-ghost" id="tripsRefreshBtn">Refresh now</button>
             </div>
 
             <div class="dm-table-wrap">
@@ -549,12 +592,13 @@
                         <th>End (sched.)</th>
                         <th>End (real)</th>
                         <th>Progress</th>
+                        <th>Phase</th>
                         <th>Status</th>
                         <th class="dm-right">Actions</th>
                     </tr>
                     </thead>
                     <tbody id="tripsTableBody">
-                    <tr><td colspan="10" class="dm-empty">Loading…</td></tr>
+                    <tr><td colspan="11" class="dm-empty">Loading…</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -624,20 +668,40 @@
         </div>
 
         <div class="dm-drawer-body">
-            <!-- Read-only context. The route and the timetable are not editable
-                 here: changing a trip's route would orphan every one of its
-                 scheduled stops, which belongs in the timetable editor. -->
-            <label class="dm-label">Trip</label>
-            <p class="dm-readonly dm-mono" id="tripFormId">—</p>
+            <!-- Read-only context, edit mode only. The route is not editable on
+                 an existing trip: changing it would orphan every one of that
+                 trip's scheduled stops. -->
+            <div id="tripFormEditOnly">
+                <label class="dm-label">Trip</label>
+                <p class="dm-readonly dm-mono" id="tripFormId">—</p>
 
-            <label class="dm-label">Route</label>
-            <p class="dm-readonly" id="tripFormRoute">—</p>
+                <label class="dm-label">Route</label>
+                <p class="dm-readonly" id="tripFormRoute">—</p>
 
-            <label class="dm-label">Scheduled window</label>
-            <p class="dm-readonly dm-mono" id="tripFormWindow">—</p>
+                <label class="dm-label">Scheduled window</label>
+                <p class="dm-readonly dm-mono" id="tripFormWindow">—</p>
 
-            <label class="dm-label">Progress</label>
-            <p class="dm-readonly" id="tripFormProgress">—</p>
+                <label class="dm-label">Progress</label>
+                <p class="dm-readonly" id="tripFormProgress">—</p>
+            </div>
+
+            <!-- Create mode only. Listed routes are those that already have at
+                 least one trip, because a new trip's timings are copied from an
+                 existing one on the same route. -->
+            <div id="tripFormCreateOnly">
+                <label class="dm-label" for="tripFormRouteSelect">Route</label>
+                <select id="tripFormRouteSelect" class="dm-input dm-select">
+                    <option value="">— Choose a route —</option>
+                </select>
+                <p class="dm-hint">
+                    The new trip copies this route's stop pattern and running time;
+                    only the departure differs.
+                </p>
+            </div>
+
+            <label class="dm-label" for="tripFormDeparture">Departure</label>
+            <input type="time" id="tripFormDeparture" class="dm-input dm-mono" step="60">
+            <p class="dm-hint" id="tripFormDepartureHint"></p>
 
             <label class="dm-label" for="tripFormBus">Assigned bus</label>
             <select id="tripFormBus" class="dm-input dm-select">
@@ -645,6 +709,16 @@
             </select>
             <p class="dm-hint" id="tripFormBusHint">
                 Only buses with no other trip during this window are listed.
+            </p>
+
+            <!-- The timetable stores arrival_seconds, not dates: there is one
+                 timetable, repeated daily. Saying so here is the difference
+                 between a deliberate change and an unpleasant surprise. -->
+            <p class="dm-warn" id="tripFormPermanentWarning">
+                <strong>This change is permanent.</strong> The timetable has no
+                per-day version, so this trip will run with the new bus
+                <em>every day</em>, not just today. For a one-off swap during a
+                breakdown, wait for the disruption feature.
             </p>
 
             <p class="dm-error" id="tripFormError"></p>
