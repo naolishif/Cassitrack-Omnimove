@@ -24,7 +24,10 @@ public class JourneyRequest {
     @JsonProperty("departure_time") private String departureTime;
 
     @JsonProperty("messages") private List<String> messages = new ArrayList<>();
+    @JsonProperty("lang") private String lang;
 
     public void addMessage(String msg) { this.messages.add(msg); }
     private List<String> modes;
+
+    public boolean isItalian() { return "it".equalsIgnoreCase(lang); }
 }

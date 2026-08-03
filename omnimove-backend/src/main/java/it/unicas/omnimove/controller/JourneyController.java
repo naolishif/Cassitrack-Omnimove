@@ -15,6 +15,7 @@ import it.unicas.omnimove.service.GreenIndexService;
 import it.unicas.omnimove.service.JourneyEventService;
 import it.unicas.omnimove.service.JourneyPlannerService;
 import it.unicas.omnimove.service.RateLimiterService;
+import it.unicas.omnimove.service.WeatherService;
 import it.unicas.omnimove.service.TrafficAwareETAService;
 import it.unicas.omnimove.service.GoogleApiSettingsService;
 import it.unicas.omnimove.dto.StopArrivalResponse;
@@ -69,6 +70,7 @@ public class JourneyController {
     private final StringRedisTemplate   redisTemplate;
     private final TripRepository        tripRepository;
     private final ObjectMapper          objectMapper;
+    private final WeatherService        weatherService;
 
     @GetMapping("/stops")
     @Operation(summary = "List active stops for origin/destination pickers")
@@ -85,6 +87,20 @@ public class JourneyController {
                 ))
                 .toList();
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/weather")
+    @Operation(summary = "Current weather condition for the weather pill")
+    public ResponseEntity<Map<String, Object>> weather() {
+        try {
+            var w = weatherService.getCurrentWeather();
+            return ResponseEntity.ok(Map.of(
+                "condition",   w.condition != null ? w.condition.name() : "CLEAR",
+                "temperature", Math.round(w.tempCelsius)
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of("condition", "CLEAR", "temperature", 20));
+        }
     }
 
     @PostMapping("/search")

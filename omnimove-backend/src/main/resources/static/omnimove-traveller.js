@@ -19,6 +19,9 @@ document.getElementById('profileName').textContent  = _user.name  || _user.usern
 document.getElementById('profileEmail').textContent = _user.email || '';
 document.getElementById('paymentEmail').textContent = _user.email || '';
 
+// Apply saved language on load
+applyTranslations();
+
 const _name = _user.name || _user.username || 'there';
 document.getElementById('aiGreeting').textContent =
     `👋 Hi ${_name}! I'm OmniAI. I can help you find the best route, check real-time delays, or suggest eco-friendly alternatives. What do you need?`;
@@ -130,8 +133,8 @@ function timeAgoLabel(dateStr) {
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
 
-    if (sameDay) return { date: 'Today', sub: `Today, ${hh}:${mm}` };
-    if (isYest)  return { date: 'Yesterday', sub: `Yesterday, ${hh}:${mm}` };
+    if (sameDay) return { date: t('lbl_today'), sub: `${t('lbl_today')}, ${hh}:${mm}` };
+    if (isYest)  return { date: t('lbl_yesterday'), sub: `${t('lbl_yesterday')}, ${hh}:${mm}` };
     const opts = { weekday: 'short', day: 'numeric', month: 'short' };
     const label = d.toLocaleDateString('en-GB', opts);
     return { date: label, sub: `${label}, ${hh}:${mm}` };
@@ -142,7 +145,7 @@ const MODE_ICON = { BUS: ['ri-bus', '🚌'], BIKE: ['ri-bike', '🚲'], SCOOTER:
 function renderHistory(items) {
     const container = document.getElementById('history-list');
     if (!items || items.length === 0) {
-        container.innerHTML = '<div class="empty-state">No trips yet. Start your first journey!</div>';
+        container.innerHTML = `<div class="empty-state">${t('no_trips')}</div>`;
         return;
     }
 
@@ -185,7 +188,7 @@ async function loadHistory() {
 function renderFavorites(items) {
     const container = document.getElementById('favs-list');
     if (!items || items.length === 0) {
-        container.innerHTML = '<div class="empty-state">No favourites yet. Tap the ☆ on a trip to save its route here.</div>';
+        container.innerHTML = `<div class="empty-state">${t('no_favs')}</div>`;
         return;
     }
 
@@ -220,6 +223,28 @@ async function loadFavorites() {
 loadEcoStats();
 loadHistory();
 loadPreferences();
+
+// Re-render dynamic content when language switches
+window._onLangChange = () => {
+    loadHistory();
+    loadFavorites();
+    updateWeatherPill();
+};
+
+// ── Weather pill on page load ──────────────────────────────────────
+async function updateWeatherPill() {
+    try {
+        const r = await apiFetch('/journeys/weather');
+        if (!r.ok) return;
+        const w = await r.json();
+        const temp = w.temperature + '°C';
+        const key  = 'weather_' + w.condition;
+        const raw  = t(key);
+        const pill = document.querySelector('.weather-pill');
+        if (pill) pill.textContent = raw.replace('{t}', temp);
+    } catch (e) { /* keep placeholder */ }
+}
+updateWeatherPill();
 
 async function apiFetch(path, options = {}) {
     const token = localStorage.getItem('omnimove_token');
@@ -292,7 +317,7 @@ function renderStopMarkers() {
             `<b>${safeName}</b><br>` +
             `<button class="stop-check-btn" ` +
             `data-stop-id="${escAttr(stop.id)}" data-stop-name="${escAttr(stop.name)}">` +
-            `Check next buses</button>`;
+            `${t('btn_check_buses')}</button>`;
         const marker = L.marker([stop.lat, stop.lon], { icon: STOP_ICON })
             .addTo(map)
             .bindPopup(popup);
@@ -329,7 +354,10 @@ const CROWDING_BG = {
     HIGH:'background:#fed7aa;color:#9a3412',
     VERY_HIGH:'background:#fee2e2;color:#991b1b',
 };
-const CROWDING_LABEL = { LOW:'Low', MEDIUM:'Medium', HIGH:'High', VERY_HIGH:'Very High' };
+function getCrowdingLabel(level) {
+    const map = { LOW:'crowd_low', MEDIUM:'crowd_medium', HIGH:'crowd_high', VERY_HIGH:'crowd_very_high' };
+    return t(map[level] || level);
+}
 
 async function showStopArrivals(stopId, stopName) {
     const overlay  = document.getElementById('stopSheetOverlay');
@@ -338,7 +366,7 @@ async function showStopArrivals(stopId, stopName) {
     const list     = document.getElementById('stopSheetList');
 
     title.textContent    = stopName;
-    subtitle.textContent = 'Loading next buses…';
+    subtitle.textContent = t('loading_buses');
     list.innerHTML       = '';
     overlay.classList.add('open');
 
@@ -349,12 +377,12 @@ async function showStopArrivals(stopId, stopName) {
         const arrivals = await r.json();
         const routeCount = new Set(arrivals.map(a => a.route_short_name || a.route_name)).size;
         subtitle.textContent = arrivals.length
-            ? `${routeCount} line${routeCount !== 1 ? 's' : ''} · next departures`
-            : 'No upcoming buses found';
+            ? `${routeCount} ${routeCount !== 1 ? t('lbl_lines') : t('lbl_line')} · ${t('lbl_next_departures')}`
+            : t('no_buses');
         renderArrivals(list, arrivals);
     } catch(e) {
-        subtitle.textContent = 'Could not load arrivals';
-        list.innerHTML = '<p style="color:var(--text-soft);text-align:center;padding:24px 0">Service unavailable</p>';
+        subtitle.textContent = t('err_arrivals');
+        list.innerHTML = `<p style="color:var(--text-soft);text-align:center;padding:24px 0">${t('err_service')}</p>`;
     }
 }
 
@@ -394,7 +422,7 @@ function routeColor(name) {
 function etaText(isoString, now) {
     if (!isoString) return '—';
     const diff = Math.round((new Date(isoString).getTime() - now) / 1000);
-    if (diff <= 0) return 'Now';
+    if (diff <= 0) return t('lbl_now');
     if (diff < 60) return `${diff} sec`;
     return `${Math.round(diff / 60)} min`;
 }
@@ -427,8 +455,8 @@ function renderArrivals(list, arrivals) {
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                   <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/>
                   <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>
-                </svg> Real time</span>`
-            : `<span class="tmb-rt sched">🕐 Scheduled</span>`;
+                </svg> ${t('lbl_real_time')}</span>`
+            : `<span class="tmb-rt sched">🕐 ${t('lbl_scheduled')}</span>`;
 
         const direction = first.route_name ? escHtml(first.route_name) : '';
 
@@ -441,7 +469,7 @@ function renderArrivals(list, arrivals) {
         // Crowding on first arrival
         const crowding = first.crowding_level;
         const crowdHtml = (crowding && CROWDING_BG[crowding])
-            ? `<span class="tmb-crowd" style="${CROWDING_BG[crowding]}">Crowding: ${CROWDING_LABEL[crowding]}</span>`
+            ? `<span class="tmb-crowd" style="${CROWDING_BG[crowding]}">${t('lbl_crowding')} ${getCrowdingLabel(crowding)}</span>`
             : '';
 
         return `<div class="tmb-route-row">
@@ -465,7 +493,7 @@ async function loadStops() {
         const stops = await r.json();
 
         if (!Array.isArray(stops) || stops.length === 0) {
-            showToast('Nessuna fermata disponibile', true);
+            showToast(t('no_stops_avail'), true);
             return;
         }
 
@@ -613,14 +641,15 @@ async function doSearch() {
     document.querySelector('.routes-list').innerHTML =
         '<div style="text-align:center;padding:40px 20px;color:var(--text-soft)">'
         + '<div style="font-size:28px;margin-bottom:10px">🔄</div>'
-        + '<div style="font-size:13px;font-weight:600">Finding best routes...</div>'
+        + `<div style="font-size:13px;font-weight:600">${t('finding_routes')}</div>`
         + '</div>';
 
     try {
         const payload = {
             origin_lat: origin.lat, origin_lon: origin.lon, origin_name: origin.name, origin_is_gps: origin.isGPS === true,
             dest_lat:   dest.lat,   dest_lon:   dest.lon,   dest_name:   dest.name,
-            user_id: _user.id, dest_stop_id: dest.id, origin_stop_id: origin.isGPS ? null : origin.id
+            user_id: _user.id, dest_stop_id: dest.id, origin_stop_id: origin.isGPS ? null : origin.id,
+            lang: getLang()
         };
         // Only constrain modes when the traveler picked specific ones via the chips.
         if (activeModes.length > 0) {
@@ -642,8 +671,8 @@ async function doSearch() {
         renderRoutes(data);
     } catch (e) {
         const msg = e.message === 'rate_limited'
-            ? 'Too many searches. Please wait a moment before trying again.'
-            : 'Could not load routes.';
+            ? t('err_rate_limited')
+            : t('err_load_routes');
         document.querySelector('.routes-list').innerHTML =
             '<div style="text-align:center;padding:40px 20px;color:var(--red)">'
             + '<div style="font-size:28px;margin-bottom:10px">⚠️</div>'
@@ -655,10 +684,10 @@ async function doSearch() {
 // ── Route rendering ───────────────────────────────────────────────
 const MODE_ICONS = { BUS:'🚌', BIKE:'🚲', SCOOTER:'🛴', WALK:'🚶' };
 const MODE_BTNS  = {
-    BUS:     { label:'Select Bus',     cls:'btn-dark'   },
-    BIKE:    { label:'Select Bike',    cls:'btn-blue'   },
-    SCOOTER: { label:'Select Scooter', cls:'btn-purple' },
-    WALK:    { label:'Start Walking',  cls:'btn-green'  },
+    BUS:     { labelKey:'btn_bus',     cls:'btn-dark'   },
+    BIKE:    { labelKey:'btn_bike',    cls:'btn-blue'   },
+    SCOOTER: { labelKey:'btn_scooter', cls:'btn-purple' },
+    WALK:    { labelKey:'btn_walk',    cls:'btn-green'  },
 };
 
 const LINE_COLORS     = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#10b981' };
@@ -671,7 +700,12 @@ function greenColor(g) {
 let selectedJourney = null;
 
 function renderRoutes(data) {
-    if (data.weather_summary) {
+    if (data.weather_condition) {
+        const temp = data.temperature_celsius != null ? Math.round(data.temperature_celsius) + '°C' : '';
+        const key = 'weather_' + data.weather_condition;
+        const raw = t(key);
+        document.querySelector('.weather-pill').textContent = raw.replace('{t}', temp);
+    } else if (data.weather_summary) {
         document.querySelector('.weather-pill').textContent = data.weather_summary;
     }
     const list = document.querySelector('.routes-list');
@@ -682,7 +716,7 @@ function renderRoutes(data) {
         : '';
 
     if (!data.options || data.options.length === 0) {
-        list.innerHTML = noticeHtml + '<div style="padding:20px;color:var(--text-soft);font-size:13px">No routes found.</div>';
+        list.innerHTML = noticeHtml + `<div style="padding:20px;color:var(--text-soft);font-size:13px">${t('no_routes')}</div>`;
         return;
     }
 
@@ -693,8 +727,13 @@ function renderRoutes(data) {
         window._routeOptions[opt.mode] = opt;
 
         const icon = MODE_ICONS[opt.mode] || '🚗';
-        const btn  = MODE_BTNS[opt.mode]  || { label: 'Select', cls: 'btn-dark' };
-        const cost = opt.cost_euros === 0 ? 'Free' : '€' + opt.cost_euros.toFixed(2);
+        const _btn = MODE_BTNS[opt.mode]  || { labelKey: null, cls: 'btn-dark' };
+        const btn  = { label: _btn.labelKey ? t(_btn.labelKey) : 'Select', cls: _btn.cls };
+        // For BUS keep the backend route label (e.g. "3 → Liceo Scientifico"); translate other modes
+        const modeLabel = opt.mode === 'BUS'
+            ? opt.mode_label
+            : (t('mode_' + opt.mode.toLowerCase()) || opt.mode_label);
+        const cost = opt.cost_euros === 0 ? t('lbl_free') : '€' + opt.cost_euros.toFixed(2);
         const co2  = opt.co2_grams > 0 ? Math.round(opt.co2_grams) + ' g' : '0 g';
         const delayBadge = opt.delay_label
             ? `<span class="status-badge delay-${(opt.delay_status||'unknown').toLowerCase()}">${escHtml(opt.delay_label)}</span>`
@@ -704,17 +743,17 @@ function renderRoutes(data) {
         return `
 <div class="route-card" id="card-${opt.mode}">
     <div class="route-top">
-        <div class="route-name">${icon} ${opt.mode_label}</div>
+        <div class="route-name">${icon} ${modeLabel}</div>
         <div class="route-time">${opt.duration_minutes} min</div>
     </div>
     <div class="status-row">
-        ${warn || '<span class="status-badge s-ok">✓ Available</span>'}
+        ${warn || `<span class="status-badge s-ok">${t('badge_available')}</span>`}
         ${delayBadge}
     </div>
     <div class="metrics-row">
-        <div class="metric-box"><div class="metric-label">Cost</div><div class="metric-value">${cost}</div></div>
+        <div class="metric-box"><div class="metric-label">${t('metric_cost')}</div><div class="metric-value">${cost}</div></div>
         <div class="metric-box"><div class="metric-label">CO₂</div><div class="metric-value">${co2}</div></div>
-        <div class="metric-box"><div class="metric-label">Green</div>
+        <div class="metric-box"><div class="metric-label">${t('metric_green')}</div>
             <div class="metric-value" style="color:${greenColor(opt.green_index)}">${opt.green_index}/100</div>
         </div>
     </div>
@@ -847,14 +886,14 @@ function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
     const startBtn = document.createElement('button');
     startBtn.className = 'action-btn btn-green';
     startBtn.style.cssText = 'width:100%;font-size:14px;padding:13px';
-    startBtn.textContent = 'Start Journey';
+    startBtn.textContent = t('btn_start_journey');
     startBtn.onclick = startJourney;
 
     banner.appendChild(infoDiv);
     banner.appendChild(startBtn);
     document.querySelector('.routes-list').appendChild(banner);
 
-    if (!window.matchMedia('(max-width: 768px)').matches) showToast(`${modeEmoji} ${label} selected — tap Start Journey`);
+    if (!window.matchMedia('(max-width: 768px)').matches) showToast(`${modeEmoji} ${label} selected — tap ${t('btn_start_journey')}`);
 
     // Show dashed preview on map immediately
     showRoutePreview(mode, selectedJourney.legs || []);
@@ -1064,7 +1103,7 @@ async function startJourney() {
                       <div class="tl-body">
                         ${_stopRow(leg.from || 'Start', walkDepMs)}
                         <div class="tl-meta">
-                          <span class="tl-badge" style="background:${col}18;color:${col}">🚶 Walk · ${leg.duration_minutes || 0} min</span>
+                          <span class="tl-badge" style="background:${col}18;color:${col}">🚶 ${t('walk')} · ${leg.duration_minutes || 0} min</span>
                           ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
                         </div>
                       </div>
@@ -1085,7 +1124,7 @@ async function startJourney() {
                           <span style="font-size:14px">🔄</span>
                           <div style="flex:1">
                             <div style="font-size:12px;font-weight:700;color:#ef4444">${leg.instruction || 'Change bus'}</div>
-                            <div style="font-size:11px;color:#64748b">${leg.duration_minutes || 0} min wait · next bus ${_fmtTime(_runMs)}</div>
+                            <div style="font-size:11px;color:#64748b">${leg.duration_minutes || 0} ${t('min_wait')} · ${t('next_bus')} ${_fmtTime(_runMs)}</div>
                           </div>
                         </div>
                       </div>
@@ -1102,7 +1141,7 @@ async function startJourney() {
                       </div>
                       <div class="tl-body">
                         <div class="tl-meta">
-                          <span class="tl-badge" style="background:${col}18;color:${col}">🕐 Wait · ${leg.duration_minutes || 0} min</span>
+                          <span class="tl-badge" style="background:${col}18;color:${col}">🕐 ${t('wait_lbl')} · ${leg.duration_minutes || 0} min</span>
                         </div>
                       </div>
                     </div>`;
@@ -1140,8 +1179,8 @@ async function startJourney() {
                           var btn=this;
                           var open=el.style.display==='block';
                           el.style.display=open?'none':'block';
-                          btn.textContent=open?'▾ ${intermediates.length} stops':'▴ Hide stops';
-                        ">▾ ${intermediates.length} stops</button>
+                          btn.textContent=open?'▾ ${intermediates.length} '+window.t(${intermediates.length}===1?'lbl_stop':'lbl_stops'):window.t('stops_hide');
+                        ">▾ ${intermediates.length} ${intermediates.length === 1 ? t('lbl_stop') : t('lbl_stops')}</button>
                         <div id="${stopListId}" class="tl-stop-list" style="display:none">
                           ${stopListHtml}
                         </div>` : ''}
@@ -1155,7 +1194,7 @@ async function startJourney() {
                       </div>
                       <div class="tl-body" style="padding-bottom:${isLast?'0':'12px'}">
                         ${_stopRow(alightStop, alightMs)}
-                        ${isLast ? `<div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">🏁 Your destination</div>` : ''}
+                        ${isLast ? `<div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">${t('your_destination')}</div>` : ''}
                       </div>
                     </div>`;
                 }
@@ -1167,7 +1206,7 @@ async function startJourney() {
         function buildSingleLegTimeline(mode, legs, distKm, co2g) {
             const COLORS = { WALK:'#6366f1', BIKE:'#3b82f6', SCOOTER:'#7c3aed' };
             const ICONS  = { WALK:'🚶', BIKE:'🚲', SCOOTER:'🛴' };
-            const LABEL  = { WALK:'Walk', BIKE:'Bike', SCOOTER:'Scooter' };
+            const LABEL  = { WALK:t('walk'), BIKE:t('bike'), SCOOTER:t('scooter') };
             const DASH   = { WALK:'8,6', BIKE:'6,4', SCOOTER:'4,3' };
             const col    = COLORS[mode] || '#94a3b8';
             const icon   = ICONS[mode]  || '🚶';
@@ -1223,12 +1262,12 @@ async function startJourney() {
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
                   <div style="width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,#10b981,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${modeEmoji}</div>
                   <div style="flex:1;min-width:0">
-                    <div style="font-size:10px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.5px">Journey In Progress</div>
+                    <div style="font-size:10px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.5px">${t('journey_in_progress')}</div>
                     <div style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isBusMode ? fmtRouteLabel(label) : label}</div>
                   </div>
                   <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:20px;padding:6px 14px;text-align:center;flex-shrink:0">
                     <div style="font-size:18px;font-weight:900;color:#059669;line-height:1"><span id="etaCounter">${durationMin}</span></div>
-                    <div style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase">min left</div>
+                    <div style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase">${t('min_left')}</div>
                   </div>
                 </div>
                 <!-- Vertical timeline (all modes) -->
@@ -1236,14 +1275,14 @@ async function startJourney() {
                 <!-- Footer -->
                 <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid #f1f5f9">
                   <span style="width:7px;height:7px;border-radius:50%;background:#10b981;animation:pulse 1.5s infinite;display:inline-block"></span>
-                  <span style="font-size:11px;color:#64748b;font-weight:600">Live tracking active</span>
+                  <span style="font-size:11px;color:#64748b;font-weight:600">${t('live_tracking')}</span>
                   <span style="font-size:11px;color:#cbd5e1">·</span>
                   <span style="font-size:11px;color:#64748b">🌱 ${greenIndex}/100</span>
                 </div>
               </div>
               <!-- End Journey -->
               <button onclick="endJourney()" style="width:100%;background:white;color:#ef4444;border:1.5px solid #fecaca;border-radius:14px;font-size:14px;font-weight:700;padding:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
-                <span style="font-size:16px">🏁</span> End Journey
+                <span style="font-size:16px">🏁</span> ${t('end_journey')}
               </button>
             </div>`;
 
@@ -1331,12 +1370,12 @@ function renderBusMarkers(vehicles) {
         }
 
         const delayTxt = best.delay_minutes == null
-            ? 'Delay unknown'
-            : best.delay_minutes <= 0 ? 'On time' : `${best.delay_minutes} min late`;
+            ? t('delay_unknown')
+            : best.delay_minutes <= 0 ? t('on_time') : `${best.delay_minutes} min late`;
         const popup = `<b>🚌 ${best.vehicle_id || '—'}</b><br>`
             + `Route: ${best.route_name || best.route_id || '—'}<br>`
             + `${delayTxt}<br>`
-            + `Next stop: ${best.next_stop_name || '—'}`;
+            + `${t('next_stop')}: ${best.next_stop_name || '—'}`;
 
         const icon = L.divIcon({
             html: makeBusMarkerHtml(leg.color),
@@ -1424,8 +1463,8 @@ function endJourney() {
     document.querySelector('.routes-list').innerHTML =
         '<div style="text-align:center;padding:48px 20px;color:var(--text-soft)">'
         + '<div style="font-size:36px;margin-bottom:12px">🌱</div>'
-        + '<div style="font-size:14px;font-weight:700;color:var(--text-dark)">Journey completed!</div>'
-        + '<div style="font-size:12px;margin-top:6px">Search a new route above</div>'
+        + `<div style="font-size:14px;font-weight:700;color:var(--text-dark)">${t('journey_completed')}</div>`
+        + `<div style="font-size:12px;margin-top:6px">${t('search_new_route')}</div>`
         + '</div>';
 
     if (!window.matchMedia('(max-width: 768px)').matches) showToast('🏁 Journey ended — great trip!');

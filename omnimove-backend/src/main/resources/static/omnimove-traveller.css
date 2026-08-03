@@ -1547,3 +1547,10 @@ body {
 .d-unknown{background:#f1f5f9;color:#475569}
 .d-live{box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
 .d-hist{opacity:.9}
+/* ── Language pill toggle (account section + login) ── */
+.lang-toggle{display:flex;gap:6px}
+.lang-pill{padding:6px 18px;border-radius:20px;font-size:12px;font-weight:600;
+    cursor:pointer;border:1.5px solid var(--border-mid);
+    background:transparent;color:var(--text-mid);transition:all .18s}
+.lang-pill:hover{border-color:var(--primary);color:var(--primary)}
+.lang-pill-active{background:var(--primary) !important;color:#fff !important;border-color:var(--primary) !important}

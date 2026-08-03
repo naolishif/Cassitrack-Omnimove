@@ -169,6 +169,7 @@ public class JourneyPlannerService {
                 .totalOptions(options.size())
                 .realtimeAvailable(realtimeAvailable)
                 .weatherSummary(weather.suggestion)
+                .weatherCondition(weather.condition != null ? weather.condition.name() : null)
                 .temperatureCelsius(weather.tempCelsius)
                 .build();
     }
@@ -292,7 +293,7 @@ public class JourneyPlannerService {
             lineLabel = line.getShortName() + " → " + line.getLongName();
             DelayInfo[] delayOut = { DelayInfo.none() };
             waitMin = waitMinutesForLine(nearestStop, line.getRouteId(), line.getShortName(),
-                    msgs, delayOut, departureBase, isNow);
+                    msgs, delayOut, departureBase, isNow, req.isItalian());
             busDelay = delayOut[0];
 
             java.time.Instant boarding = departureBase.plusSeconds(60L * waitMin);
@@ -320,7 +321,7 @@ public class JourneyPlannerService {
             if (t != null) {
                 DelayInfo[] delayOut = { DelayInfo.none() };
                 waitMin    = waitMinutesForLine(nearestStop, t.l1RouteId(), t.l1Short(),
-                        msgs, delayOut, departureBase, isNow);
+                        msgs, delayOut, departureBase, isNow, req.isItalian());
                 busDelay = delayOut[0];
 
                 java.time.Instant boarding1 = departureBase.plusSeconds(60L * waitMin);
@@ -334,7 +335,7 @@ public class JourneyPlannerService {
                 boolean liveAtTransfer = isNow && !atTransfer.isAfter(
                         java.time.Instant.now().plusSeconds(15 * 60));
                 int changeWait = waitMinutesForLine(t.stop(), t.l2RouteId(), t.l2Short(),
-                        msgs, null, atTransfer, liveAtTransfer);
+                        msgs, null, atTransfer, liveAtTransfer, req.isItalian());
 
                 java.time.Instant boarding2 = atTransfer.plusSeconds(60L * changeWait);
                 SegTime s2 = busTimeBySegments(t.l2TripId(), t.stop(), destStop,
@@ -754,7 +755,7 @@ public class JourneyPlannerService {
      */
     private int waitMinutesForLine(String stopId, String routeId, String routeShort,
                                    List<String> msgs, DelayInfo[] out,
-                                   java.time.Instant when, boolean useLive) {
+                                   java.time.Instant when, boolean useLive, boolean italian) {
         // useLive == false -> ricerca per un orario futuro: un bus tracciato ADESSO
         // non dice nulla su quel momento, quindi si va diritti all'orario di tabella.
         if (useLive) {
@@ -794,7 +795,10 @@ public class JourneyPlannerService {
                     // giusta (sotto), non l'ETA di un bus di un'altra linea.
                     if (msgs != null) {
                         String lineLabel = routeShort != null ? routeShort : routeId;
-                        msgs.add("\u2139\ufe0f No live bus for route " + lineLabel + " right now \u2014 "
+                        msgs.add(italian
+                            ? "\u2139\ufe0f Nessun bus in tempo reale per la linea " + lineLabel + " al momento \u2014 "
+                                + "attesa alla fermata " + fmtStop(stopId) + " stimata dall'orario."
+                            : "\u2139\ufe0f No live bus for route " + lineLabel + " right now \u2014 "
                                 + "wait time at " + fmtStop(stopId) + " estimated from the timetable.");
                     }
                     log.debug("waitMinutesForLine: nessun bus live per linea {} a {}, uso orario DB",

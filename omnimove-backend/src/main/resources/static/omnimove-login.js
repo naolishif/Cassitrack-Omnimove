@@ -2,6 +2,9 @@
 // CONFIG
 // ════════════════════════════════════════════════════════════
 const OMNIMOVE = '/omnimove/api/v1';
+
+// Apply stored language on page load
+document.addEventListener('DOMContentLoaded', applyTranslations);
 const REDIRECT = {
     ADMIN:     'omnimove-admin.html',
     TRAVELLER: 'omnimove-traveller.html',

@@ -93,3 +93,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--display);
     .email-sent-box .icon { font-size: 30px; }
     .email-sent-box p { font-size: 11px; }
 }
+/* ── Language pill toggle ── */
+.lang-toggle{display:flex;gap:4px;justify-content:center;margin-bottom:20px}
+.lang-pill{padding:5px 16px;border-radius:20px;font-family:var(--mono);font-size:11px;
+    letter-spacing:.5px;cursor:pointer;border:1px solid var(--border);
+    background:transparent;color:var(--dim);transition:all .18s}
+.lang-pill:hover{border-color:var(--accent);color:var(--text)}
+.lang-pill-active{background:var(--accent) !important;color:#fff !important;border-color:var(--accent) !important}
