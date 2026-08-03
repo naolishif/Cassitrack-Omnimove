@@ -289,7 +289,7 @@ public class JourneyPlannerService {
 
         if (!direct.isEmpty()) {
             var line = direct.get(0);
-            lineLabel = line.getShortName() + " — " + line.getLongName();
+            lineLabel = line.getShortName() + " → " + line.getLongName();
             DelayInfo[] delayOut = { DelayInfo.none() };
             waitMin = waitMinutesForLine(nearestStop, line.getRouteId(), line.getShortName(),
                     msgs, delayOut, departureBase, isNow);
@@ -306,11 +306,13 @@ public class JourneyPlannerService {
             busMetres = seg.metres();
 
             String tripId = line.getTripId();
+            StopSlice slice0 = stopSliceBetween(tripId, nearestStop, destStop);
             busLegs.add(JourneyLeg.builder().mode("BUS")
                     .from(fmtStop(nearestStop)).to(req.getDestName())
                     .durationMinutes(busMin).distanceMetres(busMetres)
                     .instruction(lineLabel)
-                    .stopCoords(stopCoordsBetween(tripId, nearestStop, destStop))
+                    .stopCoords(slice0.coords())
+                    .stopNames(slice0.names())
                     .routeId(line.getRouteId())
                     .build());
         } else {
@@ -347,22 +349,26 @@ public class JourneyPlannerService {
                 busMin    = l1Min + changeWait + l2Min;
                 busMetres = m1 + m2;
 
+                StopSlice slice1 = stopSliceBetween(t.l1TripId(), nearestStop, t.stop());
+                StopSlice slice2 = stopSliceBetween(t.l2TripId(), t.stop(), destStop);
                 busLegs.add(JourneyLeg.builder().mode("BUS")
                         .from(fmtStop(nearestStop)).to(fmtStop(t.stop()))
                         .durationMinutes(l1Min).distanceMetres(m1)
                         .instruction(t.l1Label())
-                        .stopCoords(stopCoordsBetween(t.l1TripId(), nearestStop, t.stop()))
+                        .stopCoords(slice1.coords())
+                        .stopNames(slice1.names())
                         .routeId(t.l1RouteId())
                         .build());
                 busLegs.add(JourneyLeg.builder().mode("WAIT")
                         .from(fmtStop(t.stop())).to(fmtStop(t.stop()))
                         .durationMinutes(changeWait).distanceMetres(0.0)
-                        .instruction("Cambia a " + fmtStop(t.stop()) + " · prendi " + t.l2Label()).build());
+                        .instruction("Change at " + fmtStop(t.stop()) + " · take " + t.l2Label()).build());
                 busLegs.add(JourneyLeg.builder().mode("BUS")
                         .from(fmtStop(t.stop())).to(req.getDestName())
                         .durationMinutes(l2Min).distanceMetres(m2)
                         .instruction(t.l2Label())
-                        .stopCoords(stopCoordsBetween(t.l2TripId(), t.stop(), destStop))
+                        .stopCoords(slice2.coords())
+                        .stopNames(slice2.names())
                         .routeId(t.l2RouteId())
                         .build());
             } else {
@@ -606,35 +612,46 @@ public class JourneyPlannerService {
                 .orElse(id);
     }
 
-    private List<double[]> stopCoordsBetween(String tripId, String originStopId, String destStopId) {
-        if (tripId == null) return List.of();
+    /** Returns the slice of the trip's stops between origin and dest (inclusive), sorted by sequence. */
+    private record StopSlice(List<double[]> coords, List<String> names) {}
+
+    private StopSlice stopSliceBetween(String tripId, String originStopId, String destStopId) {
+        if (tripId == null) return new StopSlice(List.of(), List.of());
 
         var seq = new ArrayList<>(scheduledStopRepository.findByTripId(tripId));
         seq.sort(Comparator.comparingInt(it.unicas.omnimove.model.ScheduledStop::getStopSequence));
 
-        // posizioni (indici nella sequenza ordinata) di origine e cambio/destinazione
         int oi = -1, di = -1;
         for (int i = 0; i < seq.size(); i++) {
             String sid = seq.get(i).getStopId();
             if (oi < 0 && sid.equals(originStopId)) oi = i;
             else if (oi >= 0 && di < 0 && sid.equals(destStopId)) { di = i; break; }
         }
-        // se non le ho trovate in quest'ordine, riprovo senza vincolo di precedenza
         if (oi < 0 || di < 0) {
             oi = indexOfStop(seq, originStopId);
             di = indexOfStop(seq, destStopId);
         }
-        if (oi < 0 || di < 0) return List.of();          // sequenza incoerente
+        if (oi < 0 || di < 0) return new StopSlice(List.of(), List.of());
 
         int from = Math.min(oi, di);
         int to   = Math.max(oi, di);
 
         List<double[]> coords = new ArrayList<>();
+        List<String>   names  = new ArrayList<>();
         for (int i = from; i <= to; i++) {
             String sid = seq.get(i).getStopId();
             coords.add(new double[]{ getStopLat(sid), getStopLon(sid) });
+            names.add(fmtStop(sid));
         }
-        return coords;
+        return new StopSlice(coords, names);
+    }
+
+    private List<double[]> stopCoordsBetween(String tripId, String originStopId, String destStopId) {
+        return stopSliceBetween(tripId, originStopId, destStopId).coords();
+    }
+
+    private List<String> stopNamesBetween(String tripId, String originStopId, String destStopId) {
+        return stopSliceBetween(tripId, originStopId, destStopId).names();
     }
 
     private int indexOfStop(List<it.unicas.omnimove.model.ScheduledStop> seq, String stopId) {
@@ -718,8 +735,8 @@ public class JourneyPlannerService {
         int m2 = (int) Math.ceil(x.getL2Sec() / 60.0);
         return new Transfer(
                 x.getTransferStop(),
-                x.getL1Short() + " — " + x.getL1Long(), m1,
-                x.getL2Short() + " — " + x.getL2Long(), m2,
+                x.getL1Short() + " → " + x.getL1Long(), m1,
+                x.getL2Short() + " → " + x.getL2Long(), m2,
                 m1 + m2,
                 x.getL2RouteId(), x.getL2Short(),
                 x.getL1RouteId(), x.getL1Short(),

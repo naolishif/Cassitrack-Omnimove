@@ -661,7 +661,8 @@ const MODE_BTNS  = {
     WALK:    { label:'Start Walking',  cls:'btn-green'  },
 };
 
-const LINE_COLORS = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#10b981' };
+const LINE_COLORS     = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#10b981' };
+const BUS_LEG_COLORS  = ['#0f172a', '#3b82f6', '#7c3aed']; // indexed by bus-leg order
 
 function greenColor(g) {
     return g >= 75 ? '#10b981' : g >= 50 ? '#f59e0b' : '#ef4444';
@@ -753,16 +754,16 @@ function showRoutePreview(mode, legs) {
     const color = LINE_COLORS[mode] || '#0f172a';
 
     if (mode === 'BUS' && legs && legs.length > 0) {
-        const busColors = ['#0f172a', '#3b82f6', '#7c3aed'];
         let colorIdx = 0;
+        const activeBusLegs = [];
         legs.forEach(leg => {
             if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
-                const legColor = busColors[colorIdx++ % busColors.length];
+                const legColor = BUS_LEG_COLORS[colorIdx % BUS_LEG_COLORS.length];
+                colorIdx++;
                 const coords = leg.stop_coords.map(c => [c[0], c[1]]);
                 window._previewLayers.push(
                     L.polyline(coords, { color: legColor, weight: 4, opacity: 0.85 }).addTo(map)
                 );
-                // White stop dots along the route
                 coords.forEach((c, i) => {
                     const isEnd = i === 0 || i === coords.length - 1;
                     window._previewLayers.push(
@@ -772,6 +773,13 @@ function showRoutePreview(mode, legs) {
                         }).addTo(map)
                     );
                 });
+                if (leg.route_id) {
+                    activeBusLegs.push({
+                        routeId: leg.route_id,
+                        color: legColor,
+                        boardingCoords: leg.stop_coords[0] // [lat, lon] of boarding stop
+                    });
+                }
             } else if (leg.mode === 'WALK' && leg.stop_coords && leg.stop_coords.length >= 2) {
                 const coords = leg.stop_coords.map(c => [c[0], c[1]]);
                 window._previewLayers.push(
@@ -784,12 +792,8 @@ function showRoutePreview(mode, legs) {
             .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
         if (allCoords.length > 1) map.fitBounds(allCoords, { padding: [50, 50] });
 
-        // Start live bus markers — filter by route if IDs are available,
-        // otherwise show all active buses as fallback.
-        const routeIds = legs
-            .filter(l => l.mode === 'BUS' && l.route_id)
-            .map(l => l.route_id);
-        window._activeBusRouteIds = routeIds; // may be empty = no filter = all buses
+        window._activeBusLegs    = activeBusLegs;
+        window._activeBusRouteIds = activeBusLegs.map(l => l.routeId);
         fetchAndRenderBusMarkers();
         window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
     } else {
@@ -810,7 +814,8 @@ function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
         mode, label, greenIndex,
         distanceKm: distanceMetres / 1000,
         costEuros,
-        durationMinutes: window._routeOptions[mode]?.duration_minutes
+        durationMinutes: window._routeOptions[mode]?.duration_minutes,
+        co2Grams: window._routeOptions[mode]?.co2_grams ?? 0
     };
 
     if (window._routeOptions && window._routeOptions[mode]) {
@@ -946,12 +951,11 @@ async function startJourney() {
         window._busRouteLines = [];
 
         if (mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0) {
-            const busColors = ['#0f172a', '#3b82f6', '#7c3aed'];
             let colorIdx = 0;
 
             selectedJourney.legs.forEach(leg => {
                 if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
-                    const legColor = busColors[colorIdx % busColors.length];
+                    const legColor = BUS_LEG_COLORS[colorIdx % BUS_LEG_COLORS.length];
                     colorIdx++;
                     const coords = leg.stop_coords.map(c => [c[0], c[1]]);
                     const line = L.polyline(coords, { color: legColor, weight: 5, opacity: 0.9 }).addTo(map);
@@ -998,58 +1002,250 @@ async function startJourney() {
         const modeEmoji = MODE_ICONS[mode];
         const fmtD = m => m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(1) + ' km';
 
-        // BUS: show walk/wait/bus breakdown from leg data
-        let gridHtml = '';
-        if (mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0) {
-            const legs = selectedJourney.legs;
-            const walkLegs = legs.filter(l => l.mode === 'WALK');
-            const waitLegs = legs.filter(l => l.mode === 'WAIT');
-            const busLegs  = legs.filter(l => l.mode === 'BUS');
-            const walkMin = walkLegs.reduce((s, l) => s + (l.duration_minutes || 0), 0);
-            const waitMin = waitLegs.reduce((s, l) => s + (l.duration_minutes || 0), 0);
-            const busMin  = busLegs.reduce((s,  l) => s + (l.duration_minutes || 0), 0);
-            const walkM   = walkLegs.reduce((s, l) => s + (l.distance_metres  || 0), 0);
-            const busM    = busLegs.reduce((s,  l) => s + (l.distance_metres  || 0), 0);
-            const cell = (lbl, top, sub) =>
-                `<div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:10px">
-                    <div style="font-size:9px;opacity:0.75;font-weight:700;text-transform:uppercase;margin-bottom:3px">${lbl}</div>
-                    <div style="font-size:15px;font-weight:800">${top}</div>
-                    ${sub ? `<div style="font-size:10px;opacity:0.75;margin-top:2px">${sub}</div>` : ''}
-                 </div>`;
-            gridHtml = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:14px">'
-                + cell('Walk', walkMin > 0 ? `🚶 ${walkMin} min` : '🚶 —', walkMin > 0 ? fmtD(walkM) : 'already at stop')
-                + cell('Bus wait', `🕐 ${waitMin} min`, '')
-                + cell('On bus', `🚌 ${busMin} min`, fmtD(busM))
-                + '</div>'
-                + `<div style="margin-top:10px;font-size:11px;opacity:0.8;text-align:center">
-                    Total: <span id="etaCounter" style="font-weight:800">${durationMin} min</span>
-                    &nbsp;·&nbsp; 🌱 ${greenIndex}
-                </div>`;
-        } else {
-            gridHtml = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:16px">'
-                + `<div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:10px">
-                    <div style="font-size:10px;opacity:0.8;font-weight:700;text-transform:uppercase">Distance</div>
-                    <div style="font-size:16px;font-weight:800">${distanceKm.toFixed(1)} km</div></div>`
-                + `<div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:10px">
-                    <div style="font-size:10px;opacity:0.8;font-weight:700;text-transform:uppercase">ETA</div>
-                    <div style="font-size:16px;font-weight:800" id="etaCounter">${durationMin} min</div></div>`
-                + `<div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:10px">
-                    <div style="font-size:10px;opacity:0.8;font-weight:700;text-transform:uppercase">Green</div>
-                    <div style="font-size:16px;font-weight:800">🌱 ${greenIndex}</div></div>`
-                + '</div>';
+        // ── Route label: "3 → Dest" or "3 → Dest + 1 → Dest2" → circles ──
+        function fmtRouteLabel(instruction, circleStyle) {
+            if (!instruction) return 'Bus';
+            // Transfer labels contain " + " separating each leg label — stack vertically
+            if (instruction.includes(' + ')) {
+                return instruction.split(' + ')
+                    .map(part => `<div style="line-height:1.6">${fmtRouteLabel(part.trim(), circleStyle)}</div>`)
+                    .join('');
+            }
+            const sep = instruction.indexOf(' → ');
+            if (sep === -1) return escHtml(instruction);
+            const num = escHtml(instruction.slice(0, sep).trim());
+            const dest = escHtml(instruction.slice(sep + 3).trim());
+            const cs  = circleStyle || 'background:#1d4ed8;color:#fff';
+            return `<span class="rnum-bus" style="${cs}">${num}</span> → ${dest}`;
         }
 
-        document.querySelector('.routes-list').innerHTML =
-            '<div style="padding:16px 0">'
-            + '<div style="background:linear-gradient(135deg,#10b981,#3b82f6);border-radius:20px;padding:20px;color:white;margin-bottom:16px;text-align:center">'
-            + `<div style="font-size:36px;margin-bottom:8px">${modeEmoji}</div>`
-            + '<div style="font-size:18px;font-weight:800;margin-bottom:4px">Journey In Progress</div>'
-            + `<div style="font-size:13px;opacity:0.85">${label}</div>`
-            + gridHtml
-            + '</div>'
-            + '<button class="action-btn" onclick="endJourney()" style="width:100%;background:#fef2f2;color:#ef4444;border:1px solid #fee2e2;font-size:14px;padding:13px;margin-bottom:12px">🏁 End Journey</button>'
-            + '<div style="text-align:center;font-size:11px;color:var(--text-soft);font-weight:600">📡 Live tracking active</div>'
-            + '</div>';
+        // ── Build Google Maps-style vertical timeline ──────────────────────
+        function buildTimeline(legs, totalMin, greenIdx) {
+            const C = { WALK:'#6366f1', WAIT:'#f59e0b', BUS:'#10b981', TRANSFER:'#ef4444' };
+            let html = '';
+            let busIndex = 0;
+
+            // Running clock — starts at now, accumulates each leg's duration
+            const _tripStart = new Date();
+            let   _runMs     = 0;
+            function _tick(min) { _runMs += (min || 0) * 60000; }
+            function _fmtTime(offsetMs) {
+                const d = new Date(_tripStart.getTime() + offsetMs);
+                return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+            }
+            // Inline time badge — prominent black HH:MM
+            function _timeBadge(ms) {
+                return `<span style="font-size:13px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;flex-shrink:0">${_fmtTime(ms)}</span>`;
+            }
+            // Stop name row with time right-aligned
+            function _stopRow(name, timeMs) {
+                return `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+                          <span class="tl-from" style="margin:0">${name}</span>
+                          ${_timeBadge(timeMs)}
+                        </div>`;
+            }
+
+            legs.forEach((leg, i) => {
+                const isLast = i === legs.length - 1;
+                const col = C[leg.mode] || '#94a3b8';
+                const names = leg.stop_names || [];
+                const isTransfer = leg.mode === 'WAIT' && leg.instruction && leg.instruction.toLowerCase().includes('change at');
+
+                if (leg.mode === 'WALK') {
+                    // ── WALK row ──────────────────────────────────────────────
+                    const walkDepMs = _runMs;
+                    _tick(leg.duration_minutes);
+                    html += `
+                    <div class="tl-row">
+                      <div class="tl-left">
+                        <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+                        ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
+                      </div>
+                      <div class="tl-body">
+                        ${_stopRow(leg.from || 'Start', walkDepMs)}
+                        <div class="tl-meta">
+                          <span class="tl-badge" style="background:${col}18;color:${col}">🚶 Walk · ${leg.duration_minutes || 0} min</span>
+                          ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
+                        </div>
+                      </div>
+                    </div>`;
+
+                } else if (isTransfer) {
+                    // ── TRANSFER / CHANGE BUS ────────────────────────────────
+                    const xferMs = _runMs;
+                    _tick(leg.duration_minutes);
+                    html += `
+                    <div class="tl-row">
+                      <div class="tl-left">
+                        <div class="tl-dot tl-dot-transfer" style="background:white;border-color:#ef4444"></div>
+                        ${!isLast ? `<div class="tl-line" style="background:#ef444433"></div>` : ''}
+                      </div>
+                      <div class="tl-body">
+                        <div class="tl-transfer-badge">
+                          <span style="font-size:14px">🔄</span>
+                          <div style="flex:1">
+                            <div style="font-size:12px;font-weight:700;color:#ef4444">${leg.instruction || 'Change bus'}</div>
+                            <div style="font-size:11px;color:#64748b">${leg.duration_minutes || 0} min wait · next bus ${_fmtTime(_runMs)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>`;
+
+                } else if (leg.mode === 'WAIT') {
+                    // ── WAIT (no change) ─────────────────────────────────────
+                    _tick(leg.duration_minutes);
+                    html += `
+                    <div class="tl-row">
+                      <div class="tl-left">
+                        <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+                        ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
+                      </div>
+                      <div class="tl-body">
+                        <div class="tl-meta">
+                          <span class="tl-badge" style="background:${col}18;color:${col}">🕐 Wait · ${leg.duration_minutes || 0} min</span>
+                        </div>
+                      </div>
+                    </div>`;
+
+                } else if (leg.mode === 'BUS') {
+                    // ── BUS row with collapsible stop list ───────────────────
+                    busIndex++;
+                    const stopListId = `tl-stops-${busIndex}`;
+                    const intermediates = names.slice(1, -1);
+                    const boardStop  = names[0]  || leg.from || '';
+                    const alightStop = names[names.length - 1] || leg.to || '';
+                    const stopListHtml = intermediates.map(n =>
+                        `<div class="tl-stop-item"><div class="tl-stop-dot"></div><span>${n}</span></div>`
+                    ).join('');
+
+                    const boardMs = _runMs;
+                    _tick(leg.duration_minutes);
+                    const alightMs = _runMs;
+
+                    html += `
+                    <div class="tl-row">
+                      <div class="tl-left">
+                        <div class="tl-dot tl-dot-board" style="background:${col};border-color:${col}"></div>
+                        <div class="tl-line tl-line-bus" style="background:${col}"></div>
+                      </div>
+                      <div class="tl-body">
+                        ${_stopRow(boardStop, boardMs)}
+                        <div class="tl-meta">
+                          <span class="tl-badge" style="background:${col}18;color:${col}">🚌 ${fmtRouteLabel(leg.instruction, `background:${col};color:#fff`)} · ${leg.duration_minutes || 0} min</span>
+                          ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
+                        </div>
+                        ${intermediates.length > 0 ? `
+                        <button class="tl-expand-btn" onclick="
+                          var el=document.getElementById('${stopListId}');
+                          var btn=this;
+                          var open=el.style.display==='block';
+                          el.style.display=open?'none':'block';
+                          btn.textContent=open?'▾ ${intermediates.length} stops':'▴ Hide stops';
+                        ">▾ ${intermediates.length} stops</button>
+                        <div id="${stopListId}" class="tl-stop-list" style="display:none">
+                          ${stopListHtml}
+                        </div>` : ''}
+                      </div>
+                    </div>
+                    <!-- Alight stop row -->
+                    <div class="tl-row">
+                      <div class="tl-left">
+                        <div class="tl-dot tl-dot-alight" style="background:white;border-color:${col}"></div>
+                        ${!isLast ? `<div class="tl-line" style="background:#e2e8f0"></div>` : ''}
+                      </div>
+                      <div class="tl-body" style="padding-bottom:${isLast?'0':'12px'}">
+                        ${_stopRow(alightStop, alightMs)}
+                        ${isLast ? `<div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">🏁 Your destination</div>` : ''}
+                      </div>
+                    </div>`;
+                }
+            });
+            return html;
+        }
+
+        // ── non-BUS modes: single-leg vertical timeline (Option A) ──────────
+        function buildSingleLegTimeline(mode, legs, distKm, co2g) {
+            const COLORS = { WALK:'#6366f1', BIKE:'#3b82f6', SCOOTER:'#7c3aed' };
+            const ICONS  = { WALK:'🚶', BIKE:'🚲', SCOOTER:'🛴' };
+            const LABEL  = { WALK:'Walk', BIKE:'Bike', SCOOTER:'Scooter' };
+            const DASH   = { WALK:'8,6', BIKE:'6,4', SCOOTER:'4,3' };
+            const col    = COLORS[mode] || '#94a3b8';
+            const icon   = ICONS[mode]  || '🚶';
+            const lbl    = LABEL[mode]  || mode;
+
+            // Prefer leg from/to if available, fall back to selectedJourney label
+            const leg    = (legs && legs.length > 0) ? legs[0] : null;
+            const from   = leg?.from || 'Start';
+            const to     = leg?.to   || 'Destination';
+            const dist   = leg?.distance_metres ? fmtD(leg.distance_metres) : `${distKm.toFixed(1)} km`;
+            const co2    = co2g > 0 ? `${Math.round(co2g)} g CO₂` : '0 g CO₂';
+            const durMin = leg?.duration_minutes;
+            const durStr = durMin ? `${durMin} min` : '';
+
+            // dashed SVG line encoded as background-image
+            const svgLine = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='100'%3E%3Cline x1='1' y1='0' x2='1' y2='100' stroke='${encodeURIComponent(col)}' stroke-width='2' stroke-dasharray='${DASH[mode]}'/%3E%3C/svg%3E")`;
+
+            return `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot" style="background:white;border-color:${col};border-width:2px"></div>
+                <div class="tl-line" style="background-image:${svgLine};background-color:transparent;background-repeat:repeat-y;background-size:2px 100%"></div>
+              </div>
+              <div class="tl-body">
+                <div class="tl-from">${from}</div>
+                <div class="tl-meta">
+                  <span class="tl-badge" style="background:${col}18;color:${col}">${icon} ${lbl}${durStr ? ' · ' + durStr : ''}</span>
+                  <span class="tl-sub">${dist}</span>
+                  <span class="tl-sub" style="color:#10b981">🌱 ${co2}</span>
+                </div>
+              </div>
+            </div>
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+              </div>
+              <div class="tl-body" style="padding-bottom:0">
+                <div class="tl-from">${to}</div>
+                <div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">🏁 Your destination</div>
+              </div>
+            </div>`;
+        }
+
+        const isBusMode = mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0;
+        const timelineHtml = isBusMode
+            ? buildTimeline(selectedJourney.legs, durationMin, greenIndex)
+            : buildSingleLegTimeline(mode, selectedJourney.legs, distanceKm, selectedJourney.co2Grams ?? 0);
+
+        document.querySelector('.routes-list').innerHTML = `
+            <div style="padding:12px 0">
+              <!-- Header -->
+              <div style="background:white;border-radius:18px;padding:16px 16px 12px;margin-bottom:10px;box-shadow:0 2px 16px rgba(0,0,0,0.07);border:1px solid #f1f5f9">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                  <div style="width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,#10b981,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${modeEmoji}</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:10px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.5px">Journey In Progress</div>
+                    <div style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isBusMode ? fmtRouteLabel(label) : label}</div>
+                  </div>
+                  <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:20px;padding:6px 14px;text-align:center;flex-shrink:0">
+                    <div style="font-size:18px;font-weight:900;color:#059669;line-height:1"><span id="etaCounter">${durationMin}</span></div>
+                    <div style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase">min left</div>
+                  </div>
+                </div>
+                <!-- Vertical timeline (all modes) -->
+                <div class="journey-timeline">${timelineHtml}</div>
+                <!-- Footer -->
+                <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid #f1f5f9">
+                  <span style="width:7px;height:7px;border-radius:50%;background:#10b981;animation:pulse 1.5s infinite;display:inline-block"></span>
+                  <span style="font-size:11px;color:#64748b;font-weight:600">Live tracking active</span>
+                  <span style="font-size:11px;color:#cbd5e1">·</span>
+                  <span style="font-size:11px;color:#64748b">🌱 ${greenIndex}/100</span>
+                </div>
+              </div>
+              <!-- End Journey -->
+              <button onclick="endJourney()" style="width:100%;background:white;color:#ef4444;border:1.5px solid #fecaca;border-radius:14px;font-size:14px;font-weight:700;padding:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+                <span style="font-size:16px">🏁</span> End Journey
+              </button>
+            </div>`;
 
         let remaining = durationMin;
         window._etaInterval = setInterval(() => {
@@ -1068,10 +1264,15 @@ async function startJourney() {
         // 11) Live bus markers — polling already started in showRoutePreview.
         //     Restart here only if somehow not running (e.g. Start Journey without preview).
         if (mode === 'BUS' && !window._busPollInterval) {
-            const routeIds = (selectedJourney.legs || [])
+            const activeBusLegs = (selectedJourney.legs || [])
                 .filter(l => l.mode === 'BUS' && l.route_id)
-                .map(l => l.route_id);
-            window._activeBusRouteIds = routeIds;
+                .map((l, idx) => ({
+                    routeId: l.route_id,
+                    color: BUS_LEG_COLORS[idx % BUS_LEG_COLORS.length],
+                    boardingCoords: l.stop_coords ? l.stop_coords[0] : null
+                }));
+            window._activeBusLegs     = activeBusLegs;
+            window._activeBusRouteIds = activeBusLegs.map(l => l.routeId);
             fetchAndRenderBusMarkers();
             window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
         }
@@ -1086,13 +1287,9 @@ async function startJourney() {
 
 // ── Live bus markers ──────────────────────────────────────────────
 
-const BUS_MARKER_HTML = `
-<div style="
-  background:#0f172a;color:white;
-  width:32px;height:32px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);
-  font-size:16px;cursor:pointer">🚌</div>`;
+function makeBusMarkerHtml(color) {
+    return `<div style="background:${color};color:white;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);font-size:16px;cursor:pointer">🚌</div>`;
+}
 
 function clearBusMarkers() {
     (window._busMarkers || []).forEach(m => map.removeLayer(m));
@@ -1100,24 +1297,52 @@ function clearBusMarkers() {
     hideStaleNotice();
 }
 
+// Euclidean approximation — good enough for picking the nearest vehicle
+function _latLonDist(lat1, lon1, lat2, lon2) {
+    const d = (lat2 - lat1) * (lat2 - lat1) + (lon2 - lon1) * (lon2 - lon1);
+    return Math.sqrt(d);
+}
+
 function renderBusMarkers(vehicles) {
     clearBusMarkers();
-    vehicles.forEach(v => {
-        if (v.lat == null || v.lon == null) return;
-        const delayTxt = v.delay_minutes == null
+    const legs = window._activeBusLegs || [];
+
+    if (legs.length === 0) {
+        // No leg context — fall back to showing all vehicles (black)
+        vehicles.forEach(v => {
+            if (v.lat == null || v.lon == null) return;
+            const icon = L.divIcon({ html: makeBusMarkerHtml('#0f172a'), className: '', iconSize: [32,32], iconAnchor: [16,16] });
+            window._busMarkers.push(L.marker([v.lat, v.lon], { icon }).addTo(map));
+        });
+        return;
+    }
+
+    // One marker per leg: pick the vehicle on that route closest to the boarding stop
+    legs.forEach(leg => {
+        const candidates = vehicles.filter(v => v.route_id === leg.routeId && v.lat != null && v.lon != null);
+        if (candidates.length === 0) return;
+
+        let best = candidates[0];
+        if (candidates.length > 1 && leg.boardingCoords) {
+            const [bLat, bLon] = leg.boardingCoords;
+            best = candidates.reduce((b, v) =>
+                _latLonDist(v.lat, v.lon, bLat, bLon) < _latLonDist(b.lat, b.lon, bLat, bLon) ? v : b
+            );
+        }
+
+        const delayTxt = best.delay_minutes == null
             ? 'Delay unknown'
-            : v.delay_minutes <= 0 ? 'On time' : `${v.delay_minutes} min late`;
-        const etaTxt = v.eta_seconds != null
-            ? `${Math.round(v.eta_seconds / 60)} min`
-            : '—';
-        const popup = `
-            <b>🚌 ${v.vehicle_id || '—'}</b><br>
-            Route: ${v.route_name || v.route_id || '—'}<br>
-            Delay: ${delayTxt}<br>
-            Next stop: ${v.next_stop_name || '—'} · ETA ${etaTxt}`;
-        const icon = L.divIcon({ html: BUS_MARKER_HTML, className: '', iconSize: [32, 32], iconAnchor: [16, 16] });
-        const marker = L.marker([v.lat, v.lon], { icon }).addTo(map).bindPopup(popup);
-        window._busMarkers.push(marker);
+            : best.delay_minutes <= 0 ? 'On time' : `${best.delay_minutes} min late`;
+        const popup = `<b>🚌 ${best.vehicle_id || '—'}</b><br>`
+            + `Route: ${best.route_name || best.route_id || '—'}<br>`
+            + `${delayTxt}<br>`
+            + `Next stop: ${best.next_stop_name || '—'}`;
+
+        const icon = L.divIcon({
+            html: makeBusMarkerHtml(leg.color),
+            className: '', iconSize: [32, 32], iconAnchor: [16, 16]
+        });
+        window._busMarkers.push(L.marker([best.lat, best.lon], { icon }).addTo(map).bindPopup(popup));
     });
 }
 
