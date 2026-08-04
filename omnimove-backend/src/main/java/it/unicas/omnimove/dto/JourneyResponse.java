@@ -12,6 +12,7 @@ public class JourneyResponse {
     @JsonProperty("total_options") private Integer totalOptions;
     @JsonProperty("realtime_available") private boolean realtimeAvailable;
     @JsonProperty("weather_summary") private String weatherSummary;
+    @JsonProperty("weather_condition") private String weatherCondition;
     @JsonProperty("temperature_celsius") private Double temperatureCelsius;
     public void addMessage(String msg) { this.messages.add(msg); }
 }

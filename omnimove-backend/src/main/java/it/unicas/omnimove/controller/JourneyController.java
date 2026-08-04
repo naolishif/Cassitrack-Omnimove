@@ -15,6 +15,7 @@ import it.unicas.omnimove.service.GreenIndexService;
 import it.unicas.omnimove.service.JourneyEventService;
 import it.unicas.omnimove.service.JourneyPlannerService;
 import it.unicas.omnimove.service.RateLimiterService;
+import it.unicas.omnimove.service.WeatherService;
 import it.unicas.omnimove.service.TrafficAwareETAService;
 import it.unicas.omnimove.service.GoogleApiSettingsService;
 import it.unicas.omnimove.dto.StopArrivalResponse;
@@ -26,13 +27,22 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import it.unicas.omnimove.client.CassitrackClient;
+import it.unicas.omnimove.dto.BusTelemetryDTO;
 import it.unicas.omnimove.dto.VehicleDTO;
+import it.unicas.omnimove.model.Trip;
+import it.unicas.omnimove.repository.TripRepository;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -57,6 +67,10 @@ public class JourneyController {
     private final CassitrackClient      cassitrackClient;
     private final TrafficAwareETAService trafficAwareETAService;
     private final GoogleApiSettingsService googleApiSettings;
+    private final StringRedisTemplate   redisTemplate;
+    private final TripRepository        tripRepository;
+    private final ObjectMapper          objectMapper;
+    private final WeatherService        weatherService;
 
     @GetMapping("/stops")
     @Operation(summary = "List active stops for origin/destination pickers")
@@ -73,6 +87,20 @@ public class JourneyController {
                 ))
                 .toList();
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/weather")
+    @Operation(summary = "Current weather condition for the weather pill")
+    public ResponseEntity<Map<String, Object>> weather() {
+        try {
+            var w = weatherService.getCurrentWeather();
+            return ResponseEntity.ok(Map.of(
+                "condition",   w.condition != null ? w.condition.name() : "CLEAR",
+                "temperature", Math.round(w.tempCelsius)
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of("condition", "CLEAR", "temperature", 20));
+        }
     }
 
     @PostMapping("/search")
@@ -242,5 +270,79 @@ public class JourneyController {
                 .build());
 
         return ResponseEntity.ok(Map.of("message", "Journey recorded"));
+    }
+
+    /**
+     * GET /api/v1/journeys/live-buses?route_ids=LINEA-16,LINEA-3
+     *
+     * Returns live positions of active buses, optionally filtered by route.
+     *
+     * Data source: OmniMove's own Redis cache (bus:latest:*), which is populated
+     * every ~5 seconds via the SSE stream from CassiTrack. Route resolution is
+     * done against OmniMove's own NeTEx DB (trips → route) — no CassiTrack HTTP
+     * call needed, so this always works even if CassiTrack REST API is slow.
+     *
+     * A bus is considered stale if its GPS timestamp is older than 5 minutes.
+     */
+    @GetMapping("/live-buses")
+    @Operation(summary = "Live bus positions for a set of routes")
+    public ResponseEntity<List<VehicleDTO>> liveBuses(
+            @RequestParam(name = "route_ids", required = false, defaultValue = "") String routeIds) {
+
+        Set<String> filter = Stream.of(routeIds.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
+
+        Set<String> keys = redisTemplate.keys("bus:latest:*");
+        if (keys == null || keys.isEmpty()) return ResponseEntity.ok(Collections.emptyList());
+
+        Instant staleThreshold = Instant.now().minusSeconds(300); // 5 min
+        List<VehicleDTO> vehicles = new ArrayList<>();
+
+        for (String key : keys) {
+            String json = redisTemplate.opsForValue().get(key);
+            if (json == null) continue;
+            try {
+                BusTelemetryDTO t = objectMapper.readValue(json, BusTelemetryDTO.class);
+
+                // Skip stale data
+                if (t.getTimestamp() != null && t.getTimestamp().isBefore(staleThreshold)) continue;
+
+                // Resolve route from OmniMove's own NeTEx DB via tripId
+                String routeId   = null;
+                String routeName = null;
+                if (t.getTripId() != null) {
+                    Optional<Trip> tripOpt = tripRepository.findById(t.getTripId());
+                    if (tripOpt.isPresent() && tripOpt.get().getRoute() != null) {
+                        routeId   = tripOpt.get().getRoute().getId();
+                        routeName = tripOpt.get().getRoute().getShortName();
+                    }
+                }
+
+                // Apply route filter (no filter = show all active buses)
+                if (!filter.isEmpty() && (routeId == null || !filter.contains(routeId))) continue;
+
+                VehicleDTO dto = new VehicleDTO();
+                dto.setVehicleId(t.getBusId());
+                dto.setLat(t.getLatitude() != 0 ? (double) t.getLatitude() : null);
+                dto.setLon(t.getLongitude() != 0 ? (double) t.getLongitude() : null);
+                dto.setSpeedKmh((double) t.getSpeed());
+                dto.setRouteId(routeId);
+                dto.setRouteName(routeName);
+                dto.setDelayMinutes(t.getDelay());
+                dto.setNextStopName(t.getNextStop());
+                dto.setIsActive(true);
+                dto.setLastSeen(t.getTimestamp());
+                vehicles.add(dto);
+
+            } catch (Exception e) {
+                // log and skip malformed entries
+                org.slf4j.LoggerFactory.getLogger(getClass())
+                        .warn("Failed to parse Redis key {}: {}", key, e.getMessage());
+            }
+        }
+
+        return ResponseEntity.ok(vehicles);
     }
 }

@@ -10,6 +10,7 @@
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
           crossorigin="anonymous" />
     <link href="omnimove-traveller.css" rel="stylesheet">
+    <script src="omnimove-i18n.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
             crossorigin="anonymous"></script>
@@ -21,7 +22,7 @@
     <button class="menu-close" onclick="closeMenuMap()" aria-label="Close menu">✕</button>
     <div class="sidebar-brand">
         <div class="brand-logo">OMNI<span>MOVE</span></div>
-        <div class="brand-tagline">Smarter urban mobility</div>
+        <div class="brand-tagline" data-i18n="brand_tagline">Smarter urban mobility</div>
     </div>
 
     <div class="sidebar-user">
@@ -34,36 +35,36 @@
     </div>
 
     <nav class="sidebar-nav">
-        <span class="nav-section-label">Navigation</span>
+        <span class="nav-section-label" data-i18n="nav_section_nav">Navigation</span>
         <div class="nav-item active" data-pane="map">
-            <span class="nav-icon">🗺</span> Plan Route
+            <span class="nav-icon">🗺</span> <span data-i18n="nav_plan">Plan Route</span>
         </div>
         <div class="nav-item" data-pane="tickets">
-            <span class="nav-icon">🎫</span> My Tickets
+            <span class="nav-icon">🎫</span> <span data-i18n="nav_tickets">My Tickets</span>
             <span class="nav-badge">1</span>
         </div>
 
-        <span class="nav-section-label">My Account</span>
+        <span class="nav-section-label" data-i18n="nav_section_account">My Account</span>
         <div class="nav-item" data-pane="profile" data-tab="history">
-            <span class="nav-icon">🕐</span> Last Routes
+            <span class="nav-icon">🕐</span> <span data-i18n="nav_history">Last Routes</span>
         </div>
         <div class="nav-item" data-pane="profile" data-tab="favorites">
-            <span class="nav-icon">⭐</span> Favourite Routes
+            <span class="nav-icon">⭐</span> <span data-i18n="nav_favourites">Favourite Routes</span>
         </div>
         <div class="nav-item" data-pane="profile" data-tab="payment">
-            <span class="nav-icon">💳</span> Payment
+            <span class="nav-icon">💳</span> <span data-i18n="nav_payment">Payment</span>
         </div>
         <div class="nav-item" data-pane="profile" data-tab="settings">
-            <span class="nav-icon">⚙</span> Preferences
+            <span class="nav-icon">⚙</span> <span data-i18n="nav_preferences">Preferences</span>
         </div>
         <div class="nav-item" data-pane="profile" data-tab="account">
-            <span class="nav-icon">👤</span> Account
+            <span class="nav-icon">👤</span> <span data-i18n="nav_account">Account</span>
         </div>
     </nav>
 
     <div class="sidebar-eco">
         <div class="eco-card">
-            <div class="eco-label">Your Eco Score</div>
+            <div class="eco-label" data-i18n="eco_score">Your Eco Score</div>
             <div class="eco-points" id="sidebarEcoPoints">—</div>
             <div class="eco-sub" id="sidebarEcoSub">—</div>
         </div>
@@ -84,30 +85,28 @@
         <div class="topbar-search">
             <div class="search-seg">
                 <span>📍</span>
-                <input id="originSelect" type="text" autocomplete="off" placeholder="Origin" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
+                <input id="originSelect" type="text" autocomplete="off" data-i18n="ph_origin" placeholder="Origin" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
             </div>
             <div class="search-seg">
                 <span>🏁</span>
-                <input id="destSelect" type="text" autocomplete="off" placeholder="Destination" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
+                <input id="destSelect" type="text" autocomplete="off" data-i18n="ph_dest" placeholder="Destination" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
             </div>
-            <div class="search-seg">
+            <div class="search-seg" onclick="openTimePicker()" style="cursor:pointer;flex-shrink:0">
                 <span>🕐</span>
-                <input id="departTime" type="time" step="60"
-                       style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;cursor:pointer;"
-                       title="Leave blank for now">
+                <span id="timeDisplay">Now</span>
             </div>
             <button class="search-btn" onclick="swapStops()" style="background:var(--bg-app);color:var(--text-dark);border-left:1px solid var(--border-mid);padding:10px 14px;font-size:16px" title="Swap">⇄</button>
-            <button class="search-btn" onclick="doSearch()">Search →</button>
+            <button class="search-btn" id="searchBtn" onclick="doSearch()" data-i18n="search_btn" data-label="Search">Search</button>
         </div>
         <div class="cats" id="sortChips">
-            <div class="cat-chip active" data-sort="eco" onclick="setSort(this)">🌱 Eco</div>
-            <div class="cat-chip" data-sort="budget" onclick="setSort(this)">💸 Budget</div>
-            <div class="cat-chip" data-sort="fast" onclick="setSort(this)">⚡ Fast</div>
+            <div class="cat-chip active" data-sort="eco" onclick="setSort(this)" data-i18n="chip_eco">🌱 Eco</div>
+            <div class="cat-chip" data-sort="budget" onclick="setSort(this)" data-i18n="chip_budget">💸 Budget</div>
+            <div class="cat-chip" data-sort="fast" onclick="setSort(this)" data-i18n="chip_fast">⚡ Fast</div>
         </div>
         <div class="cats" id="modeChips">
-            <div class="cat-chip" data-mode="BUS" onclick="toggleModeChip(this)">🚌 Bus</div>
-            <div class="cat-chip" data-mode="BIKE" onclick="toggleModeChip(this)">🚲 Bike</div>
-            <div class="cat-chip" data-mode="SCOOTER" onclick="toggleModeChip(this)">🛴 Scooter</div>
+            <div class="cat-chip" data-mode="BUS" onclick="toggleModeChip(this)" data-i18n="chip_bus">🚌 Bus</div>
+            <div class="cat-chip" data-mode="BIKE" onclick="toggleModeChip(this)" data-i18n="chip_bike">🚲 Bike</div>
+            <div class="cat-chip" data-mode="SCOOTER" onclick="toggleModeChip(this)" data-i18n="chip_scooter">🛴 Scooter</div>
         </div>
     </div>
 
@@ -123,18 +122,56 @@
             <div class="map-sidebar">
                 <div class="sheet-handle" id="sheetHandle"><span></span></div>
                 <div class="map-sidebar-header">
-                    <h2>Smart Routes</h2>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <h2 data-i18n="smart_routes">Smart Routes</h2>
+                        <button id="sidebarTimePill" class="sidebar-time-pill" onclick="openTimePicker()">
+                            🕐 <span id="sidebarTimeDisplay">Now</span>
+                        </button>
+                    </div>
                     <div class="weather-pill">☁️ 18°C · Light rain</div>
                 </div>
                 <div class="routes-list">
 
                     <div style="text-align:center;padding:48px 20px;color:var(--text-soft)">
                         <div style="font-size:36px;margin-bottom:12px">🧭</div>
-                        <div style="font-size:14px;font-weight:700;color:var(--text-dark)">Plan your trip</div>
-                        <div style="font-size:12px;margin-top:6px">Pick origin &amp; destination above, then tap Search.</div>
+                        <div style="font-size:14px;font-weight:700;color:var(--text-dark)" data-i18n="plan_trip_title">Plan your trip</div>
+                        <div style="font-size:12px;margin-top:6px" data-i18n="plan_trip_desc">Pick origin &amp; destination above, then tap Search.</div>
                     </div>
 
                 </div>
+
+                <!-- Route Detail Sheet — lives inside the sidebar so it matches its bounds -->
+                <div id="routeDetailSheet" class="rd-overlay">
+                    <div class="rd-sheet">
+                        <div class="rd-handle"></div>
+                        <div class="rd-header">
+                            <div class="rd-icon-wrap">
+                                <span id="rdEmoji" style="font-size:24px"></span>
+                            </div>
+                            <div class="rd-title-col">
+                                <div id="rdLabel" style="font-size:15px;font-weight:700;color:#0f172a"></div>
+                                <div id="rdTimes" style="font-size:12px;color:#64748b;margin-top:2px;font-weight:600"></div>
+                            </div>
+                            <div class="rd-dur-badge">
+                                <div id="rdDur" style="font-size:18px;font-weight:900;color:#059669;line-height:1"></div>
+                                <div style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase">min</div>
+                            </div>
+                            <button class="rd-close-btn" onclick="closeRouteDetail()" aria-label="Close">✕</button>
+                        </div>
+                        <div class="rd-pills">
+                            <div class="rd-pill">🌱 <span id="rdGreen"></span></div>
+                            <div class="rd-pill">💶 <span id="rdCost"></span></div>
+                            <div class="rd-pill">☁️ <span id="rdCo2"></span></div>
+                        </div>
+                        <div class="rd-timeline-scroll">
+                            <div class="journey-timeline" id="rdTimeline"></div>
+                        </div>
+                        <div class="rd-footer">
+                            <button id="rdStartBtn" class="action-btn btn-green rd-start-btn" onclick="startJourneyFromDetail()" data-i18n="btn_start_journey">Start Journey</button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -143,116 +180,116 @@
             <div class="tickets-inner">
 
                 <div>
-                    <div class="section-title">My Tickets</div>
-                    <span class="section-label">Active Ticket</span>
+                    <div class="section-title" data-i18n="section_my_tickets">My Tickets</div>
+                    <span class="section-label" data-i18n="label_active_ticket">Active Ticket</span>
                     <div class="active-ticket-card">
                         <div class="ticket-info">
                             <div class="line">🚌 Bus Line 16 — Active</div>
                             <div class="validity">Valid for 45 more minutes · Urban zone A</div>
                         </div>
-                        <button class="qr-btn">📱 Show QR</button>
+                        <button class="qr-btn" data-i18n="btn_show_qr">📱 Show QR</button>
                     </div>
                 </div>
 
                 <div>
-                    <span class="section-label">Buy New Ticket</span>
+                    <span class="section-label" data-i18n="label_buy_ticket">Buy New Ticket</span>
                     <div class="type-selector">
                         <div class="type-chip active" onclick="showTicketType('bus', this)">
-                            <span class="t-icon">🚌</span> Bus
+                            <span class="t-icon">🚌</span> <span data-i18n="type_bus">Bus</span>
                         </div>
                         <div class="type-chip" onclick="showTicketType('scooter', this)">
-                            <span class="t-icon">🛴</span> Scooter
+                            <span class="t-icon">🛴</span> <span data-i18n="type_scooter">Scooter</span>
                         </div>
                         <div class="type-chip" onclick="showTicketType('bike', this)">
-                            <span class="t-icon">🚲</span> Bike
+                            <span class="t-icon">🚲</span> <span data-i18n="type_bike">Bike</span>
                         </div>
                     </div>
 
                     <div id="bus-tickets" class="ticket-list active">
                         <div class="ticket-option">
-                            <h3>Single Ride</h3>
-                            <p>90 min · All urban lines</p>
+                            <h3 data-i18n="ticket_single">Single Ride</h3>
+                            <p data-i18n="ticket_single_desc">90 min · All urban lines</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€1.10</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px">Buy</button>
+                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3>Daily Pass</h3>
-                            <p>24 h · Unlimited rides</p>
+                            <h3 data-i18n="ticket_daily">Daily Pass</h3>
+                            <p data-i18n="ticket_daily_desc">24 h · Unlimited rides</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€3.50</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px">Buy</button>
+                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3>Weekly Pass</h3>
-                            <p>7 days · Unlimited rides</p>
+                            <h3 data-i18n="ticket_weekly">Weekly Pass</h3>
+                            <p data-i18n="ticket_weekly_desc">7 days · Unlimited rides</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€16.00</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px">Buy</button>
+                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3>Monthly Pass</h3>
-                            <p>30 days · All urban lines</p>
+                            <h3 data-i18n="ticket_monthly">Monthly Pass</h3>
+                            <p data-i18n="ticket_monthly_desc">30 days · All urban lines</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€48.00</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px">Buy</button>
+                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                     </div>
 
                     <div id="scooter-tickets" class="ticket-list">
                         <div class="ticket-option">
-                            <h3>Standard Unlock</h3>
-                            <p>€1.00 unlock + €0.15/min</p>
+                            <h3 data-i18n="ticket_unlock">Standard Unlock</h3>
+                            <p data-i18n="ticket_unlock_desc">€1.00 unlock + €0.15/min</p>
                             <div class="ticket-bottom">
-                                <span class="price-tag">Pay-as-go</span>
-                                <button class="action-btn btn-blue" style="width:auto;padding:8px 18px">Start</button>
+                                <span class="price-tag" data-i18n="price_paygo">Pay-as-go</span>
+                                <button class="action-btn btn-blue" style="width:auto;padding:8px 18px" data-i18n="btn_start">Start</button>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3>30 Min Bundle</h3>
-                            <p>No unlock fee included</p>
+                            <h3 data-i18n="ticket_30min">30 Min Bundle</h3>
+                            <p data-i18n="ticket_30min_desc">No unlock fee included</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€4.00</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px">Buy</button>
+                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3>60 Min Bundle</h3>
-                            <p>Best value for longer rides</p>
+                            <h3 data-i18n="ticket_60min">60 Min Bundle</h3>
+                            <p data-i18n="ticket_60min_desc">Best value for longer rides</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€7.00</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px">Buy</button>
+                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                     </div>
 
                     <div id="bike-tickets" class="ticket-list">
                         <div class="ticket-option">
-                            <h3>Casual Ride</h3>
-                            <p>Up to 15 minutes</p>
+                            <h3 data-i18n="ticket_casual">Casual Ride</h3>
+                            <p data-i18n="ticket_casual_desc">Up to 15 minutes</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€1.50</span>
-                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px">Unlock</button>
+                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px" data-i18n="btn_unlock_bike">Unlock</button>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3>Hour Pass</h3>
-                            <p>Up to 60 minutes</p>
+                            <h3 data-i18n="ticket_hour">Hour Pass</h3>
+                            <p data-i18n="ticket_hour_desc">Up to 60 minutes</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€4.00</span>
-                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px">Buy</button>
+                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3>Day Pass</h3>
-                            <p>Unlimited rides, 24 h</p>
+                            <h3 data-i18n="ticket_day">Day Pass</h3>
+                            <p data-i18n="ticket_day_desc">Unlimited rides, 24 h</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€12.00</span>
-                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px">Buy</button>
+                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                     </div>
@@ -274,43 +311,43 @@
                     <div class="profile-stats">
                         <div class="pstat">
                             <div class="pstat-val" id="statEcoPoints">—</div>
-                            <div class="pstat-lbl">Eco pts</div>
+                            <div class="pstat-lbl" data-i18n="stat_eco_pts">Eco pts</div>
                         </div>
                         <div class="pstat">
                             <div class="pstat-val" id="statCo2Saved">—</div>
-                            <div class="pstat-lbl">CO₂ saved</div>
+                            <div class="pstat-lbl" data-i18n="stat_co2">CO₂ saved</div>
                         </div>
                         <div class="pstat">
                             <div class="pstat-val" id="statTrips">—</div>
-                            <div class="pstat-lbl">Trips</div>
+                            <div class="pstat-lbl" data-i18n="stat_trips">Trips</div>
                         </div>
                         <div class="pstat">
                             <div class="pstat-val" id="statSpent">—</div>
-                            <div class="pstat-lbl">Spent (30d)</div>
+                            <div class="pstat-lbl" data-i18n="stat_spent">Spent (30d)</div>
                         </div>
                     </div>
                 </div>
 
                 <div class="profile-tabs">
-                    <div class="profile-tab active" data-ptab="history" onclick="switchProfileTab('history')">Last Routes</div>
-                    <div class="profile-tab" data-ptab="favorites" onclick="switchProfileTab('favorites')">Favourites</div>
-                    <div class="profile-tab" data-ptab="payment" onclick="switchProfileTab('payment')">Payment</div>
-                    <div class="profile-tab" data-ptab="settings" onclick="switchProfileTab('settings')">Preferences</div>
-                <div class="profile-tab" data-ptab="account" onclick="switchProfileTab('account')">Account</div>
+                    <div class="profile-tab active" data-ptab="history" onclick="switchProfileTab('history')" data-i18n="ptab_history">Last Routes</div>
+                    <div class="profile-tab" data-ptab="favorites" onclick="switchProfileTab('favorites')" data-i18n="ptab_favourites">Favourites</div>
+                    <div class="profile-tab" data-ptab="payment" onclick="switchProfileTab('payment')" data-i18n="ptab_payment">Payment</div>
+                    <div class="profile-tab" data-ptab="settings" onclick="switchProfileTab('settings')" data-i18n="ptab_settings">Preferences</div>
+                <div class="profile-tab" data-ptab="account" onclick="switchProfileTab('account')" data-i18n="ptab_account">Account</div>
                 </div>
 
                 <div class="ptab-pane active" id="ptab-history">
-                    <span class="section-label">Recent Trips</span>
+                    <span class="section-label" data-i18n="label_recent_trips">Recent Trips</span>
                     <div class="route-hist-grid" id="history-list"></div>
                 </div>
 
                 <div class="ptab-pane" id="ptab-favorites">
-                    <span class="section-label">Saved Favourite Routes</span>
+                    <span class="section-label" data-i18n="label_saved_routes">Saved Favourite Routes</span>
                     <div class="route-hist-grid" id="favs-list"></div>
                 </div>
 
                 <div class="ptab-pane" id="ptab-payment">
-                    <span class="section-label">Saved Payment Methods</span>
+                    <span class="section-label" data-i18n="label_payment_methods">Saved Payment Methods</span>
                     <div class="payment-grid">
                         <div class="payment-card">
                             <div class="pay-icon" style="background:#dbeafe">💳</div>
@@ -318,7 +355,7 @@
                                 <div class="route-hist-name">Visa •••• 4821</div>
                                 <div class="route-hist-sub">Expires 09/27</div>
                             </div>
-                            <span class="status-badge s-ok" style="flex-shrink:0">Default</span>
+                            <span class="status-badge s-ok" style="flex-shrink:0" data-i18n="pay_default">Default</span>
                         </div>
                         <div class="payment-card">
                             <div class="pay-icon" style="background:#fef9c3">📱</div>
@@ -328,85 +365,85 @@
                             </div>
                         </div>
                     </div>
-                    <button class="action-btn btn-dark" style="width:auto;margin-top:16px;padding:11px 24px">+ Add Payment Method</button>
+                    <button class="action-btn btn-dark" style="width:auto;margin-top:16px;padding:11px 24px" data-i18n="btn_add_payment">+ Add Payment Method</button>
                 </div>
 
                 <div class="ptab-pane" id="ptab-settings">
                     <div class="settings-section">
-                        <span class="section-label">Journey Preferences</span>
+                        <span class="section-label" data-i18n="label_journey_prefs">Journey Preferences</span>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">Default journey mode</div>
+                                <div class="pref-label" data-i18n="label_default_mode">Default journey mode</div>
                             </div>
                             <select class="pref-select" id="prefDefaultMode">
-                                <option value="ECO">🌱 Eco</option>
-                                <option value="BUDGET">💸 Budget</option>
-                                <option value="FAST">⚡ Fast</option>
+                                <option value="ECO" data-i18n="opt_eco">🌱 Eco</option>
+                                <option value="BUDGET" data-i18n="opt_budget">💸 Budget</option>
+                                <option value="FAST" data-i18n="opt_fast">⚡ Fast</option>
                             </select>
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">Avoid high-occupancy buses</div>
-                                <div class="pref-desc">Only show routes with low to medium occupancy</div>
+                                <div class="pref-label" data-i18n="pref_avoid_occupancy">Avoid high-occupancy buses</div>
+                                <div class="pref-desc" data-i18n="desc_avoid_occupancy">Only show routes with low to medium occupancy</div>
                             </div>
                             <div class="toggle" id="prefAvoidOccupancy" onclick="togglePref(this)"></div>
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">Show walking options</div>
-                                <div class="pref-desc">Include walking as a route alternative</div>
+                                <div class="pref-label" data-i18n="pref_show_walking">Show walking options</div>
+                                <div class="pref-desc" data-i18n="desc_show_walking">Include walking as a route alternative</div>
                             </div>
                             <div class="toggle" id="prefShowWalking" onclick="togglePref(this)"></div>
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">E-bike preferred over bus</div>
-                                <div class="pref-desc">Prioritise bike sharing when available</div>
+                                <div class="pref-label" data-i18n="pref_ebike">E-bike preferred over bus</div>
+                                <div class="pref-desc" data-i18n="desc_ebike">Prioritise bike sharing when available</div>
                             </div>
                             <div class="toggle" id="prefBikeOverBus" onclick="togglePref(this)"></div>
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">Hide bike/scooter/walk when raining</div>
-                                <div class="pref-desc">Only show bus options when the weather is rainy</div>
+                                <div class="pref-label" data-i18n="pref_rain">Hide bike/scooter/walk when raining</div>
+                                <div class="pref-desc" data-i18n="desc_rain">Only show bus options when the weather is rainy</div>
                             </div>
                             <div class="toggle" id="prefOnlyBusRain" onclick="togglePref(this)"></div>
                         </div>
                     </div>
                     <div class="settings-section">
-                        <span class="section-label">Notifications</span>
+                        <span class="section-label" data-i18n="label_notifications">Notifications</span>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">Route delay alerts</div>
-                                <div class="pref-desc">Get notified when your route has a delay</div>
+                                <div class="pref-label" data-i18n="pref_delay_alerts">Route delay alerts</div>
+                                <div class="pref-desc" data-i18n="desc_delay_alerts">Get notified when your route has a delay</div>
                             </div>
                             <div class="toggle" id="prefNotifyDelays" onclick="togglePref(this)"></div>
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">Ticket expiry reminders</div>
-                                <div class="pref-desc">Alert 10 min before ticket expires</div>
+                                <div class="pref-label" data-i18n="pref_ticket_reminder">Ticket expiry reminders</div>
+                                <div class="pref-desc" data-i18n="desc_ticket_reminder">Alert 10 min before ticket expires</div>
                             </div>
                             <div class="toggle" id="prefNotifyTicket" onclick="togglePref(this)"></div>
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">Eco tip of the day</div>
-                                <div class="pref-desc">Daily sustainability tips for your commute</div>
+                                <div class="pref-label" data-i18n="pref_eco_tip">Eco tip of the day</div>
+                                <div class="pref-desc" data-i18n="desc_eco_tip">Daily sustainability tips for your commute</div>
                             </div>
                             <div class="toggle" id="prefNotifyEcoTip" onclick="togglePref(this)"></div>
                         </div>
                     </div>
                     <div class="settings-section">
-                        <span class="section-label">Save Changes</span>
-                        <button class="action-btn btn-green" onclick="savePreferences()" style="width:100%;padding:12px 20px;font-size:14px;font-weight:700">💾 Save Preferences</button>
+                        <span class="section-label" data-i18n="label_save_changes">Save Changes</span>
+                        <button class="action-btn btn-green" onclick="savePreferences()" style="width:100%;padding:12px 20px;font-size:14px;font-weight:700" data-i18n="btn_save_prefs">Save Preferences</button>
                     </div>
 
                 </div>
 
                 <div class="ptab-pane" id="ptab-account">
                     <div class="settings-section">
-                        <span class="section-label">Profile</span>
+                        <span class="section-label" data-i18n="section_profile">Profile</span>
                         <div class="pref-row">
                             <div>
                                 <div class="pref-label" id="accountName">—</div>
@@ -416,24 +453,38 @@
                     </div>
 
                     <div class="settings-section">
-                        <span class="section-label">Session</span>
+                        <span class="section-label" data-i18n="section_language">Language</span>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label">Log out of OmniMove</div>
-                                <div class="pref-desc">You will need to sign in again to access your account</div>
+                                <div class="pref-label" data-i18n="lang_label">App language</div>
+                                <div class="pref-desc" data-i18n="lang_desc">Choose your preferred language for the OmniMove interface</div>
                             </div>
-                            <button class="action-btn" onclick="logout()" style="width:auto;padding:8px 20px;flex-shrink:0;background:#fef2f2;color:var(--red);border:1px solid #fee2e2">Log Out</button>
+                            <div class="lang-toggle" style="flex-shrink:0">
+                                <button class="lang-pill lang-pill-active" data-lang="en" onclick="setLanguage('en')">EN</button>
+                                <button class="lang-pill" data-lang="it" onclick="setLanguage('it')">IT</button>
+                            </div>
                         </div>
                     </div>
 
                     <div class="settings-section">
-                        <span class="section-label">Account Actions</span>
+                        <span class="section-label" data-i18n="section_session">Session</span>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label" style="color:var(--red)">Delete account</div>
-                                <div class="pref-desc">Permanently removes your account and all data.</div>
+                                <div class="pref-label" data-i18n="logout_label">Log out of OmniMove</div>
+                                <div class="pref-desc" data-i18n="logout_desc">You will need to sign in again to access your account</div>
                             </div>
-                            <button class="action-btn" onclick="confirmDeleteAccount()" style="width:auto;padding:8px 20px;flex-shrink:0;background:none;color:var(--red);border:1px solid #fecaca">Delete</button>
+                            <button class="action-btn" onclick="logout()" style="width:auto;padding:8px 20px;flex-shrink:0;background:#fef2f2;color:var(--red);border:1px solid #fee2e2" data-i18n="logout_btn">Log Out</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <span class="section-label" data-i18n="section_actions">Account Actions</span>
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" style="color:var(--red)" data-i18n="delete_label">Delete account</div>
+                                <div class="pref-desc" data-i18n="delete_desc">Permanently removes your account and all data.</div>
+                            </div>
+                            <button class="action-btn" onclick="confirmDeleteAccount()" style="width:auto;padding:8px 20px;flex-shrink:0;background:none;color:var(--red);border:1px solid #fecaca" data-i18n="delete_btn">Delete</button>
                         </div>
                     </div>
                 </div>
@@ -450,17 +501,17 @@
     <div style="background:#0f1623;border:1px solid #7f1d1d;border-radius:12px;
          padding:32px;max-width:380px;width:90%;text-align:center">
         <div style="font-size:36px;margin-bottom:12px">⚠️</div>
-        <div style="font-size:18px;font-weight:800;margin-bottom:8px;color:#f87171">Delete Account</div>
-        <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:24px">
+        <div style="font-size:18px;font-weight:800;margin-bottom:8px;color:#f87171" data-i18n="modal_delete_title">Delete Account</div>
+        <p style="font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:24px" data-i18n="modal_delete_body">
             Are you sure? This will permanently delete your account and all associated data. This action cannot be undone.
         </p>
         <div style="display:flex;gap:12px;justify-content:center">
             <button onclick="document.getElementById('deleteModal').style.display='none'"
                 style="padding:10px 24px;background:#1e293b;color:#94a3b8;border:1px solid #334155;
-                border-radius:8px;cursor:pointer;font-weight:700">Cancel</button>
+                border-radius:8px;cursor:pointer;font-weight:700" data-i18n="btn_cancel">Cancel</button>
             <button id="confirmDeleteBtn" onclick="deleteAccount()"
                 style="padding:10px 24px;background:#7f1d1d;color:#fca5a5;border:none;
-                border-radius:8px;cursor:pointer;font-weight:700">Yes, delete my account</button>
+                border-radius:8px;cursor:pointer;font-weight:700" data-i18n="btn_confirm_delete">Yes, delete my account</button>
         </div>
     </div>
 </div>
@@ -471,8 +522,8 @@
         <div class="ai-panel-header">
             <div class="ai-icon">✦</div>
             <div>
-                <h3>OmniAI Assistant</h3>
-                <small>Ask anything about your route or mobility options</small>
+                <h3 data-i18n="ai_title">OmniAI Assistant</h3>
+                <small data-i18n="ai_subtitle">Ask anything about your route or mobility options</small>
             </div>
             <button class="ai-close" onclick="closeAI()">×</button>
         </div>
@@ -480,8 +531,8 @@
             <div class="ai-msg bot" id="aiGreeting"></div>
         </div>
         <div class="ai-input-row">
-            <input class="ai-input" id="aiInput" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter') sendAI()">
-            <button class="ai-send" onclick="sendAI()">Send ↗</button>
+            <input class="ai-input" id="aiInput" data-i18n="ph_ai_input" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter') sendAI()">
+            <button class="ai-send" onclick="sendAI()" data-i18n="btn_send_ai">Send ↗</button>
         </div>
     </div>
 </div>
@@ -502,6 +553,32 @@
 </div>
 
 <div class="ac-list" id="acList"></div>
+
+<!-- ── TIME PICKER OVERLAY ── -->
+<div id="timePickerOverlay" class="tp-overlay" onclick="closeTimePicker(event)">
+    <div class="tp-sheet" onclick="event.stopPropagation()">
+        <div class="tp-toolbar">
+            <div class="tp-toggle-wrap">
+                <button id="tpDepart" class="tp-toggle active" onclick="setTimeMode('depart')" data-i18n="time_depart">Depart at</button>
+                <button id="tpArrive" class="tp-toggle" onclick="setTimeMode('arrive')" data-i18n="time_arrive">Arrive by</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+                <button class="tp-now-btn" onclick="resetTimeToNow()" data-i18n="time_now">Now</button>
+                <button class="tp-done" onclick="confirmTimePicker()" data-i18n="btn_done">Done</button>
+            </div>
+        </div>
+        <div class="tp-picker-wrap">
+            <div class="tp-mask-top"></div>
+            <div class="tp-mask-bot"></div>
+            <div class="tp-selector"></div>
+            <div class="tp-drums">
+                <div class="tp-drum" id="drumHours"></div>
+                <div class="tp-colon">:</div>
+                <div class="tp-drum" id="drumMins"></div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script src="omnimove-traveller.js"></script>
 </body>

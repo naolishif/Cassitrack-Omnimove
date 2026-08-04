@@ -19,6 +19,15 @@ document.getElementById('profileName').textContent  = _user.name  || _user.usern
 document.getElementById('profileEmail').textContent = _user.email || '';
 document.getElementById('paymentEmail').textContent = _user.email || '';
 
+// Apply saved language on load
+applyTranslations();
+// Sync the search button's data-label attribute (CSS ::after uses attr(data-label))
+function syncSearchBtn() {
+    const btn = document.getElementById('searchBtn');
+    if (btn) btn.setAttribute('data-label', t('search_btn'));
+}
+syncSearchBtn();
+
 const _name = _user.name || _user.username || 'there';
 document.getElementById('aiGreeting').textContent =
     `👋 Hi ${_name}! I'm OmniAI. I can help you find the best route, check real-time delays, or suggest eco-friendly alternatives. What do you need?`;
@@ -130,8 +139,8 @@ function timeAgoLabel(dateStr) {
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
 
-    if (sameDay) return { date: 'Today', sub: `Today, ${hh}:${mm}` };
-    if (isYest)  return { date: 'Yesterday', sub: `Yesterday, ${hh}:${mm}` };
+    if (sameDay) return { date: t('lbl_today'), sub: `${t('lbl_today')}, ${hh}:${mm}` };
+    if (isYest)  return { date: t('lbl_yesterday'), sub: `${t('lbl_yesterday')}, ${hh}:${mm}` };
     const opts = { weekday: 'short', day: 'numeric', month: 'short' };
     const label = d.toLocaleDateString('en-GB', opts);
     return { date: label, sub: `${label}, ${hh}:${mm}` };
@@ -142,7 +151,7 @@ const MODE_ICON = { BUS: ['ri-bus', '🚌'], BIKE: ['ri-bike', '🚲'], SCOOTER:
 function renderHistory(items) {
     const container = document.getElementById('history-list');
     if (!items || items.length === 0) {
-        container.innerHTML = '<div class="empty-state">No trips yet. Start your first journey!</div>';
+        container.innerHTML = `<div class="empty-state">${t('no_trips')}</div>`;
         return;
     }
 
@@ -185,7 +194,7 @@ async function loadHistory() {
 function renderFavorites(items) {
     const container = document.getElementById('favs-list');
     if (!items || items.length === 0) {
-        container.innerHTML = '<div class="empty-state">No favourites yet. Tap the ☆ on a trip to save its route here.</div>';
+        container.innerHTML = `<div class="empty-state">${t('no_favs')}</div>`;
         return;
     }
 
@@ -220,6 +229,193 @@ async function loadFavorites() {
 loadEcoStats();
 loadHistory();
 loadPreferences();
+
+// Re-render dynamic content when language switches
+window._onLangChange = () => {
+    loadHistory();
+    loadFavorites();
+    updateWeatherPill();
+    syncSearchBtn();
+    updateTimeDisplay();
+};
+
+// ── Weather pill on page load ──────────────────────────────────────
+async function updateWeatherPill() {
+    try {
+        const r = await apiFetch('/journeys/weather');
+        if (!r.ok) return;
+        const w = await r.json();
+        const temp = w.temperature + '°C';
+        const key  = 'weather_' + w.condition;
+        const raw  = t(key);
+        const pill = document.querySelector('.weather-pill');
+        if (pill) pill.textContent = raw.replace('{t}', temp);
+    } catch (e) { /* keep placeholder */ }
+}
+updateWeatherPill();
+
+// ── Time Picker ─────────────────────────────────────────────────────
+const _TP_ITEM_H = 40; // must match CSS .tp-drum-item height
+const _TP_REPS   = 7;  // repetitions for seamless infinite scroll
+const _TP_MID    = Math.floor(_TP_REPS / 2);
+
+let _pickerHour = null;
+let _pickerMin  = null;
+let _pickerMode = 'depart'; // 'depart' | 'arrive'
+
+/** Returns a Date for the user's chosen departure time (or now if nothing chosen). */
+function _getPickerTripStart() {
+    if (_pickerHour === null) return new Date();
+    const d = new Date();
+    d.setHours(_pickerHour, _pickerMin, 0, 0);
+    // If the chosen time is already past today, shift to tomorrow
+    if (d < new Date()) d.setDate(d.getDate() + 1);
+    return d;
+}
+/** Format a Date as "HH:MM". */
+function _fmtHHMM(date) {
+    return date.getHours().toString().padStart(2,'0') + ':' + date.getMinutes().toString().padStart(2,'0');
+}
+
+function updateTimeDisplay() {
+    let label, pillLabel;
+    if (_pickerHour === null) {
+        label     = t('time_now');
+        pillLabel = t('time_now');
+    } else {
+        const hh = String(_pickerHour).padStart(2, '0');
+        const mm = String(_pickerMin).padStart(2, '0');
+        const modeLabel = _pickerMode === 'arrive' ? t('time_arrive') : t('time_depart');
+        label     = `${modeLabel} ${hh}:${mm}`;
+        pillLabel = `${hh}:${mm}`;
+    }
+    const el = document.getElementById('timeDisplay');
+    if (el) el.textContent = label;
+
+    // Sidebar pill: compact — just the time (or "Now"), highlighted when a time is set
+    const sidebarEl   = document.getElementById('sidebarTimeDisplay');
+    const sidebarPill = document.getElementById('sidebarTimePill');
+    if (sidebarEl) sidebarEl.textContent = pillLabel;
+    if (sidebarPill) {
+        sidebarPill.classList.toggle('sidebar-time-pill--active', _pickerHour !== null);
+    }
+}
+updateTimeDisplay();
+
+function _buildDrum(drumId, range, selected) {
+    const drum = document.getElementById(drumId);
+    drum.innerHTML = '';
+    // 2 invisible pads at top — lets value 0 snap-center at scrollTop 0
+    for (let i = 0; i < 2; i++) {
+        const p = document.createElement('div');
+        p.className = 'tp-drum-item tp-pad';
+        drum.appendChild(p);
+    }
+    // _TP_REPS full cycles of 0…range-1
+    for (let rep = 0; rep < _TP_REPS; rep++) {
+        for (let v = 0; v < range; v++) {
+            const el = document.createElement('div');
+            el.className = 'tp-drum-item';
+            el.textContent = String(v).padStart(2, '0');
+            drum.appendChild(el);
+        }
+    }
+    // 2 invisible pads at bottom
+    for (let i = 0; i < 2; i++) {
+        const p = document.createElement('div');
+        p.className = 'tp-drum-item tp-pad';
+        drum.appendChild(p);
+    }
+    // Position at middle rep, selected value (instant — no smooth-scroll)
+    drum.scrollTop = (_TP_MID * range + selected) * _TP_ITEM_H;
+}
+
+// Attach loop-back listeners ONCE per drum (idempotent)
+let _tpListenersAttached = false;
+function _attachDrumLoops() {
+    if (_tpListenersAttached) return;
+    _tpListenersAttached = true;
+    _attachLoop('drumHours', 24);
+    _attachLoop('drumMins',  60);
+}
+function _attachLoop(drumId, range) {
+    const drum = document.getElementById(drumId);
+    const reset = () => {
+        const idx = Math.round(drum.scrollTop / _TP_ITEM_H);
+        if (idx < range || idx >= (_TP_REPS - 1) * range) {
+            const val = ((idx % range) + range) % range;
+            drum.scrollTop = (_TP_MID * range + val) * _TP_ITEM_H;
+        }
+    };
+    // scrollend fires after snap animation settles — perfect for loop reset
+    if ('onscrollend' in document) {
+        drum.addEventListener('scrollend', reset);
+    } else {
+        let timer;
+        drum.addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(reset, 120); }, { passive: true });
+    }
+}
+
+function openTimePicker() {
+    const now = new Date();
+    const selH = _pickerHour !== null ? _pickerHour : now.getHours();
+    const selM = _pickerMin  !== null ? _pickerMin  : now.getMinutes();
+
+    // Build DOM while hidden, then show — scroll must be set AFTER display:flex takes effect
+    _buildDrum('drumHours', 24, selH);
+    _buildDrum('drumMins',  60, selM);
+    _attachDrumLoops();
+
+    document.getElementById('tpDepart').classList.toggle('active', _pickerMode === 'depart');
+    document.getElementById('tpArrive').classList.toggle('active', _pickerMode === 'arrive');
+    document.querySelectorAll('#timePickerOverlay [data-i18n]').forEach(el => {
+        el.textContent = t(el.dataset.i18n);
+    });
+
+    // Show overlay first — otherwise scrollTop on display:none elements is ignored
+    document.getElementById('timePickerOverlay').classList.add('open');
+
+    // Re-apply scroll positions after the browser has rendered the overlay
+    requestAnimationFrame(() => {
+        document.getElementById('drumHours').scrollTop = (_TP_MID * 24 + selH) * _TP_ITEM_H;
+        document.getElementById('drumMins').scrollTop  = (_TP_MID * 60 + selM) * _TP_ITEM_H;
+    });
+}
+
+function closeTimePicker(e) {
+    if (e && e.target !== document.getElementById('timePickerOverlay')) return;
+    document.getElementById('timePickerOverlay').classList.remove('open');
+}
+
+function setTimeMode(mode) {
+    _pickerMode = mode;
+    document.getElementById('tpDepart').classList.toggle('active', mode === 'depart');
+    document.getElementById('tpArrive').classList.toggle('active', mode === 'arrive');
+}
+
+function _getDrumValue(drumId, range) {
+    const drum = document.getElementById(drumId);
+    const idx = Math.round(drum.scrollTop / _TP_ITEM_H);
+    return ((idx % range) + range) % range;
+}
+
+function confirmTimePicker() {
+    _pickerHour = _getDrumValue('drumHours', 24);
+    _pickerMin  = _getDrumValue('drumMins',  60);
+    document.getElementById('timePickerOverlay').classList.remove('open');
+    updateTimeDisplay();
+}
+
+function resetTimeToNow() {
+    _pickerHour = null;
+    _pickerMin  = null;
+    _pickerMode = 'depart';
+    document.getElementById('timePickerOverlay').classList.remove('open');
+    updateTimeDisplay();
+    // Re-sync the Depart toggle to active
+    document.getElementById('tpDepart')?.classList.add('active');
+    document.getElementById('tpArrive')?.classList.remove('active');
+}
 
 async function apiFetch(path, options = {}) {
     const token = localStorage.getItem('omnimove_token');
@@ -292,7 +488,7 @@ function renderStopMarkers() {
             `<b>${safeName}</b><br>` +
             `<button class="stop-check-btn" ` +
             `data-stop-id="${escAttr(stop.id)}" data-stop-name="${escAttr(stop.name)}">` +
-            `Check next buses</button>`;
+            `${t('btn_check_buses')}</button>`;
         const marker = L.marker([stop.lat, stop.lon], { icon: STOP_ICON })
             .addTo(map)
             .bindPopup(popup);
@@ -329,7 +525,10 @@ const CROWDING_BG = {
     HIGH:'background:#fed7aa;color:#9a3412',
     VERY_HIGH:'background:#fee2e2;color:#991b1b',
 };
-const CROWDING_LABEL = { LOW:'Low', MEDIUM:'Medium', HIGH:'High', VERY_HIGH:'Very High' };
+function getCrowdingLabel(level) {
+    const map = { LOW:'crowd_low', MEDIUM:'crowd_medium', HIGH:'crowd_high', VERY_HIGH:'crowd_very_high' };
+    return t(map[level] || level);
+}
 
 async function showStopArrivals(stopId, stopName) {
     const overlay  = document.getElementById('stopSheetOverlay');
@@ -338,7 +537,7 @@ async function showStopArrivals(stopId, stopName) {
     const list     = document.getElementById('stopSheetList');
 
     title.textContent    = stopName;
-    subtitle.textContent = 'Loading next buses…';
+    subtitle.textContent = t('loading_buses');
     list.innerHTML       = '';
     overlay.classList.add('open');
 
@@ -347,13 +546,14 @@ async function showStopArrivals(stopId, stopName) {
             '/journeys/stops/' + encodeURIComponent(stopId) + '/arrivals?limit=10');
         if (!r.ok) throw new Error(r.status);
         const arrivals = await r.json();
+        const routeCount = new Set(arrivals.map(a => a.route_short_name || a.route_name)).size;
         subtitle.textContent = arrivals.length
-            ? `Next ${arrivals.length} bus${arrivals.length > 1 ? 'es' : ''}`
-            : 'No upcoming buses found';
+            ? `${routeCount} ${routeCount !== 1 ? t('lbl_lines') : t('lbl_line')} · ${t('lbl_next_departures')}`
+            : t('no_buses');
         renderArrivals(list, arrivals);
     } catch(e) {
-        subtitle.textContent = 'Could not load arrivals';
-        list.innerHTML = '<p style="color:var(--text-soft);text-align:center;padding:24px 0">Service unavailable</p>';
+        subtitle.textContent = t('err_arrivals');
+        list.innerHTML = `<p style="color:var(--text-soft);text-align:center;padding:24px 0">${t('err_service')}</p>`;
     }
 }
 
@@ -382,43 +582,73 @@ function delayLine(a) {
     return `<span class="delay-chip d-hist d-late">Was ${m} min late${at}</span>`;
 }
 
+// Deterministic color per route short-name (consistent across renders)
+const ROUTE_PALETTE = ['#d32f2f','#1565c0','#2e7d32','#e65100','#6a1b9a','#00695c','#37474f','#ad1457','#0277bd','#558b2f'];
+function routeColor(name) {
+    let h = 0;
+    for (const c of (name || '')) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+    return ROUTE_PALETTE[Math.abs(h) % ROUTE_PALETTE.length];
+}
+
+function etaText(isoString, now) {
+    if (!isoString) return '—';
+    const diff = Math.round((new Date(isoString).getTime() - now) / 1000);
+    if (diff <= 0) return t('lbl_now');
+    if (diff < 60) return `${diff} sec`;
+    return `${Math.round(diff / 60)} min`;
+}
+
 function renderArrivals(list, arrivals) {
     if (!arrivals.length) { list.innerHTML = ''; return; }
     const now = Date.now();
-    list.innerHTML = arrivals.map(a => {
-        const eta     = a.estimated_arrival ? new Date(a.estimated_arrival).getTime() : now;
-        const diffMin = Math.max(0, Math.round((eta - now) / 60000));
-        const diffSec = Math.max(0, Math.round((eta - now) / 1000));
-        const etaText  = diffMin > 0 ? `${diffMin} min` : diffSec > 0 ? `${diffSec} sec` : 'Now';
-        const etaClass = diffMin <= 2 ? 'red' : diffMin <= 5 ? 'amber' : '';
-        const status    = a.schedule_status || '';
-        const cardClass = CARD_CLASS[status] || '';
-        const statusBadge = (status && status !== 'UNKNOWN' && STATUS_BG[status])
-            ? `<span class="arrival-badge" style="${STATUS_BG[status]}">${STATUS_LABEL[status] || escHtml(status)}</span>`
+
+    // Group by route short-name, preserving order of first appearance
+    const groups = new Map();
+    for (const a of arrivals) {
+        const key = a.route_short_name || a.route_name || '?';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(a);
+    }
+
+    list.innerHTML = [...groups.entries()].map(([shortName, group]) => {
+        const color   = routeColor(shortName);
+        const first   = group[0];
+        const second  = group[1];
+        const t1      = etaText(first.estimated_arrival, now);
+        const t2      = second ? etaText(second.estimated_arrival, now) : null;
+        const timesHtml = t2
+            ? `<span class="tmb-t1">${t1}</span><span class="tmb-sep"> | </span><span class="tmb-t2">${t2}</span>`
+            : `<span class="tmb-t1">${t1}</span>`;
+
+        const isLive = first.real_time || first.departed;
+        const rtHtml = isLive
+            ? `<span class="tmb-rt live">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>
+                </svg> ${t('lbl_real_time')}</span>`
+            : `<span class="tmb-rt sched">🕐 ${t('lbl_scheduled')}</span>`;
+
+        const direction = first.route_name ? escHtml(first.route_name) : '';
+
+        // Delay note on first arrival only (if live and delayed)
+        let delayHtml = '';
+        if (isLive && first.delay_minutes != null && first.delay_minutes > 0) {
+            delayHtml = `<span class="tmb-delay">${first.delay_minutes} min late</span>`;
+        }
+
+        // Crowding on first arrival
+        const crowding = first.crowding_level;
+        const crowdHtml = (crowding && CROWDING_BG[crowding])
+            ? `<span class="tmb-crowd" style="${CROWDING_BG[crowding]}">${t('lbl_crowding')} ${getCrowdingLabel(crowding)}</span>`
             : '';
-        const crowding = a.crowding_level;
-        const crowdBadge = (crowding && CROWDING_BG[crowding])
-            ? `<span class="arrival-badge" style="${CROWDING_BG[crowding]}">Crowding: ${CROWDING_LABEL[crowding]}</span>`
-            : '';
-        const routeShort = escHtml(a.route_short_name || a.route_name || '?');
-        const routeLong  = (a.route_short_name && a.route_name) ? escHtml(a.route_name) : '';
-        const schTime = a.scheduled_arrival
-            ? new Date(a.scheduled_arrival).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})
-            : '—';
-        const estTime = a.estimated_arrival
-            ? new Date(a.estimated_arrival).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})
-            : '—';
-        return `<div class="arrival-card ${cardClass}">
-            <div class="arrival-top">
-                <div class="arrival-route-info">
-                    <span class="arrival-route-short">${routeShort}</span>
-                    ${routeLong ? `<span class="arrival-route-long">${routeLong}</span>` : ''}
-                </div>
-                <span class="arrival-eta ${etaClass}">${etaText}</span>
-            </div>
-            <div class="arrival-meta">
-                ${statusBadge}${crowdBadge}${delayLine(a)}
-                <span class="arrival-times">Sched: ${schTime} · ETA: ${estTime}</span>
+
+        return `<div class="tmb-route-row">
+            <div class="tmb-badge" style="background:${color}">${escHtml(shortName)}</div>
+            <div class="tmb-info">
+                <div class="tmb-times">${timesHtml}</div>
+                <div class="tmb-meta">${rtHtml}${delayHtml}${crowdHtml}</div>
+                ${direction ? `<div class="tmb-dir">→ ${direction}</div>` : ''}
             </div>
         </div>`;
     }).join('');
@@ -434,7 +664,7 @@ async function loadStops() {
         const stops = await r.json();
 
         if (!Array.isArray(stops) || stops.length === 0) {
-            showToast('Nessuna fermata disponibile', true);
+            showToast(t('no_stops_avail'), true);
             return;
         }
 
@@ -558,6 +788,9 @@ function sortOptions(options) {
 // ── Search ────────────────────────────────────────────────────────
 async function doSearch() {
     _acHide();   // close the suggestion list on search
+    // Reset time to "Now" on every new search (like Google Maps "Leave now")
+    _pickerHour = null; _pickerMin = null; _pickerMode = 'depart';
+    updateTimeDisplay();
     const destId = document.getElementById('destSelect').dataset.id;
     const dest   = STOPS[destId];
     let origin   = getOrigin();
@@ -582,21 +815,26 @@ async function doSearch() {
     document.querySelector('.routes-list').innerHTML =
         '<div style="text-align:center;padding:40px 20px;color:var(--text-soft)">'
         + '<div style="font-size:28px;margin-bottom:10px">🔄</div>'
-        + '<div style="font-size:13px;font-weight:600">Finding best routes...</div>'
+        + `<div style="font-size:13px;font-weight:600">${t('finding_routes')}</div>`
         + '</div>';
 
     try {
         const payload = {
             origin_lat: origin.lat, origin_lon: origin.lon, origin_name: origin.name, origin_is_gps: origin.isGPS === true,
             dest_lat:   dest.lat,   dest_lon:   dest.lon,   dest_name:   dest.name,
-            user_id: _user.id, dest_stop_id: dest.id, origin_stop_id: origin.isGPS ? null : origin.id
+            user_id: _user.id, dest_stop_id: dest.id, origin_stop_id: origin.isGPS ? null : origin.id,
+            lang: getLang()
         };
         // Only constrain modes when the traveler picked specific ones via the chips.
         if (activeModes.length > 0) {
             payload.modes = [...activeModes];
         }
-        const departVal = document.getElementById('departTime')?.value;
-        if (departVal) payload.departure_time = departVal;
+        if (_pickerHour !== null) {
+            const hh = String(_pickerHour).padStart(2, '0');
+            const mm = String(_pickerMin).padStart(2, '0');
+            payload.departure_time = `${hh}:${mm}`;
+            if (_pickerMode === 'arrive') payload.arrive_by = true;
+        }
 
         const r = await apiFetch('/journeys/search', {
             method: 'POST',
@@ -611,8 +849,8 @@ async function doSearch() {
         renderRoutes(data);
     } catch (e) {
         const msg = e.message === 'rate_limited'
-            ? 'Too many searches. Please wait a moment before trying again.'
-            : 'Could not load routes.';
+            ? t('err_rate_limited')
+            : t('err_load_routes');
         document.querySelector('.routes-list').innerHTML =
             '<div style="text-align:center;padding:40px 20px;color:var(--red)">'
             + '<div style="font-size:28px;margin-bottom:10px">⚠️</div>'
@@ -624,13 +862,14 @@ async function doSearch() {
 // ── Route rendering ───────────────────────────────────────────────
 const MODE_ICONS = { BUS:'🚌', BIKE:'🚲', SCOOTER:'🛴', WALK:'🚶' };
 const MODE_BTNS  = {
-    BUS:     { label:'Select Bus',     cls:'btn-dark'   },
-    BIKE:    { label:'Select Bike',    cls:'btn-blue'   },
-    SCOOTER: { label:'Select Scooter', cls:'btn-purple' },
-    WALK:    { label:'Start Walking',  cls:'btn-green'  },
+    BUS:     { labelKey:'btn_bus',     cls:'btn-dark'   },
+    BIKE:    { labelKey:'btn_bike',    cls:'btn-blue'   },
+    SCOOTER: { labelKey:'btn_scooter', cls:'btn-purple' },
+    WALK:    { labelKey:'btn_walk',    cls:'btn-green'  },
 };
 
-const LINE_COLORS = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#10b981' };
+const LINE_COLORS     = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#10b981' };
+const BUS_LEG_COLORS  = ['#0f172a', '#3b82f6', '#7c3aed']; // indexed by bus-leg order
 
 function greenColor(g) {
     return g >= 75 ? '#10b981' : g >= 50 ? '#f59e0b' : '#ef4444';
@@ -639,7 +878,12 @@ function greenColor(g) {
 let selectedJourney = null;
 
 function renderRoutes(data) {
-    if (data.weather_summary) {
+    if (data.weather_condition) {
+        const temp = data.temperature_celsius != null ? Math.round(data.temperature_celsius) + '°C' : '';
+        const key = 'weather_' + data.weather_condition;
+        const raw = t(key);
+        document.querySelector('.weather-pill').textContent = raw.replace('{t}', temp);
+    } else if (data.weather_summary) {
         document.querySelector('.weather-pill').textContent = data.weather_summary;
     }
     const list = document.querySelector('.routes-list');
@@ -650,7 +894,7 @@ function renderRoutes(data) {
         : '';
 
     if (!data.options || data.options.length === 0) {
-        list.innerHTML = noticeHtml + '<div style="padding:20px;color:var(--text-soft);font-size:13px">No routes found.</div>';
+        list.innerHTML = noticeHtml + `<div style="padding:20px;color:var(--text-soft);font-size:13px">${t('no_routes')}</div>`;
         return;
     }
 
@@ -661,28 +905,43 @@ function renderRoutes(data) {
         window._routeOptions[opt.mode] = opt;
 
         const icon = MODE_ICONS[opt.mode] || '🚗';
-        const btn  = MODE_BTNS[opt.mode]  || { label: 'Select', cls: 'btn-dark' };
-        const cost = opt.cost_euros === 0 ? 'Free' : '€' + opt.cost_euros.toFixed(2);
+        const _btn = MODE_BTNS[opt.mode]  || { labelKey: null, cls: 'btn-dark' };
+        const btn  = { label: _btn.labelKey ? t(_btn.labelKey) : 'Select', cls: _btn.cls };
+        // For BUS keep the backend route label (e.g. "3 → Liceo Scientifico"); translate other modes
+        const modeLabel = opt.mode === 'BUS'
+            ? opt.mode_label
+            : (t('mode_' + opt.mode.toLowerCase()) || opt.mode_label);
+        const cost = opt.cost_euros === 0 ? t('lbl_free') : '€' + opt.cost_euros.toFixed(2);
         const co2  = opt.co2_grams > 0 ? Math.round(opt.co2_grams) + ' g' : '0 g';
         const delayBadge = opt.delay_label
             ? `<span class="status-badge delay-${(opt.delay_status||'unknown').toLowerCase()}">${escHtml(opt.delay_label)}</span>`
             : '';
         const warn = opt.weather_warning
             ? `<span class="status-badge s-delay">${opt.weather_warning}</span>` : '';
+        // Departure / arrival time labels for the card
+        const _depDate = _getPickerTripStart();
+        const _arrDate = new Date(_depDate.getTime() + (opt.duration_minutes || 0) * 60000);
+        const _depTime = _fmtHHMM(_depDate);
+        const _arrTime = _fmtHHMM(_arrDate);
         return `
 <div class="route-card" id="card-${opt.mode}">
     <div class="route-top">
-        <div class="route-name">${icon} ${opt.mode_label}</div>
+        <div class="route-name">${icon} ${modeLabel}</div>
         <div class="route-time">${opt.duration_minutes} min</div>
     </div>
+    <div style="display:flex;align-items:center;gap:6px;margin:-4px 0 6px;font-size:12px;color:var(--text-mid);font-weight:600">
+        <span>${_depTime}</span>
+        <span style="color:var(--border-mid)">→</span>
+        <span>${_arrTime}</span>
+    </div>
     <div class="status-row">
-        ${warn || '<span class="status-badge s-ok">✓ Available</span>'}
+        ${warn || `<span class="status-badge s-ok">${t('badge_available')}</span>`}
         ${delayBadge}
     </div>
     <div class="metrics-row">
-        <div class="metric-box"><div class="metric-label">Cost</div><div class="metric-value">${cost}</div></div>
+        <div class="metric-box"><div class="metric-label">${t('metric_cost')}</div><div class="metric-value">${cost}</div></div>
         <div class="metric-box"><div class="metric-label">CO₂</div><div class="metric-value">${co2}</div></div>
-        <div class="metric-box"><div class="metric-label">Green</div>
+        <div class="metric-box"><div class="metric-label">${t('metric_green')}</div>
             <div class="metric-value" style="color:${greenColor(opt.green_index)}">${opt.green_index}/100</div>
         </div>
     </div>
@@ -694,14 +953,103 @@ function renderRoutes(data) {
     }).join('');
 }
 
-// selectMode — only highlights the card and shows the Start Journey banner.
-// The actual map drawing happens in startJourney so GPS is resolved first.
+// ── Route preview (shown on card selection, before Start Journey) ──
+
+function clearRoutePreview() {
+    (window._previewLayers || []).forEach(l => map.removeLayer(l));
+    window._previewLayers = [];
+    // NOTE: stop marker restoration is handled by endJourney and renderRoutes,
+    // not here — clearRoutePreview is also called from startJourney where stops
+    // must stay hidden.
+    clearInterval(window._busPollInterval);
+    window._busPollInterval = null;
+    clearBusMarkers();
+    window._activeBusRouteIds = [];
+}
+
+function showRoutePreview(mode, legs) {
+    clearRoutePreview();
+    window._previewLayers = [];
+
+    const origin = window._currentOrigin;
+    const dest   = window._currentDest;
+    if (!origin || !dest) return;
+
+    // Hide all generic stop markers — we'll show only relevant ones for BUS
+    (window._stopMarkers || []).forEach(m => map.removeLayer(m));
+
+    const color = LINE_COLORS[mode] || '#0f172a';
+
+    if (mode === 'BUS' && legs && legs.length > 0) {
+        let colorIdx = 0;
+        const activeBusLegs = [];
+        legs.forEach(leg => {
+            if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
+                const legColor = BUS_LEG_COLORS[colorIdx % BUS_LEG_COLORS.length];
+                colorIdx++;
+                const coords = leg.stop_coords.map(c => [c[0], c[1]]);
+                window._previewLayers.push(
+                    L.polyline(coords, { color: legColor, weight: 4, opacity: 0.85 }).addTo(map)
+                );
+                coords.forEach((c, i) => {
+                    const isEnd = i === 0 || i === coords.length - 1;
+                    window._previewLayers.push(
+                        L.circleMarker(c, {
+                            radius: isEnd ? 7 : 5,
+                            color: legColor, fillColor: '#ffffff', fillOpacity: 1, weight: 2
+                        }).addTo(map)
+                    );
+                });
+                if (leg.route_id) {
+                    activeBusLegs.push({
+                        routeId: leg.route_id,
+                        color: legColor,
+                        boardingCoords: leg.stop_coords[0] // [lat, lon] of boarding stop
+                    });
+                }
+            } else if (leg.mode === 'WALK' && leg.stop_coords && leg.stop_coords.length >= 2) {
+                const coords = leg.stop_coords.map(c => [c[0], c[1]]);
+                window._previewLayers.push(
+                    L.polyline(coords, { color: '#94a3b8', weight: 3, opacity: 0.6, dashArray: '5,6' }).addTo(map)
+                );
+            }
+        });
+        const allCoords = legs
+            .filter(l => l.stop_coords)
+            .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
+        if (allCoords.length > 1) map.fitBounds(allCoords, { padding: [50, 50] });
+
+        window._activeBusLegs     = activeBusLegs;
+        window._activeBusRouteIds = activeBusLegs.map(l => l.routeId);
+
+        // Only show live bus positions for "Now" trips — future departures would show
+        // vehicles at their current position, which is irrelevant to the planned time.
+        if (_pickerHour === null) {
+            fetchAndRenderBusMarkers();
+            window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+        } else {
+            showStaleNotice(t('live_buses_future') || '🕐 Live positions not shown for future trips');
+        }
+    } else {
+        window._previewLayers.push(
+            L.polyline(
+                [[origin.lat, origin.lon], [dest.lat, dest.lon]],
+                { color, weight: 4, opacity: 0.7, dashArray: mode === 'WALK' ? '8,8' : '8,4' }
+            ).addTo(map)
+        );
+        map.fitBounds([[origin.lat, origin.lon], [dest.lat, dest.lon]], { padding: [50, 50] });
+    }
+}
+
+// selectMode — highlights the card, previews the route on the map, and shows the Start Journey banner.
+// Full GPS resolution + solid lines happen in startJourney.
 function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
     selectedJourney = {
         mode, label, greenIndex,
         distanceKm: distanceMetres / 1000,
         costEuros,
-        durationMinutes: window._routeOptions[mode]?.duration_minutes
+        durationMinutes: window._routeOptions[mode]?.duration_minutes,
+        co2Grams: window._routeOptions[mode]?.co2_grams ?? 0
     };
 
     if (window._routeOptions && window._routeOptions[mode]) {
@@ -716,39 +1064,309 @@ function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
     const card = document.getElementById('card-' + mode);
     if (card) { card.style.border = '2px solid var(--primary)'; card.style.opacity = '1'; }
 
-    // Remove old banner if any
-    const existing = document.getElementById('start-banner');
-    if (existing) existing.remove();
+    // Show dashed preview on map immediately
+    showRoutePreview(mode, selectedJourney.legs || []);
 
-    const modeEmoji = MODE_ICONS[mode];
-
-    const banner = document.createElement('div');
-    banner.id = 'start-banner';
-    banner.style.cssText = 'position:sticky;bottom:0;background:var(--bg-white);border-top:2px solid var(--primary);padding:14px;margin:0 -14px -14px';
-
-    const infoDiv = document.createElement('div');
-    infoDiv.style.cssText = 'font-size:11px;color:var(--text-soft);margin-bottom:8px;font-weight:600';
-    infoDiv.textContent = `${modeEmoji} ${label} · 🌱 ${greenIndex}/100 · ${(distanceMetres/1000).toFixed(1)} km`;
-
-    const startBtn = document.createElement('button');
-    startBtn.className = 'action-btn btn-green';
-    startBtn.style.cssText = 'width:100%;font-size:14px;padding:13px';
-    startBtn.textContent = 'Start Journey';
-    startBtn.onclick = startJourney;
-
-    banner.appendChild(infoDiv);
-    banner.appendChild(startBtn);
-    document.querySelector('.routes-list').appendChild(banner);
-
-    if (!window.matchMedia('(max-width: 768px)').matches) showToast(`${modeEmoji} ${label} selected — tap Start Journey`);
+    // Open detail sheet instead of a sticky banner
+    _openRouteDetail(mode, label, greenIndex, distanceMetres, costEuros);
 }
+
+// ── Route detail preview sheet ────────────────────────────────────────
+function _openRouteDetail(mode, label, greenIndex, distanceMetres, costEuros) {
+    const opt = window._routeOptions?.[mode] || {};
+    const durationMin = opt.duration_minutes
+        || selectedJourney.durationMinutes
+        || Math.ceil((distanceMetres/1000) / (mode==='WALK'?5:mode==='BIKE'?15:mode==='SCOOTER'?20:25) * 60);
+    const distanceKm  = distanceMetres / 1000;
+    const modeEmoji   = MODE_ICONS[mode] || '🚗';
+    const co2g        = opt.co2_grams ?? selectedJourney.co2Grams ?? 0;
+
+    const depDate = _getPickerTripStart();
+    const arrDate = new Date(depDate.getTime() + durationMin * 60000);
+
+    const isBusMode = mode === 'BUS' && selectedJourney.legs?.length > 0;
+    const timelineHtml = isBusMode
+        ? buildTimeline(selectedJourney.legs, durationMin, greenIndex)
+        : buildSingleLegTimeline(mode, selectedJourney.legs || [], distanceKm, co2g);
+
+    const modeLabel = isBusMode ? (fmtRouteLabel(label) || label) : label;
+    const costTxt   = (!costEuros || costEuros === 0) ? t('lbl_free') : '€' + costEuros.toFixed(2);
+    const co2Txt    = Math.round(co2g) + ' g CO₂';
+    const gcol      = greenColor(greenIndex);
+
+    document.getElementById('rdEmoji').textContent = modeEmoji;
+    document.getElementById('rdLabel').innerHTML   = modeLabel;
+    document.getElementById('rdTimes').textContent = `${_fmtHHMM(depDate)} → ${_fmtHHMM(arrDate)}`;
+    document.getElementById('rdDur').textContent   = durationMin + ' min';
+    document.getElementById('rdTimeline').innerHTML = timelineHtml;
+    document.getElementById('rdCost').textContent  = costTxt;
+    document.getElementById('rdCo2').textContent   = co2Txt;
+    document.getElementById('rdGreen').textContent = greenIndex + '/100';
+    document.getElementById('rdGreen').style.color = gcol;
+
+    // Always reset the start button in case a previous journey left it disabled
+    const rdBtn = document.getElementById('rdStartBtn');
+    if (rdBtn) { rdBtn.disabled = false; rdBtn.textContent = t('btn_start_journey'); }
+
+    document.getElementById('routeDetailSheet').classList.add('open');
+}
+
+function closeRouteDetail() {
+    document.getElementById('routeDetailSheet').classList.remove('open');
+    // De-select all route cards
+    document.querySelectorAll('.route-card').forEach(c => {
+        c.style.border = '1px solid var(--border-mid)';
+        c.style.opacity = '1';
+    });
+    // Stop live bus polling and clear real-time bus markers
+    clearInterval(window._busPollInterval);
+    window._busPollInterval = null;
+    clearBusMarkers();
+    // Clear map preview and restore bus stop markers
+    (window._previewLayers || []).forEach(l => map.removeLayer(l));
+    window._previewLayers = [];
+    if (window._stopMarkers) window._stopMarkers.forEach(m => m.addTo(map));
+    selectedJourney = null;
+}
+
+function startJourneyFromDetail() {
+    document.getElementById('routeDetailSheet').classList.remove('open');
+    startJourney();
+}
+
+// ── Helpers shared by selectMode preview and startJourney ───────────
+function fmtD(m) { return m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(1) + ' km'; }
+
+
+// ── Route label: "3 → Dest" or "3 → Dest + 1 → Dest2" → circles ──
+function fmtRouteLabel(instruction, circleStyle) {
+    if (!instruction) return 'Bus';
+    // Transfer labels contain " + " separating each leg label — stack vertically
+    if (instruction.includes(' + ')) {
+        return instruction.split(' + ')
+            .map(part => `<div style="line-height:1.6">${fmtRouteLabel(part.trim(), circleStyle)}</div>`)
+            .join('');
+    }
+    const sep = instruction.indexOf(' → ');
+    if (sep === -1) return escHtml(instruction);
+    const num = escHtml(instruction.slice(0, sep).trim());
+    const dest = escHtml(instruction.slice(sep + 3).trim());
+    const cs  = circleStyle || 'background:#1d4ed8;color:#fff';
+    return `<span class="rnum-bus" style="${cs}">${num}</span> → ${dest}`;
+}
+
+// ── Build Google Maps-style vertical timeline ──────────────────────
+function buildTimeline(legs, totalMin, greenIdx) {
+    const C = { WALK:'#6366f1', WAIT:'#f59e0b', BUS:'#10b981', TRANSFER:'#ef4444' };
+    let html = '';
+    let busIndex = 0;
+
+    // Running clock — starts at the user's chosen departure time (or now)
+    const _tripStart = _getPickerTripStart();
+    let   _runMs     = 0;
+    function _tick(min) { _runMs += (min || 0) * 60000; }
+    function _fmtTime(offsetMs) {
+        const d = new Date(_tripStart.getTime() + offsetMs);
+        return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+    }
+    // Inline time badge — prominent black HH:MM
+    function _timeBadge(ms) {
+        return `<span style="font-size:13px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;flex-shrink:0">${_fmtTime(ms)}</span>`;
+    }
+    // Stop name row with time right-aligned
+    function _stopRow(name, timeMs) {
+        return `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+                  <span class="tl-from" style="margin:0">${name}</span>
+                  ${_timeBadge(timeMs)}
+                </div>`;
+    }
+
+    legs.forEach((leg, i) => {
+        const isLast = i === legs.length - 1;
+        const col = C[leg.mode] || '#94a3b8';
+        const names = leg.stop_names || [];
+        const isTransfer = leg.mode === 'WAIT' && leg.instruction && leg.instruction.toLowerCase().includes('change at');
+
+        if (leg.mode === 'WALK') {
+            // ── WALK row ──────────────────────────────────────────────
+            const walkDepMs = _runMs;
+            _tick(leg.duration_minutes);
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+                ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
+              </div>
+              <div class="tl-body">
+                ${_stopRow(leg.from || 'Start', walkDepMs)}
+                <div class="tl-meta">
+                  <span class="tl-badge" style="background:${col}18;color:${col}">🚶 ${t('walk')} · ${leg.duration_minutes || 0} min</span>
+                  ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
+                </div>
+              </div>
+            </div>`;
+
+        } else if (isTransfer) {
+            // ── TRANSFER / CHANGE BUS ────────────────────────────────
+            const xferMs = _runMs;
+            _tick(leg.duration_minutes);
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-transfer" style="background:white;border-color:#ef4444"></div>
+                ${!isLast ? `<div class="tl-line" style="background:#ef444433"></div>` : ''}
+              </div>
+              <div class="tl-body">
+                <div class="tl-transfer-badge">
+                  <span style="font-size:14px">🔄</span>
+                  <div style="flex:1">
+                    <div style="font-size:12px;font-weight:700;color:#ef4444">${leg.instruction || 'Change bus'}</div>
+                    <div style="font-size:11px;color:#64748b">${leg.duration_minutes || 0} ${t('min_wait')} · ${t('next_bus')} ${_fmtTime(_runMs)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+
+        } else if (leg.mode === 'WAIT') {
+            // ── WAIT (no change) ─────────────────────────────────────
+            _tick(leg.duration_minutes);
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+                ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
+              </div>
+              <div class="tl-body">
+                <div class="tl-meta">
+                  <span class="tl-badge" style="background:${col}18;color:${col}">🕐 ${t('wait_lbl')} · ${leg.duration_minutes || 0} min</span>
+                </div>
+              </div>
+            </div>`;
+
+        } else if (leg.mode === 'BUS') {
+            // ── BUS row with collapsible stop list ───────────────────
+            busIndex++;
+            const stopListId = `tl-stops-${busIndex}`;
+            const intermediates = names.slice(1, -1);
+            const boardStop  = names[0]  || leg.from || '';
+            const alightStop = names[names.length - 1] || leg.to || '';
+            const stopListHtml = intermediates.map(n =>
+                `<div class="tl-stop-item"><div class="tl-stop-dot"></div><span>${n}</span></div>`
+            ).join('');
+
+            const boardMs = _runMs;
+            _tick(leg.duration_minutes);
+            const alightMs = _runMs;
+
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-board" style="background:${col};border-color:${col}"></div>
+                <div class="tl-line tl-line-bus" style="background:${col}"></div>
+              </div>
+              <div class="tl-body">
+                ${_stopRow(boardStop, boardMs)}
+                <div class="tl-meta">
+                  <span class="tl-badge" style="background:${col}18;color:${col}">🚌 ${fmtRouteLabel(leg.instruction, `background:${col};color:#fff`)} · ${leg.duration_minutes || 0} min</span>
+                  ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
+                </div>
+                ${intermediates.length > 0 ? `
+                <button class="tl-expand-btn" onclick="
+                  var el=document.getElementById('${stopListId}');
+                  var btn=this;
+                  var open=el.style.display==='block';
+                  el.style.display=open?'none':'block';
+                  btn.textContent=open?'▾ ${intermediates.length} '+window.t(${intermediates.length}===1?'lbl_stop':'lbl_stops'):window.t('stops_hide');
+                ">▾ ${intermediates.length} ${intermediates.length === 1 ? t('lbl_stop') : t('lbl_stops')}</button>
+                <div id="${stopListId}" class="tl-stop-list" style="display:none">
+                  ${stopListHtml}
+                </div>` : ''}
+              </div>
+            </div>
+            <!-- Alight stop row -->
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-alight" style="background:white;border-color:${col}"></div>
+                ${!isLast ? `<div class="tl-line" style="background:#e2e8f0"></div>` : ''}
+              </div>
+              <div class="tl-body" style="padding-bottom:${isLast?'0':'12px'}">
+                ${_stopRow(alightStop, alightMs)}
+                ${isLast ? `<div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">${t('your_destination')}</div>` : ''}
+              </div>
+            </div>`;
+        }
+    });
+    return html;
+}
+
+// ── non-BUS modes: single-leg vertical timeline (Option A) ──────────
+function buildSingleLegTimeline(mode, legs, distKm, co2g) {
+    const COLORS = { WALK:'#6366f1', BIKE:'#3b82f6', SCOOTER:'#7c3aed' };
+    const ICONS  = { WALK:'🚶', BIKE:'🚲', SCOOTER:'🛴' };
+    const LABEL  = { WALK:t('walk'), BIKE:t('bike'), SCOOTER:t('scooter') };
+    const DASH   = { WALK:'8,6', BIKE:'6,4', SCOOTER:'4,3' };
+    const col    = COLORS[mode] || '#94a3b8';
+    const icon   = ICONS[mode]  || '🚶';
+    const lbl    = LABEL[mode]  || mode;
+
+    // Prefer leg from/to if available, fall back to selectedJourney label
+    const leg    = (legs && legs.length > 0) ? legs[0] : null;
+    const from   = leg?.from || 'Start';
+    const to     = leg?.to   || 'Destination';
+    const dist   = leg?.distance_metres ? fmtD(leg.distance_metres) : `${distKm.toFixed(1)} km`;
+    const co2    = co2g > 0 ? `${Math.round(co2g)} g CO₂` : '0 g CO₂';
+    const durMin = leg?.duration_minutes;
+    const durStr = durMin ? `${durMin} min` : '';
+
+    // Departure / arrival timestamps from picker
+    const depDate = _getPickerTripStart();
+    const arrDate = new Date(depDate.getTime() + (durMin || 0) * 60000);
+    const depTime = _fmtHHMM(depDate);
+    const arrTime = _fmtHHMM(arrDate);
+    const timeStyle = 'font-size:13px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;flex-shrink:0';
+
+    // dashed SVG line encoded as background-image
+    const svgLine = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='100'%3E%3Cline x1='1' y1='0' x2='1' y2='100' stroke='${encodeURIComponent(col)}' stroke-width='2' stroke-dasharray='${DASH[mode]}'/%3E%3C/svg%3E")`;
+
+    return `
+    <div class="tl-row">
+      <div class="tl-left">
+        <div class="tl-dot" style="background:white;border-color:${col};border-width:2px"></div>
+        <div class="tl-line" style="background-image:${svgLine};background-color:transparent;background-repeat:repeat-y;background-size:2px 100%"></div>
+      </div>
+      <div class="tl-body">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+          <div class="tl-from" style="margin:0">${from}</div>
+          <span style="${timeStyle}">${depTime}</span>
+        </div>
+        <div class="tl-meta">
+          <span class="tl-badge" style="background:${col}18;color:${col}">${icon} ${lbl}${durStr ? ' · ' + durStr : ''}</span>
+          <span class="tl-sub">${dist}</span>
+          <span class="tl-sub" style="color:#10b981">🌱 ${co2}</span>
+        </div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-left">
+        <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+      </div>
+      <div class="tl-body" style="padding-bottom:0">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+          <div class="tl-from" style="margin:0">${to}</div>
+          <span style="${timeStyle}">${arrTime}</span>
+        </div>
+        <div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">${t('your_destination')}</div>
+      </div>
+    </div>`;
+}
+
 
 async function startJourney() {
     if (!selectedJourney) return;
     if (window._journeyStarting) return;
     window._journeyStarting = true;
-    const _startBtn = document.querySelector('#start-banner button');
-    if (_startBtn) { _startBtn.disabled = true; _startBtn.textContent = '⏳ Starting…'; }
+    const _startBtn = document.getElementById('rdStartBtn');
+    if (_startBtn) { _startBtn.disabled = true; _startBtn.textContent = '⏳'; }
 
     try {
         const origin = window._currentOrigin;
@@ -790,8 +1408,12 @@ async function startJourney() {
         if (window._stopMarkers) window._stopMarkers.forEach(m => map.removeLayer(m));
 
         // 4) Pulisci i layer del viaggio precedente
+        clearRoutePreview();
         ['_routeLine','_routeLineGps','_journeyDestMarker','_journeyOriginMarker','_journeyGpsMarker']
             .forEach(k => { if (window[k]) { map.removeLayer(window[k]); window[k] = null; } });
+        clearInterval(window._busPollInterval);
+        window._busPollInterval = null;
+        if (typeof clearBusMarkers === 'function') clearBusMarkers();
 
         const { mode, label, greenIndex, distanceKm } = selectedJourney;
         const color = LINE_COLORS[mode] || '#0f172a';
@@ -830,12 +1452,11 @@ async function startJourney() {
         window._busRouteLines = [];
 
         if (mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0) {
-            const busColors = ['#0f172a', '#3b82f6', '#7c3aed'];
             let colorIdx = 0;
 
             selectedJourney.legs.forEach(leg => {
                 if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
-                    const legColor = busColors[colorIdx % busColors.length];
+                    const legColor = BUS_LEG_COLORS[colorIdx % BUS_LEG_COLORS.length];
                     colorIdx++;
                     const coords = leg.stop_coords.map(c => [c[0], c[1]]);
                     const line = L.polyline(coords, { color: legColor, weight: 5, opacity: 0.9 }).addTo(map);
@@ -880,60 +1501,41 @@ async function startJourney() {
         const durationMin = selectedJourney.durationMinutes
             || Math.ceil(distanceKm / (mode==='WALK'?5:mode==='BIKE'?15:mode==='SCOOTER'?20:25) * 60);
         const modeEmoji = MODE_ICONS[mode];
-        const fmtD = m => m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(1) + ' km';
+        const isBusMode = mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0;
+        const timelineHtml = isBusMode
+            ? buildTimeline(selectedJourney.legs, durationMin, greenIndex)
+            : buildSingleLegTimeline(mode, selectedJourney.legs, distanceKm, selectedJourney.co2Grams ?? 0);
 
-        // BUS: show walk/wait/bus breakdown from leg data
-        let gridHtml = '';
-        if (mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0) {
-            const legs = selectedJourney.legs;
-            const walkLegs = legs.filter(l => l.mode === 'WALK');
-            const waitLegs = legs.filter(l => l.mode === 'WAIT');
-            const busLegs  = legs.filter(l => l.mode === 'BUS');
-            const walkMin = walkLegs.reduce((s, l) => s + (l.duration_minutes || 0), 0);
-            const waitMin = waitLegs.reduce((s, l) => s + (l.duration_minutes || 0), 0);
-            const busMin  = busLegs.reduce((s,  l) => s + (l.duration_minutes || 0), 0);
-            const walkM   = walkLegs.reduce((s, l) => s + (l.distance_metres  || 0), 0);
-            const busM    = busLegs.reduce((s,  l) => s + (l.distance_metres  || 0), 0);
-            const cell = (lbl, top, sub) =>
-                `<div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:10px">
-                    <div style="font-size:9px;opacity:0.75;font-weight:700;text-transform:uppercase;margin-bottom:3px">${lbl}</div>
-                    <div style="font-size:15px;font-weight:800">${top}</div>
-                    ${sub ? `<div style="font-size:10px;opacity:0.75;margin-top:2px">${sub}</div>` : ''}
-                 </div>`;
-            gridHtml = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:14px">'
-                + cell('Walk', walkMin > 0 ? `🚶 ${walkMin} min` : '🚶 —', walkMin > 0 ? fmtD(walkM) : 'already at stop')
-                + cell('Bus wait', `🕐 ${waitMin} min`, '')
-                + cell('On bus', `🚌 ${busMin} min`, fmtD(busM))
-                + '</div>'
-                + `<div style="margin-top:10px;font-size:11px;opacity:0.8;text-align:center">
-                    Total: <span id="etaCounter" style="font-weight:800">${durationMin} min</span>
-                    &nbsp;·&nbsp; 🌱 ${greenIndex}
-                </div>`;
-        } else {
-            gridHtml = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:16px">'
-                + `<div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:10px">
-                    <div style="font-size:10px;opacity:0.8;font-weight:700;text-transform:uppercase">Distance</div>
-                    <div style="font-size:16px;font-weight:800">${distanceKm.toFixed(1)} km</div></div>`
-                + `<div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:10px">
-                    <div style="font-size:10px;opacity:0.8;font-weight:700;text-transform:uppercase">ETA</div>
-                    <div style="font-size:16px;font-weight:800" id="etaCounter">${durationMin} min</div></div>`
-                + `<div style="background:rgba(255,255,255,0.2);border-radius:12px;padding:10px">
-                    <div style="font-size:10px;opacity:0.8;font-weight:700;text-transform:uppercase">Green</div>
-                    <div style="font-size:16px;font-weight:800">🌱 ${greenIndex}</div></div>`
-                + '</div>';
-        }
-
-        document.querySelector('.routes-list').innerHTML =
-            '<div style="padding:16px 0">'
-            + '<div style="background:linear-gradient(135deg,#10b981,#3b82f6);border-radius:20px;padding:20px;color:white;margin-bottom:16px;text-align:center">'
-            + `<div style="font-size:36px;margin-bottom:8px">${modeEmoji}</div>`
-            + '<div style="font-size:18px;font-weight:800;margin-bottom:4px">Journey In Progress</div>'
-            + `<div style="font-size:13px;opacity:0.85">${label}</div>`
-            + gridHtml
-            + '</div>'
-            + '<button class="action-btn" onclick="endJourney()" style="width:100%;background:#fef2f2;color:#ef4444;border:1px solid #fee2e2;font-size:14px;padding:13px;margin-bottom:12px">🏁 End Journey</button>'
-            + '<div style="text-align:center;font-size:11px;color:var(--text-soft);font-weight:600">📡 Live tracking active</div>'
-            + '</div>';
+        document.querySelector('.routes-list').innerHTML = `
+            <div style="padding:12px 0">
+              <!-- Header -->
+              <div style="background:white;border-radius:18px;padding:16px 16px 12px;margin-bottom:10px;box-shadow:0 2px 16px rgba(0,0,0,0.07);border:1px solid #f1f5f9">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                  <div style="width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,#10b981,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${modeEmoji}</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:10px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.5px">${t('journey_in_progress')}</div>
+                    <div style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isBusMode ? fmtRouteLabel(label) : label}</div>
+                  </div>
+                  <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:20px;padding:6px 14px;text-align:center;flex-shrink:0">
+                    <div style="font-size:18px;font-weight:900;color:#059669;line-height:1"><span id="etaCounter">${durationMin}</span></div>
+                    <div style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase">${t('min_left')}</div>
+                  </div>
+                </div>
+                <!-- Vertical timeline (all modes) -->
+                <div class="journey-timeline">${timelineHtml}</div>
+                <!-- Footer -->
+                <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid #f1f5f9">
+                  <span style="width:7px;height:7px;border-radius:50%;background:#10b981;animation:pulse 1.5s infinite;display:inline-block"></span>
+                  <span style="font-size:11px;color:#64748b;font-weight:600">${t('live_tracking')}</span>
+                  <span style="font-size:11px;color:#cbd5e1">·</span>
+                  <span style="font-size:11px;color:#64748b">🌱 ${greenIndex}/100</span>
+                </div>
+              </div>
+              <!-- End Journey -->
+              <button onclick="endJourney()" style="width:100%;background:white;color:#ef4444;border:1.5px solid #fecaca;border-radius:14px;font-size:14px;font-weight:700;padding:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+                <span style="font-size:16px">🏁</span> ${t('end_journey')}
+              </button>
+            </div>`;
 
         let remaining = durationMin;
         window._etaInterval = setInterval(() => {
@@ -949,6 +1551,24 @@ async function startJourney() {
 
         showToast(`Journey started! ${durationMin} min to destination`);
 
+        // 11) Live bus markers — polling already started in showRoutePreview.
+        //     Restart here only if somehow not running (e.g. Start Journey without preview).
+        if (mode === 'BUS' && !window._busPollInterval) {
+            const activeBusLegs = (selectedJourney.legs || [])
+                .filter(l => l.mode === 'BUS' && l.route_id)
+                .map((l, idx) => ({
+                    routeId: l.route_id,
+                    color: BUS_LEG_COLORS[idx % BUS_LEG_COLORS.length],
+                    boardingCoords: l.stop_coords ? l.stop_coords[0] : null
+                }));
+            window._activeBusLegs     = activeBusLegs;
+            window._activeBusRouteIds = activeBusLegs.map(l => l.routeId);
+            if (_pickerHour === null) {
+                fetchAndRenderBusMarkers();
+                window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+            }
+        }
+
     } catch (err) {
         console.error('startJourney failed:', err);
         showToast('⚠️ Impossibile avviare il percorso', true);
@@ -957,10 +1577,127 @@ async function startJourney() {
     }
 }
 
+// ── Live bus markers ──────────────────────────────────────────────
+
+function makeBusMarkerHtml(color) {
+    return `<div style="background:${color};color:white;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);font-size:16px;cursor:pointer">🚌</div>`;
+}
+
+function clearBusMarkers() {
+    (window._busMarkers || []).forEach(m => map.removeLayer(m));
+    window._busMarkers = [];
+    hideStaleNotice();
+}
+
+// Euclidean approximation — good enough for picking the nearest vehicle
+function _latLonDist(lat1, lon1, lat2, lon2) {
+    const d = (lat2 - lat1) * (lat2 - lat1) + (lon2 - lon1) * (lon2 - lon1);
+    return Math.sqrt(d);
+}
+
+function renderBusMarkers(vehicles) {
+    clearBusMarkers();
+    const legs = window._activeBusLegs || [];
+
+    if (legs.length === 0) {
+        // No leg context — fall back to showing all vehicles (black)
+        vehicles.forEach(v => {
+            if (v.lat == null || v.lon == null) return;
+            const icon = L.divIcon({ html: makeBusMarkerHtml('#0f172a'), className: '', iconSize: [32,32], iconAnchor: [16,16] });
+            window._busMarkers.push(L.marker([v.lat, v.lon], { icon }).addTo(map));
+        });
+        return;
+    }
+
+    // One marker per leg: pick the vehicle on that route closest to the boarding stop
+    legs.forEach(leg => {
+        const candidates = vehicles.filter(v => v.route_id === leg.routeId && v.lat != null && v.lon != null);
+        if (candidates.length === 0) return;
+
+        let best = candidates[0];
+        if (candidates.length > 1 && leg.boardingCoords) {
+            const [bLat, bLon] = leg.boardingCoords;
+            best = candidates.reduce((b, v) =>
+                _latLonDist(v.lat, v.lon, bLat, bLon) < _latLonDist(b.lat, b.lon, bLat, bLon) ? v : b
+            );
+        }
+
+        const delayTxt = best.delay_minutes == null
+            ? t('delay_unknown')
+            : best.delay_minutes <= 0 ? t('on_time') : `${best.delay_minutes} min late`;
+        const popup = `<b>🚌 ${best.vehicle_id || '—'}</b><br>`
+            + `Route: ${best.route_name || best.route_id || '—'}<br>`
+            + `${delayTxt}<br>`
+            + `${t('next_stop')}: ${best.next_stop_name || '—'}`;
+
+        const icon = L.divIcon({
+            html: makeBusMarkerHtml(leg.color),
+            className: '', iconSize: [32, 32], iconAnchor: [16, 16]
+        });
+        window._busMarkers.push(L.marker([best.lat, best.lon], { icon }).addTo(map).bindPopup(popup));
+    });
+}
+
+function showStaleNotice(msg) {
+    document.getElementById('bus-stale-notice')?.remove(); // replace if already shown
+    const el = document.createElement('div');
+    el.id = 'bus-stale-notice';
+    el.style.cssText = [
+        'position:absolute;bottom:80px;left:50%;transform:translateX(-50%)',
+        'background:rgba(30,30,30,0.88);color:#fff;border-radius:10px',
+        'padding:8px 14px;font-size:12px;font-weight:600;z-index:1000',
+        'display:flex;align-items:center;gap:8px;white-space:nowrap;pointer-events:auto'
+    ].join(';');
+    const text = msg || '⚠️ Live bus data unavailable — positions may be outdated';
+    el.innerHTML = text + ' <span onclick="this.parentElement.remove()" style="cursor:pointer;opacity:0.7;margin-left:4px">✕</span>';
+    const mapEl = document.getElementById('map');
+    if (mapEl) mapEl.appendChild(el);
+}
+
+function hideStaleNotice() {
+    const el = document.getElementById('bus-stale-notice');
+    if (el) el.remove();
+}
+
+async function fetchAndRenderBusMarkers() {
+    const routeIds = window._activeBusRouteIds || [];
+    // Empty routeIds = no route filter = show all active buses
+    const qs = routeIds.length > 0
+        ? '?route_ids=' + routeIds.map(encodeURIComponent).join(',')
+        : '';
+    console.log('[BUS] fetchAndRenderBusMarkers → route_ids:', routeIds, '| qs:', qs || '(none)');
+    try {
+        const r = await apiFetch('/journeys/live-buses' + qs);
+        console.log('[BUS] HTTP status:', r.status);
+        if (!r.ok) throw new Error(r.status);
+        const list = await r.json();
+        console.log('[BUS] vehicles from API:', list);
+        if (Array.isArray(list) && list.length > 0) {
+            hideStaleNotice();
+            renderBusMarkers(list);
+        } else {
+            console.warn('[BUS] empty list → showing stale notice');
+            clearBusMarkers();
+            showStaleNotice();
+        }
+    } catch (e) {
+        console.warn('[BUS] Live bus fetch failed:', e);
+        clearBusMarkers();
+        showStaleNotice();
+    }
+}
+
 function endJourney() {
     clearInterval(window._etaInterval);
+    clearInterval(window._busPollInterval);
+    window._busPollInterval = null;
+    clearBusMarkers();
+    clearRoutePreview();
+    window._activeBusRouteIds = [];
     selectedJourney = null;
     window._journeyStarting = false;
+    const _rdBtn = document.getElementById('rdStartBtn');
+    if (_rdBtn) { _rdBtn.disabled = false; _rdBtn.textContent = t('btn_start_journey'); }
 
     // Remove all journey map layers
     ['_routeLine','_routeLineGps','_journeyDestMarker','_journeyOriginMarker','_journeyGpsMarker']
@@ -978,12 +1715,18 @@ function endJourney() {
 
     map.setView([41.4901, 13.8303], 15);
 
-    document.querySelector('.routes-list').innerHTML =
-        '<div style="text-align:center;padding:48px 20px;color:var(--text-soft)">'
-        + '<div style="font-size:36px;margin-bottom:12px">🌱</div>'
-        + '<div style="font-size:14px;font-weight:700;color:var(--text-dark)">Journey completed!</div>'
-        + '<div style="font-size:12px;margin-top:6px">Search a new route above</div>'
-        + '</div>';
+    // Restore route cards from the last search so the user can pick again without re-searching
+    if (window._lastSearchData) {
+        renderRoutes(window._lastSearchData);
+        showToast(`🏁 ${t('journey_completed')} — ${t('search_new_route')}`);
+    } else {
+        document.querySelector('.routes-list').innerHTML =
+            '<div style="text-align:center;padding:48px 20px;color:var(--text-soft)">'
+            + '<div style="font-size:36px;margin-bottom:12px">🌱</div>'
+            + `<div style="font-size:14px;font-weight:700;color:var(--text-dark)">${t('journey_completed')}</div>`
+            + `<div style="font-size:12px;margin-top:6px">${t('search_new_route')}</div>`
+            + '</div>';
+    }
 
     if (!window.matchMedia('(max-width: 768px)').matches) showToast('🏁 Journey ended — great trip!');
     loadEcoStats();
@@ -1442,3 +2185,72 @@ function initAutocomplete() {
     window.addEventListener('resize', _acHide);
 }
 initAutocomplete();
+
+// ── Route detail sheet: swipe-down to dismiss ─────────────────────────
+(function initRdDrag() {
+    // Wait for DOM
+    const ready = () => {
+        const sheet   = document.querySelector('.rd-sheet');
+        const overlay = document.getElementById('routeDetailSheet');
+        if (!sheet || !overlay) return;
+
+        // Only start a drag from the non-scrollable zones (handle, header, pills)
+        const dragZones = ['.rd-handle', '.rd-header', '.rd-pills'];
+        let startY = 0, dy = 0, active = false;
+
+        function onStart(clientY) {
+            startY = clientY;
+            dy = 0;
+            active = true;
+            sheet.style.transition = 'none';
+        }
+        function onMove(clientY) {
+            if (!active) return;
+            dy = Math.max(0, clientY - startY);   // only downward
+            sheet.style.transform = `translateY(${dy}px)`;
+        }
+        function onEnd() {
+            if (!active) return;
+            active = false;
+            if (dy > 90) {
+                // Slide fully off then close
+                sheet.style.transition = 'transform 0.22s ease';
+                sheet.style.transform  = 'translateY(110%)';
+                setTimeout(() => {
+                    sheet.style.transition = '';
+                    sheet.style.transform  = '';
+                    closeRouteDetail();
+                }, 230);
+            } else {
+                // Spring back
+                sheet.style.transition = 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)';
+                sheet.style.transform  = '';
+                setTimeout(() => { sheet.style.transition = ''; }, 210);
+            }
+        }
+
+        // Touch
+        sheet.addEventListener('touchstart', e => {
+            if (!dragZones.some(sel => e.target.closest(sel))) return;
+            onStart(e.touches[0].clientY);
+        }, { passive: true });
+        sheet.addEventListener('touchmove', e => {
+            if (!active) return;
+            onMove(e.touches[0].clientY);
+        }, { passive: true });
+        sheet.addEventListener('touchend',   onEnd);
+        sheet.addEventListener('touchcancel', onEnd);
+
+        // Mouse (desktop drag for dev/testing)
+        sheet.addEventListener('mousedown', e => {
+            if (!dragZones.some(sel => e.target.closest(sel))) return;
+            onStart(e.clientY);
+            const move = ev => onMove(ev.clientY);
+            const up   = () => { onEnd(); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+            window.addEventListener('mousemove', move);
+            window.addEventListener('mouseup', up);
+        });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
+    else ready();
+})();
