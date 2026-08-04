@@ -2,6 +2,15 @@
 // CONFIG
 // ════════════════════════════════════════════════════════════
 const OMNIMOVE = '/omnimove/api/v1';
+
+// Returns headers with current UI language so the server can send localised emails
+function langHeaders() {
+    return { 'Content-Type': 'application/json',
+             'X-Omnimove-Lang': localStorage.getItem('omnimove_lang') || 'en' };
+}
+
+// Apply stored language on page load
+document.addEventListener('DOMContentLoaded', applyTranslations);
 const REDIRECT = {
     ADMIN:     'omnimove-admin.html',
     TRAVELLER: 'omnimove-traveller.html',
@@ -53,16 +62,16 @@ function clearAllFieldErrs(...ids) { ids.forEach(clearFieldErr); }
     const verified = params.get('verified');
     history.replaceState({}, '', window.location.pathname);
     if (verified === 'true') {
-        showMsg('✓ Email verified! You can now sign in.', 'ok');
+        showMsg(t('msg_email_verified'), 'ok');
         showPanel('loginForm'); showTabs();
         return;
     }
     if (verified === 'expired') {
-        showMsg('Verification link expired. Please register again or request a new link.', 'err');
+        showMsg(t('msg_link_expired'), 'err');
         return;
     }
     if (verified === 'invalid') {
-        showMsg('Invalid verification link.', 'err');
+        showMsg(t('msg_link_invalid'), 'err');
         return;
     }
 
@@ -169,12 +178,12 @@ async function handleLogin(e) {
     const email = document.getElementById('loginEmail').value.trim();
     const pass  = document.getElementById('loginPassword').value;
     let hasErr  = false;
-    if (!email) { fieldErr('loginEmail', 'Mandatory field'); hasErr = true; }
-    if (!pass)  { fieldErr('loginPassword', 'Mandatory field'); hasErr = true; }
+    if (!email) { fieldErr('loginEmail', t('err_required')); hasErr = true; }
+    if (!pass)  { fieldErr('loginPassword', t('err_required')); hasErr = true; }
     if (hasErr) return;
 
     const btn = document.getElementById('loginBtn');
-    btn.disabled = true; btn.textContent = 'Signing in…';
+    btn.disabled = true; btn.textContent = t('btn_sending');
 
     try {
         const r = await fetch(`${OMNIMOVE}/auth/login`, {
@@ -187,7 +196,7 @@ async function handleLogin(e) {
         if (r.ok && data.token) {
             _failedAttempts = 0; syncForgotButton();
             saveSession(data);
-            showMsg('Welcome back, ' + (data.name || 'user') + '! Redirecting…', 'ok');
+            showMsg(t('msg_welcome_back').replace('{name}', data.name || 'user'), 'ok');
             secureRedirect(data.role || 'TRAVELLER');
         } else {
             // Remove any existing resend button to avoid duplicates
@@ -201,14 +210,14 @@ async function handleLogin(e) {
 
             let errorMsg;
             if (r.status === 403) {
-                errorMsg = data.message || 'Your email address has not been verified yet. Please check your inbox.';
+                errorMsg = data.message || t('err_not_verified');
             } else if (r.status === 401) {
-                errorMsg = data.message || 'Incorrect email or password';
+                errorMsg = data.message || t('msg_wrong_creds');
             } else {
-                errorMsg = data.message || 'Login failed. Please try again.';
+                errorMsg = data.message || t('msg_login_failed');
             }
             if (data.suggest_password_reset) {
-                errorMsg += ' — Too many failed attempts, use "Forgot password?" below.';
+                errorMsg += t('msg_too_many');
             }
             showMsg(errorMsg, 'err');
 
@@ -218,7 +227,7 @@ async function handleLogin(e) {
                 resendBtn.id = 'resendVerifyBtn';
                 resendBtn.type = 'button';
                 resendBtn.className = 'btn-ghost';
-                resendBtn.textContent = 'Resend verification email';
+                resendBtn.textContent = t('btn_resend');
                 resendBtn.style.marginTop = '8px';
                 resendBtn.onclick = () => resendVerificationForEmail(
                     document.getElementById('loginEmail').value
@@ -228,9 +237,9 @@ async function handleLogin(e) {
             }
         }
     } catch (err) {
-        showMsg('Cannot reach OMNIMOVE server. Check it is running on :8180', 'err');
+        showMsg(t('msg_server_err'), 'err');
     } finally {
-        btn.disabled = false; btn.textContent = 'Sign In';
+        btn.disabled = false; btn.textContent = t('btn_signin');
     }
 }
 
@@ -250,29 +259,29 @@ async function handleRegister(e) {
     const confirm   = document.getElementById('regConfirm').value;
     let hasErr = false;
 
-    if (!firstName) { fieldErr('regFirstName', 'Mandatory field'); hasErr = true; }
-    if (!lastName)  { fieldErr('regLastName',  'Mandatory field'); hasErr = true; }
-    if (!email)     { fieldErr('regEmail',     'Mandatory field'); hasErr = true; }
-    if (!pass)      { fieldErr('regPassword',  'Mandatory field'); hasErr = true; }
-    if (!confirm)   { fieldErr('regConfirm',   'Mandatory field'); hasErr = true; }
+    if (!firstName) { fieldErr('regFirstName', t('err_required')); hasErr = true; }
+    if (!lastName)  { fieldErr('regLastName',  t('err_required')); hasErr = true; }
+    if (!email)     { fieldErr('regEmail',     t('err_required')); hasErr = true; }
+    if (!pass)      { fieldErr('regPassword',  t('err_required')); hasErr = true; }
+    if (!confirm)   { fieldErr('regConfirm',   t('err_required')); hasErr = true; }
     if (hasErr) return;
 
     if (!isPasswordValid(pass)) {
-        fieldErr('regPassword', 'Min 8 chars: uppercase, lowercase, number & special character');
+        fieldErr('regPassword', t('err_pwd_weak'));
         return;
     }
     if (pass !== confirm) {
-        fieldErr('regConfirm', 'Passwords do not match');
+        fieldErr('regConfirm', t('err_pwd_match'));
         return;
     }
 
     const btn = document.getElementById('regBtn');
-    btn.disabled = true; btn.textContent = 'Creating account…';
+    btn.disabled = true; btn.textContent = t('btn_sending');
 
     try {
         const r = await fetch(`${OMNIMOVE}/auth/register`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: langHeaders(),
             body: JSON.stringify({ name, email, password: pass, confirmPassword: confirm })
         });
         const data = await r.json();
@@ -283,14 +292,14 @@ async function handleRegister(e) {
             document.getElementById('sentToEmail').textContent = email;
             hideTabs(); hideGuestSection();
             showPanel('emailSentPanel');
-            showMsg('Account created! Verification email sent.', 'ok');
+            showMsg(t('msg_account_created'), 'ok');
         } else {
-            showMsg(data.message || data.error || 'Registration failed', 'err');
+            showMsg(data.message || data.error || t('msg_register_failed'), 'err');
         }
     } catch (err) {
-        showMsg('Cannot reach OMNIMOVE server. Check it is running on :8180', 'err');
+        showMsg(t('msg_server_err'), 'err');
     } finally {
-        btn.disabled = false; btn.textContent = 'Create Account';
+        btn.disabled = false; btn.textContent = t('btn_create');
     }
 }
 
@@ -301,35 +310,35 @@ async function resendVerification() {
     // Resolve email: use registered email, or read from what's displayed in the panel
     const email = _lastRegisteredEmail
         || document.getElementById('sentToEmail').textContent.trim().replace('—','');
-    if (!email) { showMsg('Cannot determine email address.', 'err'); return; }
+    if (!email) { showMsg(t('msg_no_email'), 'err'); return; }
 
     if (_emailSentMode === 'reset') {
         // Resend password reset link
         try {
             await fetch(`${OMNIMOVE}/auth/forgot-password`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: langHeaders(),
                 body: JSON.stringify({ email })
             });
-            showMsg('Reset link resent. Check your inbox (and spam folder).', 'ok');
-        } catch { showMsg('Cannot reach server.', 'err'); }
+            showMsg(t('msg_reset_resent'), 'ok');
+        } catch { showMsg(t('msg_server_short'), 'err'); }
     } else {
         await resendVerificationForEmail(email);
     }
 }
 
 async function resendVerificationForEmail(email) {
-    if (!email) { showMsg('Cannot determine email address.', 'err'); return; }
+    if (!email) { showMsg(t('msg_no_email'), 'err'); return; }
     try {
         const r = await fetch(`${OMNIMOVE}/auth/resend-verification`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: langHeaders(),
             body: JSON.stringify({ email })
         });
         const data = await r.json();
-        showMsg(data.message || 'Email sent!', r.ok ? 'ok' : 'err');
+        showMsg(data.message || t('msg_account_created'), r.ok ? 'ok' : 'err');
     } catch (err) {
-        showMsg('Cannot reach server.', 'err');
+        showMsg(t('msg_server_short'), 'err');
     }
 }
 
@@ -342,15 +351,15 @@ async function handleForgot(e) {
     hideMsg();
 
     const email = document.getElementById('forgotEmail').value.trim();
-    if (!email) { fieldErr('forgotEmail', '⚠ Campo obbligatorio'); return; }
+    if (!email) { fieldErr('forgotEmail', t('err_required')); return; }
 
     const btn = document.getElementById('forgotSubmitBtn');
-    btn.disabled = true; btn.textContent = 'Sending…';
+    btn.disabled = true; btn.textContent = t('btn_sending');
 
     try {
         const r = await fetch(`${OMNIMOVE}/auth/forgot-password`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: langHeaders(),
             body: JSON.stringify({ email })
         });
         const data = await r.json();
@@ -359,11 +368,11 @@ async function handleForgot(e) {
         _lastRegisteredEmail = '';
         document.getElementById('sentToEmail').textContent = email;
         showPanel('emailSentPanel');
-        showMsg(data.message || 'Check your email (and spam folder).', 'ok');
+        showMsg(data.message || t('msg_check_email'), 'ok');
     } catch (err) {
-        showMsg('Cannot reach server.', 'err');
+        showMsg(t('msg_server_short'), 'err');
     } finally {
-        btn.disabled = false; btn.textContent = 'Send Reset Link';
+        btn.disabled = false; btn.textContent = t('btn_send_reset');
     }
 }
 
@@ -379,21 +388,21 @@ async function handleReset(e) {
     const confPass = document.getElementById('newPasswordConfirm').value;
     let hasErr = false;
 
-    if (!newPass)  { fieldErr('newPassword',        'Mandatory field'); hasErr = true; }
-    if (!confPass) { fieldErr('newPasswordConfirm', 'Mandatory field'); hasErr = true; }
+    if (!newPass)  { fieldErr('newPassword',        t('err_required')); hasErr = true; }
+    if (!confPass) { fieldErr('newPasswordConfirm', t('err_required')); hasErr = true; }
     if (hasErr) return;
 
     if (!isPasswordValid(newPass)) {
-        fieldErr('newPassword', '⚠ Min 8 chars: uppercase, lowercase, number & special character');
+        fieldErr('newPassword', t('err_pwd_weak'));
         return;
     }
     if (newPass !== confPass) {
-        fieldErr('newPasswordConfirm', 'Passwords do not match');
+        fieldErr('newPasswordConfirm', t('err_pwd_match'));
         return;
     }
 
     const btn = document.getElementById('resetBtn');
-    btn.disabled = true; btn.textContent = 'Saving…';
+    btn.disabled = true; btn.textContent = t('btn_sending');
 
     try {
         const r = await fetch(`${OMNIMOVE}/auth/reset-password`, {
@@ -408,15 +417,14 @@ async function handleReset(e) {
         const data = await r.json();
 
         if (r.ok) {
-            showMsg(data.message || 'Password updated! You can now sign in.', 'ok');
+            showMsg(data.message || t('msg_pwd_updated'), 'ok');
             setTimeout(() => { showTabs(); showGuestSection(); switchTab('login'); }, 2000);
         } else {
-            showMsg((data.message || 'Reset failed. The link may have expired.') +
-                    '\nUse "Back to Sign In" to request a new link.', 'err');
+            showMsg(data.message || t('msg_reset_failed'), 'err');
         }
     } catch (err) {
-        showMsg('Cannot reach server.', 'err');
+        showMsg(t('msg_server_short'), 'err');
     } finally {
-        btn.disabled = false; btn.textContent = 'Set New Password';
+        btn.disabled = false; btn.textContent = t('btn_set_pass');
     }
 }

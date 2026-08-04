@@ -12,11 +12,17 @@
     <div class="logo">OMNI<span>MOVE</span></div>
     <div class="tagline">Smart mobility for Cassino — UNICAS 2025/2026</div>
 
+    <!-- Language toggle -->
+    <div class="lang-toggle">
+        <button class="lang-pill lang-pill-active" data-lang="en" onclick="setLanguage('en')">EN</button>
+        <button class="lang-pill" data-lang="it" onclick="setLanguage('it')">IT</button>
+    </div>
+
     <div class="card">
-        <!-- Tabs — hidden in forgot/reset flows -->
+        <!-- Tabs -->
         <div class="tabs" id="tabBar">
-            <div class="tab active" onclick="switchTab('login')">Sign In</div>
-            <div class="tab" onclick="switchTab('register')">Register</div>
+            <div class="tab active" onclick="switchTab('login')" data-i18n="tab_signin">Sign In</div>
+            <div class="tab" onclick="switchTab('register')" data-i18n="tab_register">Register</div>
         </div>
 
         <div id="msg" class="msg"></div>
@@ -25,19 +31,18 @@
         <form class="form active" id="loginForm" onsubmit="handleLogin(event)">
             <div>
                 <div class="label">Email</div>
-                <input class="input" type="email" id="loginEmail" placeholder="your@email.com"/>
+                <input class="input" type="email" id="loginEmail" data-i18n="ph_email" placeholder="your@email.com"/>
                 <span class="field-err" id="err-loginEmail"></span>
             </div>
             <div>
-                <div class="label">Password</div>
+                <div class="label" data-i18n="label_password">Password</div>
                 <input class="input" type="password" id="loginPassword" placeholder="••••••••"/>
                 <span class="field-err" id="err-loginPassword"></span>
             </div>
-            <button class="btn" type="submit" id="loginBtn">Sign In</button>
-            <!-- Shown after ≥2 failed attempts -->
+            <button class="btn" type="submit" id="loginBtn" data-i18n="btn_signin">Sign In</button>
             <button type="button" class="btn-ghost" id="forgotBtn"
-                    style="display:none" onclick="showForgotPanel()">
-                 Forgot password?
+                    style="display:none" onclick="showForgotPanel()" data-i18n="btn_forgot">
+                Forgot password?
             </button>
         </form>
 
@@ -45,89 +50,90 @@
         <form class="form" id="registerForm" onsubmit="handleRegister(event)">
             <div class="name-row" style="display:flex;gap:10px">
                 <div style="flex:1">
-                    <div class="label">Name</div>
+                    <div class="label" data-i18n="label_name">Name</div>
                     <input class="input" type="text" id="regFirstName" placeholder="Nawaye"/>
                     <span class="field-err" id="err-regFirstName"></span>
                 </div>
                 <div style="flex:1">
-                    <div class="label">Surname</div>
+                    <div class="label" data-i18n="label_surname">Surname</div>
                     <input class="input" type="text" id="regLastName" placeholder="Shiferaw"/>
                     <span class="field-err" id="err-regLastName"></span>
                 </div>
             </div>
             <div>
                 <div class="label">Email</div>
-                <input class="input" type="email" id="regEmail" placeholder="your@email.com"/>
+                <input class="input" type="email" id="regEmail" data-i18n="ph_email" placeholder="your@email.com"/>
                 <span class="field-err" id="err-regEmail"></span>
             </div>
             <div>
-                <div class="label">Password</div>
-                <input class="input" type="password" id="regPassword" placeholder="Min 8 characters"/>
+                <div class="label" data-i18n="label_password">Password</div>
+                <input class="input" type="password" id="regPassword" data-i18n="ph_min8" placeholder="Min 8 characters"/>
                 <span class="field-err" id="err-regPassword"></span>
             </div>
             <div>
-                <div class="label">Confirm Password</div>
-                <input class="input" type="password" id="regConfirm" placeholder="Repeat your password"/>
+                <div class="label" data-i18n="label_confirm_pass">Confirm Password</div>
+                <input class="input" type="password" id="regConfirm" data-i18n="ph_repeat" placeholder="Repeat your password"/>
                 <span class="field-err" id="err-regConfirm"></span>
             </div>
-            <button class="btn" type="submit" id="regBtn">Create Account</button>
+            <button class="btn" type="submit" id="regBtn" data-i18n="btn_create">Create Account</button>
         </form>
 
-        <!-- ══ PANEL: Check your email (after registration) ═════════ -->
+        <!-- ══ PANEL: Check your email ══════════════════════════════ -->
         <div class="form" id="emailSentPanel">
             <div class="email-sent-box">
-                <p>We've sent a verification link to<br>
+                <p><span data-i18n="email_sent_to">We've sent a verification link to</span><br>
                    <strong id="sentToEmail">—</strong></p>
-                <p style="margin-top:10px">
+                <p style="margin-top:10px" id="emailSentBody" data-i18n="email_sent_p">
                     Open the email and click the link to activate your account,
                     then come back here to sign in.
                 </p>
             </div>
-            <button type="button" class="btn-ghost" onclick="resendVerification()">
+            <button type="button" class="btn-ghost" onclick="resendVerification()" data-i18n="btn_resend">
                 Resend verification email
             </button>
-            <button type="button" class="btn-ghost" onclick="switchTab('login')">
+            <button type="button" class="btn-ghost" onclick="switchTab('login')" data-i18n="btn_back_signin">
                 ← Back to Sign In
             </button>
         </div>
 
         <!-- ══ PANEL: Forgot Password ════════════════════════════════ -->
         <form class="form" id="forgotForm" onsubmit="handleForgot(event)">
-            <p class="note">
+            <p class="note" data-i18n="note_forgot">
                 Enter your email and we'll send you a link to reset your password.
             </p>
             <div>
                 <div class="label">Email</div>
-                <input class="input" type="email" id="forgotEmail" placeholder="your@email.com"/>
+                <input class="input" type="email" id="forgotEmail" data-i18n="ph_email" placeholder="your@email.com"/>
                 <span class="field-err" id="err-forgotEmail"></span>
             </div>
-            <button class="btn" type="submit" id="forgotSubmitBtn">Send Reset Link</button>
-            <button type="button" class="btn-ghost" onclick="switchTab('login')">
+            <button class="btn" type="submit" id="forgotSubmitBtn" data-i18n="btn_send_reset">Send Reset Link</button>
+            <button type="button" class="btn-ghost" onclick="switchTab('login')" data-i18n="btn_back_signin">
                 ← Back to Sign In
             </button>
         </form>
 
-        <!-- ══ PANEL: Reset Password (URL ?reset=TOKEN) ══════════════ -->
+        <!-- ══ PANEL: Reset Password ══════════════════════════════════ -->
         <form class="form" id="resetForm" onsubmit="handleReset(event)">
-            <p class="note">Choose a new password for your OMNIMOVE account.</p>
+            <p class="note" data-i18n="note_reset">Choose a new password for your OMNIMOVE account.</p>
             <div>
-                <div class="label">New Password</div>
-                <input class="input" type="password" id="newPassword" placeholder="Min 8 characters"/>
+                <div class="label" data-i18n="label_new_pass">New Password</div>
+                <input class="input" type="password" id="newPassword" data-i18n="ph_min8" placeholder="Min 8 characters"/>
                 <span class="field-err" id="err-newPassword"></span>
             </div>
             <div>
-                <div class="label">Confirm New Password</div>
-                <input class="input" type="password" id="newPasswordConfirm" placeholder="Repeat new password"/>
+                <div class="label" data-i18n="label_confirm_new_pass">Confirm New Password</div>
+                <input class="input" type="password" id="newPasswordConfirm" data-i18n="ph_repeat_new" placeholder="Repeat new password"/>
                 <span class="field-err" id="err-newPasswordConfirm"></span>
             </div>
             <input type="hidden" id="resetToken"/>
-            <button class="btn btn-danger" type="submit" id="resetBtn">Set New Password</button>
-            <button type="button" class="btn-ghost" onclick="cancelReset()">← Back to Sign In</button>
+            <button class="btn btn-danger" type="submit" id="resetBtn" data-i18n="btn_set_pass">Set New Password</button>
+            <button type="button" class="btn-ghost" onclick="cancelReset()" data-i18n="btn_back_signin">← Back to Sign In</button>
         </form>
 
     </div>
 </div>
 
+<script src="omnimove-i18n.js"></script>
 <script src="omnimove-login.js"></script>
 </body>
 </html>

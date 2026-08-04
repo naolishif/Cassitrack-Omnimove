@@ -178,6 +178,7 @@ public class JourneyPlannerService {
                 .totalOptions(options.size())
                 .realtimeAvailable(realtimeAvailable)
                 .weatherSummary(weather.suggestion)
+                .weatherCondition(weather.condition != null ? weather.condition.name() : null)
                 .temperatureCelsius(weather.tempCelsius)
                 .build();
     }
@@ -259,12 +260,21 @@ public class JourneyPlannerService {
                 : findNearestStopId(req.getDestLat(), req.getDestLon());
 
         // Punto 3: base oraria del viaggio e stato del flag google.search.
+        boolean isNow = (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
         java.time.Instant departureBase = resolveDepartureBase(req.getDepartureTime(), msgs);
+
+        // "Arrive by" mode: shift search window back by 45 min so found routes arrive near target time
+        if (req.isArriveBy() && !isNow) {
+            departureBase = departureBase.minus(45, java.time.temporal.ChronoUnit.MINUTES);
+            msgs.add(req.isItalian()
+                ? "ℹ️ Percorso pianificato per arrivare entro le " + req.getDepartureTime() + "."
+                : "ℹ️ Route planned to arrive by " + req.getDepartureTime() + ".");
+        }
+
         boolean useGoogle = googleApiSettings.isSearchEnabled();
 
         // Il ritardo ha senso solo per una ricerca "adesso": per un viaggio
         // futuro il ritardo attuale di un bus che gira ora non significa nulla.
-        boolean isNow = (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
 
 
         // --- Step 1: walk to bus stop ---
@@ -298,10 +308,10 @@ public class JourneyPlannerService {
 
         if (!direct.isEmpty()) {
             var line = direct.get(0);
-            lineLabel = line.getShortName() + " — " + line.getLongName();
+            lineLabel = line.getShortName() + " → " + line.getLongName();
             DelayInfo[] delayOut = { DelayInfo.none() };
             waitMin = waitMinutesForLine(nearestStop, line.getRouteId(), line.getShortName(),
-                    msgs, delayOut, departureBase, isNow);
+                    msgs, delayOut, departureBase, isNow, req.isItalian());
             busDelay = delayOut[0];
 
             java.time.Instant boarding = departureBase.plusSeconds(60L * waitMin);
@@ -315,18 +325,21 @@ public class JourneyPlannerService {
             busMetres = seg.metres();
 
             String tripId = line.getTripId();
+            StopSlice slice0 = stopSliceBetween(tripId, nearestStop, destStop);
             busLegs.add(JourneyLeg.builder().mode("BUS")
                     .from(fmtStop(nearestStop)).to(req.getDestName())
                     .durationMinutes(busMin).distanceMetres(busMetres)
                     .instruction(lineLabel)
-                    .stopCoords(stopCoordsBetween(tripId, nearestStop, destStop))
+                    .stopCoords(slice0.coords())
+                    .stopNames(slice0.names())
+                    .routeId(line.getRouteId())
                     .build());
         } else {
             Transfer t = findBestTransfer(nearestStop, destStop);
             if (t != null) {
                 DelayInfo[] delayOut = { DelayInfo.none() };
                 waitMin    = waitMinutesForLine(nearestStop, t.l1RouteId(), t.l1Short(),
-                        msgs, delayOut, departureBase, isNow);
+                        msgs, delayOut, departureBase, isNow, req.isItalian());
                 busDelay = delayOut[0];
 
                 java.time.Instant boarding1 = departureBase.plusSeconds(60L * waitMin);
@@ -340,7 +353,7 @@ public class JourneyPlannerService {
                 boolean liveAtTransfer = isNow && !atTransfer.isAfter(
                         java.time.Instant.now().plusSeconds(15 * 60));
                 int changeWait = waitMinutesForLine(t.stop(), t.l2RouteId(), t.l2Short(),
-                        msgs, null, atTransfer, liveAtTransfer);
+                        msgs, null, atTransfer, liveAtTransfer, req.isItalian());
 
                 java.time.Instant boarding2 = atTransfer.plusSeconds(60L * changeWait);
                 SegTime s2 = busTimeBySegments(t.l2TripId(), t.stop(), destStop,
@@ -355,21 +368,27 @@ public class JourneyPlannerService {
                 busMin    = l1Min + changeWait + l2Min;
                 busMetres = m1 + m2;
 
+                StopSlice slice1 = stopSliceBetween(t.l1TripId(), nearestStop, t.stop());
+                StopSlice slice2 = stopSliceBetween(t.l2TripId(), t.stop(), destStop);
                 busLegs.add(JourneyLeg.builder().mode("BUS")
                         .from(fmtStop(nearestStop)).to(fmtStop(t.stop()))
                         .durationMinutes(l1Min).distanceMetres(m1)
                         .instruction(t.l1Label())
-                        .stopCoords(stopCoordsBetween(t.l1TripId(), nearestStop, t.stop()))
+                        .stopCoords(slice1.coords())
+                        .stopNames(slice1.names())
+                        .routeId(t.l1RouteId())
                         .build());
                 busLegs.add(JourneyLeg.builder().mode("WAIT")
                         .from(fmtStop(t.stop())).to(fmtStop(t.stop()))
                         .durationMinutes(changeWait).distanceMetres(0.0)
-                        .instruction("Cambia a " + fmtStop(t.stop()) + " · prendi " + t.l2Label()).build());
+                        .instruction("Change at " + fmtStop(t.stop()) + " · take " + t.l2Label()).build());
                 busLegs.add(JourneyLeg.builder().mode("BUS")
                         .from(fmtStop(t.stop())).to(req.getDestName())
                         .durationMinutes(l2Min).distanceMetres(m2)
                         .instruction(t.l2Label())
-                        .stopCoords(stopCoordsBetween(t.l2TripId(), t.stop(), destStop))
+                        .stopCoords(slice2.coords())
+                        .stopNames(slice2.names())
+                        .routeId(t.l2RouteId())
                         .build());
             } else {
                 log.warn("BUS: nessuna linea diretta né cambio trovato tra {} e {}", nearestStop, destStop);
@@ -426,12 +445,16 @@ public class JourneyPlannerService {
 
     private JourneyOption planBike(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "bicycling");
-        if (r.isEmpty()) {
-            log.warn("BIKE: percorso reale non disponibile da Google — opzione esclusa");
-            return null;
-        }
-        double roadM = r.get().distanceMetres();
-        int dur = (int) Math.ceil(r.get().durationSeconds() / 60.0);
+        // Fallback to haversine × 1.25 (road factor) when Google is unavailable
+        double roadM = r.map(g -> (double) g.distanceMetres())
+                        .orElseGet(() -> {
+                            log.warn("BIKE: Google non disponibile — uso stima haversine");
+                            return haversineMetres(req.getOriginLat(), req.getOriginLon(),
+                                                   req.getDestLat(),   req.getDestLon()) * 1.25;
+                        });
+        // speed: ~15 km/h cycling
+        int dur = r.map(g -> (int) Math.ceil(g.durationSeconds() / 60.0))
+                   .orElse((int) Math.ceil(roadM / 1000.0 / 15.0 * 60));
         double cost = Math.round((bikeUnlock + dur * bikePerMin) * 100) / 100.0;
         return JourneyOption.builder()
                 .mode("BIKE").modeLabel("Elerent Bike Share")
@@ -451,11 +474,12 @@ public class JourneyPlannerService {
 
     private JourneyOption planScooter(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "bicycling");
-        if (r.isEmpty()) {
-            log.warn("SCOOTER: percorso reale non disponibile da Google — opzione esclusa");
-            return null;
-        }
-        double roadM = r.get().distanceMetres();
+        double roadM = r.map(g -> (double) g.distanceMetres())
+                        .orElseGet(() -> {
+                            log.warn("SCOOTER: Google non disponibile — uso stima haversine");
+                            return haversineMetres(req.getOriginLat(), req.getOriginLon(),
+                                                   req.getDestLat(),   req.getDestLon()) * 1.25;
+                        });
         int dur = (int) Math.ceil(roadM / 1000.0 / SPEED_SCOOTER * 60);
         double cost = Math.round((scooterUnlock + dur * scooterPerMin) * 100) / 100.0;
         return JourneyOption.builder()
@@ -476,12 +500,15 @@ public class JourneyPlannerService {
 
     private JourneyOption planWalk(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "walking");
-        if (r.isEmpty()) {
-            log.warn("WALK: percorso reale non disponibile da Google — opzione esclusa");
-            return null;                       // niente fallback in linea d'aria
-        }
-        double roadM = r.get().distanceMetres();
-        int dur = (int) Math.ceil(r.get().durationSeconds() / 60.0);
+        double roadM = r.map(g -> (double) g.distanceMetres())
+                        .orElseGet(() -> {
+                            log.warn("WALK: Google non disponibile — uso stima haversine");
+                            return haversineMetres(req.getOriginLat(), req.getOriginLon(),
+                                                   req.getDestLat(),   req.getDestLon()) * 1.3;
+                        });
+        // speed: ~5 km/h walking
+        int dur = r.map(g -> (int) Math.ceil(g.durationSeconds() / 60.0))
+                   .orElse((int) Math.ceil(roadM / 1000.0 / 5.0 * 60));
         return JourneyOption.builder()
                 .mode("WALK").modeLabel("Walking")
                 .durationMinutes(dur).distanceMetres(roadM)
@@ -612,8 +639,11 @@ public class JourneyPlannerService {
                 .orElse(id);
     }
 
-    private List<double[]> stopCoordsBetween(String tripId, String originStopId, String destStopId) {
-        if (tripId == null) return List.of();
+    /** Returns the slice of the trip's stops between origin and dest (inclusive), sorted by sequence. */
+    private record StopSlice(List<double[]> coords, List<String> names) {}
+
+    private StopSlice stopSliceBetween(String tripId, String originStopId, String destStopId) {
+        if (tripId == null) return new StopSlice(List.of(), List.of());
 
         var seq = new ArrayList<>(scheduledStopRepository.findByTripId(tripId));
         seq.sort(Comparator.comparingInt(it.unicas.omnimove.model.ScheduledStop::getStopSequence));
@@ -630,7 +660,7 @@ public class JourneyPlannerService {
             oi = indexOfStop(seq, originStopId);
             di = indexOfStop(seq, destStopId);
         }
-        if (oi < 0 || di < 0) return List.of();          // sequenza incoerente
+        if (oi < 0 || di < 0) return new StopSlice(List.of(), List.of());
 
         int from = Math.min(oi, di);
         int to   = Math.max(oi, di);
@@ -643,13 +673,28 @@ public class JourneyPlannerService {
         // the bus follows. Falls back to stop-to-stop when the route has no
         // shape (or the shape cannot be matched) — see roadPathAlong().
         List<double[]> road = roadPathAlong(tripId, legStops);
-        if (!road.isEmpty()) return road;
+        if (!road.isEmpty()) {
+            // Build stop names in travel order alongside the road coords
+            List<String> roadNames = new ArrayList<>();
+            for (String sid : legStops) roadNames.add(fmtStop(sid));
+            return new StopSlice(road, roadNames);
+        }
 
         List<double[]> coords = new ArrayList<>();
+        List<String>   names  = new ArrayList<>();
         for (String sid : legStops) {
             coords.add(new double[]{ getStopLat(sid), getStopLon(sid) });
+            names.add(fmtStop(sid));
         }
-        return coords;
+        return new StopSlice(coords, names);
+    }
+
+    private List<double[]> stopCoordsBetween(String tripId, String originStopId, String destStopId) {
+        return stopSliceBetween(tripId, originStopId, destStopId).coords();
+    }
+
+    private List<String> stopNamesBetween(String tripId, String originStopId, String destStopId) {
+        return stopSliceBetween(tripId, originStopId, destStopId).names();
     }
 
     /**
@@ -786,8 +831,8 @@ public class JourneyPlannerService {
         int m2 = (int) Math.ceil(x.getL2Sec() / 60.0);
         return new Transfer(
                 x.getTransferStop(),
-                x.getL1Short() + " — " + x.getL1Long(), m1,
-                x.getL2Short() + " — " + x.getL2Long(), m2,
+                x.getL1Short() + " → " + x.getL1Long(), m1,
+                x.getL2Short() + " → " + x.getL2Long(), m2,
                 m1 + m2,
                 x.getL2RouteId(), x.getL2Short(),
                 x.getL1RouteId(), x.getL1Short(),
@@ -805,7 +850,7 @@ public class JourneyPlannerService {
      */
     private int waitMinutesForLine(String stopId, String routeId, String routeShort,
                                    List<String> msgs, DelayInfo[] out,
-                                   java.time.Instant when, boolean useLive) {
+                                   java.time.Instant when, boolean useLive, boolean italian) {
         // useLive == false -> ricerca per un orario futuro: un bus tracciato ADESSO
         // non dice nulla su quel momento, quindi si va diritti all'orario di tabella.
         if (useLive) {
@@ -845,7 +890,10 @@ public class JourneyPlannerService {
                     // giusta (sotto), non l'ETA di un bus di un'altra linea.
                     if (msgs != null) {
                         String lineLabel = routeShort != null ? routeShort : routeId;
-                        msgs.add("\u2139\ufe0f No live bus for route " + lineLabel + " right now \u2014 "
+                        msgs.add(italian
+                            ? "\u2139\ufe0f Nessun bus in tempo reale per la linea " + lineLabel + " al momento \u2014 "
+                                + "attesa alla fermata " + fmtStop(stopId) + " stimata dall'orario."
+                            : "\u2139\ufe0f No live bus for route " + lineLabel + " right now \u2014 "
                                 + "wait time at " + fmtStop(stopId) + " estimated from the timetable.");
                     }
                     log.debug("waitMinutesForLine: nessun bus live per linea {} a {}, uso orario DB",

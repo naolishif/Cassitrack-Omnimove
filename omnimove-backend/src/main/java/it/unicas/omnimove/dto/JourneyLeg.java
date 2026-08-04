@@ -13,5 +13,7 @@ public class JourneyLeg {
     @JsonProperty("duration_minutes") private Integer durationMinutes;
     @JsonProperty("distance_metres") private Double distanceMetres;
     @JsonProperty("stop_coords")  private List<double[]> stopCoords;
+    @JsonProperty("stop_names")   private List<String>   stopNames;
     private String instruction;
+    @JsonProperty("route_id") private String routeId;
 }

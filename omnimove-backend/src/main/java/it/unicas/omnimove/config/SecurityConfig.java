@@ -38,6 +38,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/", "/error", "/omnimove-login.html", "/reset-password.html",
                                 "/favicon.ico", "/omnimove-login.css", "/omnimove-login.js",
+                                "/omnimove-i18n.js",
                                 "/reset-password.css","/reset-password.js", "/api/v1/auth/reset-page"
                         ).permitAll()
                         .requestMatchers(
