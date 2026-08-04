@@ -682,7 +682,8 @@
         document.querySelectorAll('.dm-subtab').forEach(b=>b.classList.remove('active'));
         if(btn) btn.classList.add('active');
         if(panelId === 'dm-panel-stops') loadStops();
-        else if(panelId === 'dm-panel-routes') loadRoutes();
+        else if(panelId === 'dm-panel-routes') loadRoutesAdmin();
+        else if(panelId === 'dm-panel-timetable'){ ttLoadOptions(); loadTimetable(); }
         // Buses now render through the US-01 registry UI (dmLoadBuses), not the
         // superseded bm* table. dmLoadRoutes() fills the route filter/assign lists.
         else if(panelId === 'dm-panel-buses'){
@@ -694,6 +695,8 @@
     // ── Data Management: stops CRUD (Postgres) ────────────────────────────────
     let stStops = [];
     let stEditId = null;   // null = adding a new stop, otherwise the stop id being edited
+    let stSearch = '';     // free-text query (id / name / description)
+    let stActiveOnly = ''; // '' = any, 'true' = active only, 'false' = inactive only
 
     async function loadStops(){
         const body = document.getElementById('stTableBody');
@@ -708,12 +711,25 @@
         }
     }
 
+    // Search + state filter, applied in AND over the in-memory list.
+    function stFiltered(){
+        const q = stSearch.trim().toLowerCase();
+        return stStops.filter(s=>{
+            if(stActiveOnly !== '' && String(s.active !== false) !== stActiveOnly) return false;
+            if(!q) return true;
+            return [s.id, s.name, s.description]
+                .some(f => String(f ?? '').toLowerCase().includes(q));
+        });
+    }
+
     function renderStopsAdmin(){
         const body = document.getElementById('stTableBody');
         if(!body) return;
+        const rows = stFiltered();
         if(!stStops.length){ body.innerHTML = `<tr><td colspan="6" class="bm-empty">No stops yet — use “＋ Add stop”.</td></tr>`; return; }
+        if(!rows.length){ body.innerHTML = `<tr><td colspan="6" class="bm-empty">No stops match your search.</td></tr>`; return; }
         body.innerHTML = '';
-        stStops.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(s=>{
+        rows.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(s=>{
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td class="bm-mono">${escHtml(s.id)}</td>
@@ -808,8 +824,13 @@
     // ── Data Management: routes CRUD (Postgres) ───────────────────────────────
     let rtRoutes = [];
     let rtEditId = null;   // null = adding a new route, otherwise the route id being edited
+    let rtSearch = '';     // free-text query (id / short name / long name)
+    let rtActiveOnly = ''; // '' = any, 'true' = active only, 'false' = inactive only
 
-    async function loadRoutes(){
+    // NOTE: named *Admin to avoid colliding with the analytics-filter loadRoutes()
+    // defined further down (a duplicate `function` name silently overwrites the
+    // earlier one, which is what broke this tab after the merge).
+    async function loadRoutesAdmin(){
         const body = document.getElementById('rtTableBody');
         if(body) body.innerHTML = `<tr><td colspan="6" class="bm-empty">Loading…</td></tr>`;
         try{
@@ -822,12 +843,25 @@
         }
     }
 
+    // Search + state filter, applied in AND over the in-memory list.
+    function rtFiltered(){
+        const q = rtSearch.trim().toLowerCase();
+        return rtRoutes.filter(rt=>{
+            if(rtActiveOnly !== '' && String(rt.active !== false) !== rtActiveOnly) return false;
+            if(!q) return true;
+            return [rt.id, rt.shortName, rt.longName]
+                .some(f => String(f ?? '').toLowerCase().includes(q));
+        });
+    }
+
     function renderRoutesAdmin(){
         const body = document.getElementById('rtTableBody');
         if(!body) return;
+        const rows = rtFiltered();
         if(!rtRoutes.length){ body.innerHTML = `<tr><td colspan="6" class="bm-empty">No routes yet — use “＋ Add route”.</td></tr>`; return; }
+        if(!rows.length){ body.innerHTML = `<tr><td colspan="6" class="bm-empty">No routes match your search.</td></tr>`; return; }
         body.innerHTML = '';
-        rtRoutes.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(rt=>{
+        rows.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id))).forEach(rt=>{
             const hex = rt.color ? ('#'+rt.color) : null;
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -845,6 +879,18 @@
         applyDynStyles(body);   // colour swatches via data-bg (CSP-safe)
     }
 
+    /** Bus dropdown for the line's first journey (trips.bus_id is NOT NULL). */
+    async function rtLoadBusOptions(){
+        const sel = document.getElementById('rtBus');
+        if(!sel || sel.options.length) return;
+        try{
+            const r = await fetch(`${API}/buses`, {headers:{'Accept':'application/json'}});
+            if(!r.ok) return;
+            const buses = await r.json();
+            sel.innerHTML = buses.map(b=>`<option value="${escHtml(b.busId)}">${escHtml(b.targa)}</option>`).join('');
+        }catch(e){ /* leave empty */ }
+    }
+
     function setRtMsg(txt, ok){
         const el = document.getElementById('rtFormMsg');
         if(!el) return;
@@ -853,9 +899,24 @@
         el.classList.toggle('ok',  !!txt && !!ok);
     }
 
-    function openRouteForm(route){
+    async function openRouteForm(route){
         rtEditId = route ? route.id : null;
-        document.getElementById('rtFormTitle').textContent = route ? `Edit route ${route.id}` : 'New route';
+        document.getElementById('rtFormTitle').textContent =
+            route ? `Edit route ${route.id}` : 'New route + its first run';
+
+        // The itinerary is defined only when creating: editing it later would
+        // rewrite the schedule of every run already on this line.
+        const itn = document.getElementById('rtItinerary');
+        const busField = document.getElementById('rtBusField');
+        if(itn) itn.hidden = !!route;
+        if(busField) busField.hidden = !!route;
+        if(!route){
+            await ttLoadStopOptions();
+            await rtLoadBusOptions();
+            const list = document.getElementById('rtStops');
+            if(list){ list.innerHTML = ''; itnAddStop('rtStops'); itnAddStop('rtStops'); }
+        }
+
         const idEl = document.getElementById('rtId');
         idEl.value = route ? route.id : '';
         idEl.disabled = !!route;   // id is the primary key → not editable on update
@@ -886,6 +947,18 @@
         if(!payload.shortName || !payload.shortName.trim()){ setRtMsg('Short name is required.'); return; }
 
         const editing = rtEditId != null;
+
+        // Creating: attach the itinerary + the bus of the first journey. The
+        // backend stores the path as that journey's scheduled stops.
+        if(!editing){
+            payload.stops = itnCollect('rtStops');
+            payload.busId = parseInt(document.getElementById('rtBus').value, 10) || null;
+            if(payload.stops.length < 2){ setRtMsg('An itinerary needs at least two stops.'); return; }
+            if(payload.stops.some(s=>!s.stopId || !s.arrival)){
+                setRtMsg('Every stop needs both a stop and a time.'); return;
+            }
+            if(!payload.busId){ setRtMsg('Pick the bus for the first journey.'); return; }
+        }
         const url    = editing ? `${API}/routes/${encodeURIComponent(rtEditId)}` : `${API}/routes`;
         const method = editing ? 'PUT' : 'POST';
         setRtMsg('Saving…', true);
@@ -895,7 +968,7 @@
                 headers:{'Content-Type':'application/json'},
                 body: JSON.stringify(payload)
             });
-            if(r.ok){ closeRouteForm(); await loadRoutes(); }
+            if(r.ok){ closeRouteForm(); await loadRoutesAdmin(); }
             else{
                 let msg = 'Save failed.';
                 try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
@@ -909,10 +982,358 @@
         if(!window.confirm(`Delete route ${route ? route.id : id}? This cannot be undone.`)) return;
         try{
             const r = await fetch(`${API}/routes/${encodeURIComponent(id)}`, {method:'DELETE'});
-            if(r.ok){ await loadRoutes(); }
+            if(r.ok){ await loadRoutesAdmin(); }
             else{
                 let msg = 'Delete failed.';
                 try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
+                window.alert(msg);
+            }
+        }catch(e){ window.alert('Network error while deleting.'); }
+    }
+
+    // ── Data Management: timetable (trips + stop times) ───────────────────────
+    // A run is one journey of a line at a given departure. Creating one copies
+    // the line's stop sequence and shifts every time — the same thing the V5
+    // migration did by hand, done from the UI instead.
+    let ttTrips = [];
+    let ttOpenTripId = null;   // run whose stop times are being edited
+
+    async function loadTimetable(){
+        const body = document.getElementById('ttTableBody');
+        if(body) body.innerHTML = `<tr><td colspan="7" class="bm-empty">Loading…</td></tr>`;
+        const params = new URLSearchParams();
+        const s = document.getElementById('ttSearch');
+        const fr = document.getElementById('ttFilterRoute');
+        const fb = document.getElementById('ttFilterBus');
+        if(s && s.value.trim()) params.set('search', s.value.trim());
+        if(fr && fr.value) params.set('routeId', fr.value);
+        if(fb && fb.value) params.set('busId', fb.value);
+        try{
+            const r = await fetch(`${API}/timetable?${params.toString()}`, {headers:{'Accept':'application/json'}});
+            if(!r.ok) throw new Error(r.status);
+            ttTrips = await r.json();
+            renderTimetable();
+        }catch(e){
+            if(body) body.innerHTML = `<tr><td colspan="7" class="bm-empty">Failed to load the timetable.</td></tr>`;
+        }
+    }
+
+    function renderTimetable(){
+        const body = document.getElementById('ttTableBody');
+        if(!body) return;
+        if(!ttTrips.length){ body.innerHTML = `<tr><td colspan="7" class="bm-empty">No runs match — or none exist yet.</td></tr>`; return; }
+        body.innerHTML = ttTrips.map(t => `
+            <tr>
+                <td class="bm-mono">${escHtml(t.tripId)}</td>
+                <td>${escHtml(t.routeLabel)||'—'}</td>
+                <td class="bm-mono">${escHtml(t.targa)||'—'}</td>
+                <td class="bm-mono">${escHtml(t.departure)}</td>
+                <td class="bm-mono">${escHtml(t.arrival)}</td>
+                <td>${t.stopCount}</td>
+                <td class="bm-actions-col">
+                    <button type="button" class="bm-row-btn" data-act="times" data-id="${escHtml(t.tripId)}">Times</button>
+                    <button type="button" class="bm-row-btn danger" data-act="del" data-id="${escHtml(t.tripId)}">Delete</button>
+                </td>
+            </tr>`).join('');
+    }
+
+    /** Fill the line/bus dropdowns (filters + create form) from existing data. */
+    async function ttLoadOptions(){
+        try{
+            const [routesRes, busesRes] = await Promise.all([
+                fetch(`${API}/buses/route-options`, {headers:{'Accept':'application/json'}}),
+                fetch(`${API}/buses`, {headers:{'Accept':'application/json'}})
+            ]);
+            const routes = routesRes.ok ? await routesRes.json() : [];
+            const buses  = busesRes.ok  ? await busesRes.json()  : [];
+
+            const routeOpts = routes.map(rt=>`<option value="${escHtml(rt.id)}">${escHtml(rt.label)}</option>`).join('');
+            const busOpts   = buses.map(b=>`<option value="${escHtml(b.busId)}">${escHtml(b.targa)}</option>`).join('');
+
+            const fr = document.getElementById('ttFilterRoute');
+            const fb = document.getElementById('ttFilterBus');
+            const cr = document.getElementById('ttRoute');
+            const cb = document.getElementById('ttBus');
+            if(fr) fr.innerHTML = '<option value="">All lines</option>' + routeOpts;
+            if(fb) fb.innerHTML = '<option value="">All buses</option>' + busOpts;
+            if(cr) cr.innerHTML = routeOpts;
+            if(cb) cb.innerHTML = busOpts;
+        }catch(e){ /* dropdowns stay empty; the table still works */ }
+    }
+
+    function ttSetMsg(id, txt, ok){
+        const el = document.getElementById(id);
+        if(!el) return;
+        el.textContent = txt || '';
+        el.classList.toggle('err', !!txt && !ok);
+        el.classList.toggle('ok',  !!txt && !!ok);
+    }
+
+    // ── CSV export (shared) ───────────────────────────────────────────────────
+    // Built in the browser from the rows already on screen, so the file always
+    // matches what you are looking at (filters included) and no new endpoint is
+    // exposed. Excel-friendly on purpose: a ';' separator and a UTF-8 BOM, or
+    // Excel with Italian locale puts every row in one column and mangles accents.
+    function csvCell(value){
+        if(value === null || value === undefined) return '';
+        const s = String(value);
+        // Quote when the value could break the row, and double any inner quote.
+        return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+
+    /**
+     * @param filename downloaded file name
+     * @param columns  [{header, get}] — get(row) returns the cell value
+     * @param rows     array of objects to export
+     */
+    function downloadCsv(filename, columns, rows){
+        if(!rows || !rows.length){ window.alert('Nothing to export — the table is empty.'); return; }
+        const lines = [columns.map(c => csvCell(c.header)).join(';')];
+        rows.forEach(r => lines.push(columns.map(c => csvCell(c.get(r))).join(';')));
+        const blob = new Blob(['﻿' + lines.join('\r\n')],
+                              {type: 'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    /** Timestamp suffix so repeated exports don't overwrite each other. */
+    function csvStamp(){
+        const d = new Date(), p = n => String(n).padStart(2,'0');
+        return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+    }
+
+    function exportBusesCsv(){
+        downloadCsv(`buses-${csvStamp()}.csv`, [
+            {header:'Bus ID',      get:b=>b.busId},
+            {header:'Plate',       get:b=>b.targa},
+            {header:'Route',       get:b=>b.routeName},
+            {header:'Route live',  get:b=>b.routeLive === true ? 'yes' : b.routeLive === false ? 'scheduled' : ''},
+            {header:'Capacity',    get:b=>b.numeroPosti},
+            {header:'Wheelchair',  get:b=>b.wheelchairAccessible ? 'yes' : 'no'},
+            {header:'Status',      get:b=>b.status},
+            {header:'Antenna ID',  get:b=>b.currentVehicleId},
+            {header:'On map',      get:b=>b.mapVisible ? 'yes' : 'no'}
+        ], dmBuses);
+    }
+
+    function exportStopsCsv(){
+        downloadCsv(`stops-${csvStamp()}.csv`, [
+            {header:'Stop ID',     get:s=>s.id},
+            {header:'Name',        get:s=>s.name},
+            {header:'Latitude',    get:s=>s.lat},
+            {header:'Longitude',   get:s=>s.lon},
+            {header:'Active',      get:s=>s.active === false ? 'no' : 'yes'},
+            {header:'Description', get:s=>s.description}
+        ], stFiltered());          // what the table currently shows
+    }
+
+    function exportRoutesCsv(){
+        downloadCsv(`routes-${csvStamp()}.csv`, [
+            {header:'Route ID',   get:r=>r.id},
+            {header:'Short name', get:r=>r.shortName},
+            {header:'Long name',  get:r=>r.longName},
+            {header:'Colour',     get:r=>r.color},
+            {header:'Active',     get:r=>r.active === false ? 'no' : 'yes'}
+        ], rtFiltered());
+    }
+
+    function exportTimetableCsv(){
+        downloadCsv(`timetable-${csvStamp()}.csv`, [
+            {header:'Run ID',   get:t=>t.tripId},
+            {header:'Line',     get:t=>t.routeLabel},
+            {header:'Bus',      get:t=>t.targa},
+            {header:'Departs',  get:t=>t.departure},
+            {header:'Arrives',  get:t=>t.arrival},
+            {header:'Stops',    get:t=>t.stopCount}
+        ], ttTrips);
+    }
+
+    /**
+     * Detailed timetable export: one row per run AND stop, with arrival times.
+     * The rows aren't in the browser (the table only holds summaries), so they
+     * are fetched with the filters currently applied.
+     */
+    async function exportStopTimesCsv(){
+        const params = new URLSearchParams();
+        const s  = document.getElementById('ttSearch');
+        const fr = document.getElementById('ttFilterRoute');
+        const fb = document.getElementById('ttFilterBus');
+        if(s && s.value.trim()) params.set('search', s.value.trim());
+        if(fr && fr.value) params.set('routeId', fr.value);
+        if(fb && fb.value) params.set('busId', fb.value);
+        try{
+            const r = await fetch(`${API}/timetable/stop-times?${params.toString()}`,
+                                  {headers:{'Accept':'application/json'}});
+            if(!r.ok) throw new Error(r.status);
+            const rows = await r.json();
+            downloadCsv(`stop-times-${csvStamp()}.csv`, [
+                {header:'Run ID',    get:x=>x.tripId},
+                {header:'Line',      get:x=>x.routeLabel},
+                {header:'Bus',       get:x=>x.targa},
+                {header:'Stop #',    get:x=>x.sequence},
+                {header:'Stop ID',   get:x=>x.stopId},
+                {header:'Stop name', get:x=>x.stopName},
+                {header:'Arrival',   get:x=>x.arrival}
+            ], rows);
+        }catch(e){
+            window.alert('Could not build the detailed timetable export.');
+        }
+    }
+
+    // ── Itinerary editor (shared) ─────────────────────────────────────────────
+    // Used by the Routes form to define a line's path. A run never defines its
+    // own stops: it inherits the line's itinerary.
+    let ttStopOptions = '';   // <option> list of every stop, built once
+
+    async function ttLoadStopOptions(){
+        if(ttStopOptions) return;
+        try{
+            const r = await fetch(`${API}/stops`, {headers:{'Accept':'application/json'}});
+            if(!r.ok) return;
+            const stops = await r.json();
+            ttStopOptions = stops
+                .slice()
+                .sort((a,b)=>String(a.name||a.id).localeCompare(String(b.name||b.id)))
+                .map(s=>`<option value="${escHtml(s.id)}">${escHtml(s.name||s.id)}</option>`)
+                .join('');
+        }catch(e){ /* leave empty; the row will show no options */ }
+    }
+
+    /** Append one editable call to a list. Times default to +2 min after the last. */
+    function itnAddStop(listId){
+        const list = document.getElementById(listId);
+        if(!list) return;
+        const rows = list.querySelectorAll('.tt-manual-row');
+        let nextTime = '08:00';
+        if(rows.length){
+            const last = rows[rows.length-1].querySelector('.tt-time').value || '08:00';
+            const [h,m] = last.split(':').map(Number);
+            const t = (h*60 + m + 2) % (24*60);
+            nextTime = String(Math.floor(t/60)).padStart(2,'0') + ':' + String(t%60).padStart(2,'0');
+        }
+        const row = document.createElement('div');
+        row.className = 'tt-stop-row tt-manual-row';
+        row.innerHTML = `
+            <span class="tt-seq"></span>
+            <select class="bm-input tt-stop-select">${ttStopOptions}</select>
+            <input type="time" class="bm-input tt-time" value="${nextTime}">
+            <button type="button" class="bm-row-btn danger tt-del-stop" title="Remove this stop">✕</button>`;
+        list.appendChild(row);
+        itnRenumber(listId);
+    }
+
+    function itnRenumber(listId){
+        document.querySelectorAll('#'+listId+' .tt-manual-row').forEach((r,i)=>{
+            r.querySelector('.tt-seq').textContent = (i+1);
+        });
+    }
+
+    /** Read an itinerary editor into the payload shape the backend expects. */
+    function itnCollect(listId){
+        return Array.from(document.querySelectorAll('#'+listId+' .tt-manual-row')).map(r=>({
+            stopId:  r.querySelector('.tt-stop-select').value,
+            arrival: r.querySelector('.tt-time').value
+        }));
+    }
+
+    async function ttCreateRun(){
+        const payload = {
+            routeId:   document.getElementById('ttRoute').value,
+            busId:     parseInt(document.getElementById('ttBus').value, 10),
+            departure: document.getElementById('ttDeparture').value
+        };
+        if(!payload.routeId){ ttSetMsg('ttFormMsg', 'Pick a line.'); return; }
+        if(!(payload.busId > 0)){ ttSetMsg('ttFormMsg', 'Pick a bus.'); return; }
+        if(!payload.departure){ ttSetMsg('ttFormMsg', 'Pick a departure time.'); return; }
+        ttSetMsg('ttFormMsg', 'Creating…', true);
+        try{
+            const r = await fetch(`${API}/timetable`, {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if(r.ok){
+                document.getElementById('ttForm').hidden = true;
+                await loadTimetable();
+            }else{
+                let msg = 'Could not create the run.';
+                try{ const j = await r.json(); if(j && (j.error||j.message)) msg = j.error||j.message; }catch(_){}
+                ttSetMsg('ttFormMsg', msg);
+            }
+        }catch(e){ ttSetMsg('ttFormMsg', 'Network error while creating the run.'); }
+    }
+
+    /** Open the stop-by-stop time editor for one run. */
+    async function ttOpenTimes(tripId){
+        const box = document.getElementById('ttDetail');
+        const list = document.getElementById('ttStops');
+        if(!box || !list) return;
+        ttOpenTripId = tripId;
+        document.getElementById('ttForm').hidden = true;
+        box.hidden = false;
+        ttSetMsg('ttDetailMsg', '');
+        list.innerHTML = '<div class="bm-msg">Loading…</div>';
+        try{
+            const r = await fetch(`${API}/timetable/${encodeURIComponent(tripId)}`, {headers:{'Accept':'application/json'}});
+            if(!r.ok) throw new Error(r.status);
+            const d = await r.json();
+            document.getElementById('ttDetailTitle').textContent =
+                `Run ${d.tripId} · ${d.routeLabel||''} · bus ${d.targa||'—'}`;
+            list.innerHTML = d.stops.map(s=>`
+                <div class="tt-stop-row">
+                    <span class="tt-seq">${s.sequence}</span>
+                    <span class="tt-stop-name">${escHtml(s.stopName)}</span>
+                    <input type="time" class="bm-input tt-time" value="${escHtml(s.arrival)}"
+                           data-seq="${s.sequence}" data-stop-id="${escHtml(s.stopId)}">
+                </div>`).join('');
+        }catch(e){
+            list.innerHTML = '<div class="bm-msg err">Could not load the stop times.</div>';
+        }
+    }
+
+    async function ttSaveTimes(){
+        if(!ttOpenTripId) return;
+        const inputs = document.querySelectorAll('#ttStops .tt-time');
+        const stops = Array.from(inputs).map(i=>({
+            stopId:   i.dataset.stopId,
+            sequence: parseInt(i.dataset.seq, 10),
+            arrival:  i.value
+        }));
+        if(stops.some(s=>!s.arrival)){ ttSetMsg('ttDetailMsg', 'Every stop needs a time.'); return; }
+        ttSetMsg('ttDetailMsg', 'Saving…', true);
+        try{
+            const r = await fetch(`${API}/timetable/${encodeURIComponent(ttOpenTripId)}/times`, {
+                method:'PUT',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({stops})
+            });
+            if(r.ok){
+                ttSetMsg('ttDetailMsg', 'Saved.', true);
+                await loadTimetable();
+            }else{
+                let msg = 'Could not save the times.';
+                try{ const j = await r.json(); if(j && (j.error||j.message)) msg = j.error||j.message; }catch(_){}
+                ttSetMsg('ttDetailMsg', msg);
+            }
+        }catch(e){ ttSetMsg('ttDetailMsg', 'Network error while saving.'); }
+    }
+
+    async function ttDeleteRun(tripId){
+        if(!window.confirm(`Delete run ${tripId}? Its stop times will be removed too.`)) return;
+        try{
+            const r = await fetch(`${API}/timetable/${encodeURIComponent(tripId)}`, {method:'DELETE'});
+            if(r.ok){
+                if(ttOpenTripId === tripId){ document.getElementById('ttDetail').hidden = true; ttOpenTripId = null; }
+                await loadTimetable();
+            }else{
+                let msg = 'Delete failed.';
+                try{ const j = await r.json(); if(j && (j.error||j.message)) msg = j.error||j.message; }catch(_){}
                 window.alert(msg);
             }
         }catch(e){ window.alert('Network error while deleting.'); }
@@ -1472,6 +1893,8 @@
     if(dmTabStops) dmTabStops.addEventListener('click', e => switchDmPanel('dm-panel-stops', e.currentTarget));
     const dmTabRoutes = document.getElementById('dmTabRoutes');
     if(dmTabRoutes) dmTabRoutes.addEventListener('click', e => switchDmPanel('dm-panel-routes', e.currentTarget));
+    const dmTabTimetable = document.getElementById('dmTabTimetable');
+    if(dmTabTimetable) dmTabTimetable.addEventListener('click', e => switchDmPanel('dm-panel-timetable', e.currentTarget));
 
     // Data Management > buses CRUD is wired further down (dm* handlers) — the
     // superseded bm* inline-form wiring was removed with its panel.
@@ -1490,6 +1913,101 @@
         const id = btn.dataset.id;   // stop id is a string
         if(btn.dataset.act === 'edit'){ const s = stStops.find(x=>x.id===id); if(s) openStopForm(s); }
         else if(btn.dataset.act === 'del'){ deleteStop(id); }
+    });
+
+    // Data Management > stops search/filter (client-side → re-render only)
+    const stSearchEl = document.getElementById('stSearch');
+    if(stSearchEl) stSearchEl.addEventListener('input', e => { stSearch = e.target.value; renderStopsAdmin(); });
+    const stFilterActiveEl = document.getElementById('stFilterActive');
+    if(stFilterActiveEl) stFilterActiveEl.addEventListener('change', e => { stActiveOnly = e.target.value; renderStopsAdmin(); });
+    const stResetBtn = document.getElementById('stResetBtn');
+    if(stResetBtn) stResetBtn.addEventListener('click', () => {
+        stSearch = ''; stActiveOnly = '';
+        if(stSearchEl) stSearchEl.value = '';
+        if(stFilterActiveEl) stFilterActiveEl.value = '';
+        renderStopsAdmin();
+    });
+
+    // Data Management > routes search/filter (client-side → re-render only)
+    const rtSearchEl = document.getElementById('rtSearch');
+    if(rtSearchEl) rtSearchEl.addEventListener('input', e => { rtSearch = e.target.value; renderRoutesAdmin(); });
+    const rtFilterActiveEl = document.getElementById('rtFilterActive');
+    if(rtFilterActiveEl) rtFilterActiveEl.addEventListener('change', e => { rtActiveOnly = e.target.value; renderRoutesAdmin(); });
+    const rtResetBtn = document.getElementById('rtResetBtn');
+    if(rtResetBtn) rtResetBtn.addEventListener('click', () => {
+        rtSearch = ''; rtActiveOnly = '';
+        if(rtSearchEl) rtSearchEl.value = '';
+        if(rtFilterActiveEl) rtFilterActiveEl.value = '';
+        renderRoutesAdmin();
+    });
+
+    // Data Management > timetable
+    const ttSearchEl = document.getElementById('ttSearch');
+    let ttSearchTimer = null;
+    if(ttSearchEl) ttSearchEl.addEventListener('input', () => {
+        clearTimeout(ttSearchTimer);                 // debounce: filtering is server-side
+        ttSearchTimer = setTimeout(loadTimetable, 250);
+    });
+    const ttFilterRouteEl = document.getElementById('ttFilterRoute');
+    if(ttFilterRouteEl) ttFilterRouteEl.addEventListener('change', loadTimetable);
+    const ttFilterBusEl = document.getElementById('ttFilterBus');
+    if(ttFilterBusEl) ttFilterBusEl.addEventListener('change', loadTimetable);
+    const ttResetBtn = document.getElementById('ttResetBtn');
+    if(ttResetBtn) ttResetBtn.addEventListener('click', () => {
+        if(ttSearchEl) ttSearchEl.value = '';
+        if(ttFilterRouteEl) ttFilterRouteEl.value = '';
+        if(ttFilterBusEl) ttFilterBusEl.value = '';
+        loadTimetable();
+    });
+    const ttAddBtn = document.getElementById('ttAddBtn');
+    if(ttAddBtn) ttAddBtn.addEventListener('click', () => {
+        document.getElementById('ttDetail').hidden = true;
+        document.getElementById('ttForm').hidden = false;
+        ttSetMsg('ttFormMsg',
+            "The stops come from the line's itinerary — a run only sets when and with which bus.", true);
+    });
+    const ttCancelBtn = document.getElementById('ttCancelBtn');
+    if(ttCancelBtn) ttCancelBtn.addEventListener('click', () => {
+        document.getElementById('ttForm').hidden = true;
+    });
+    const ttSaveBtn = document.getElementById('ttSaveBtn');
+    if(ttSaveBtn) ttSaveBtn.addEventListener('click', ttCreateRun);
+    // CSV export — one button per panel, exporting the rows currently shown
+    const dmExportBtn = document.getElementById('dmExportBtn');
+    if(dmExportBtn) dmExportBtn.addEventListener('click', exportBusesCsv);
+    const stExportBtn = document.getElementById('stExportBtn');
+    if(stExportBtn) stExportBtn.addEventListener('click', exportStopsCsv);
+    const rtExportBtn = document.getElementById('rtExportBtn');
+    if(rtExportBtn) rtExportBtn.addEventListener('click', exportRoutesCsv);
+    const ttExportBtn = document.getElementById('ttExportBtn');
+    if(ttExportBtn) ttExportBtn.addEventListener('click', exportTimetableCsv);
+    const ttExportStopsBtn = document.getElementById('ttExportStopsBtn');
+    if(ttExportStopsBtn) ttExportStopsBtn.addEventListener('click', exportStopTimesCsv);
+
+    // Routes > itinerary editor (defines the line's path on create)
+    const rtAddStopBtn = document.getElementById('rtAddStopBtn');
+    if(rtAddStopBtn) rtAddStopBtn.addEventListener('click', () => itnAddStop('rtStops'));
+    const rtStopsEl = document.getElementById('rtStops');
+    if(rtStopsEl) rtStopsEl.addEventListener('click', e => {
+        const del = e.target.closest('.tt-del-stop');
+        if(!del) return;
+        del.closest('.tt-manual-row').remove();
+        itnRenumber('rtStops');
+    });
+    const ttDetailCloseBtn = document.getElementById('ttDetailCloseBtn');
+    if(ttDetailCloseBtn) ttDetailCloseBtn.addEventListener('click', () => {
+        document.getElementById('ttDetail').hidden = true;
+        ttOpenTripId = null;
+    });
+    const ttTimesSaveBtn = document.getElementById('ttTimesSaveBtn');
+    if(ttTimesSaveBtn) ttTimesSaveBtn.addEventListener('click', ttSaveTimes);
+    const ttTableBody = document.getElementById('ttTableBody');
+    if(ttTableBody) ttTableBody.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-act]');
+        if(!btn) return;
+        const id = btn.dataset.id;
+        if(btn.dataset.act === 'times') ttOpenTimes(id);
+        else if(btn.dataset.act === 'del') ttDeleteRun(id);
     });
 
     // Data Management > routes CRUD
@@ -1569,11 +2087,10 @@
                 .map(rt => `<option value="${escHtml(rt.id)}">${escHtml(rt.label)}</option>`)
                 .join('');
 
+            // Only the filter dropdown remains — the drawer no longer lets you
+            // assign a route, since the table derives it from the timetable.
             document.getElementById('dmFilterRoute').innerHTML =
-                '<option value="">All routes</option><option value="UNASSIGNED">Unassigned</option>' + options;
-
-            document.getElementById('dmRoute').innerHTML =
-                '<option value="">— Unassigned —</option>' + options;
+                '<option value="">All routes</option><option value="UNASSIGNED">No trips</option>' + options;
         } catch (e) {
             console.warn('Could not load route options', e);
         }
@@ -1637,7 +2154,25 @@
         return `<span class="dm-pill ${cls}">${label}</span>`;
     }
 
+    /**
+     * Route cell. The value is derived server-side from the timetable
+     * (antenna → bus → trip in service now), so it is never a stale manual
+     * assignment:
+     *   routeLive === true  → the line the bus is running right now
+     *   routeLive === false → outside service hours: the lines it serves per
+     *                         the timetable, shown muted
+     *   no route at all     → the bus has no trips assigned
+     */
+    function dmRouteCell(b) {
+        if (!b.routeName) return '<span class="dm-muted">No trips</span>';
+        if (b.routeLive) return escHtml(b.routeName);
+        return `<span class="dm-muted" title="Not in service now — lines from the timetable">${escHtml(b.routeName)} <span class="dm-route-tag">scheduled</span></span>`;
+    }
+
+    let dmBuses = [];   // last rendered rows — reused by the CSV export
+
     function dmRenderTable(buses) {
+        dmBuses = buses || [];
         const body = document.getElementById('dmTableBody');
         const count = document.getElementById('dmCount');
 
@@ -1654,7 +2189,7 @@
         <tr>
             <td class="dm-muted">#${b.busId}</td>
             <td class="dm-plate">${escHtml(b.targa)}${b.wheelchairAccessible ? ' ♿' : ''}</td>
-            <td>${b.routeName ? escHtml(b.routeName) : '<span class="dm-muted">Unassigned</span>'}</td>
+            <td>${dmRouteCell(b)}</td>
             <td class="dm-num">${b.numeroPosti}</td>
             <td>${dmStatusPill(b.status)}</td>
             <td>${dmLivePill(b)}</td>
@@ -1696,7 +2231,6 @@
         document.getElementById('dmDrawerTitle').textContent = 'New bus';
         document.getElementById('dmTarga').value      = '';
         document.getElementById('dmCapacity').value   = '';
-        document.getElementById('dmRoute').value      = '';
         document.getElementById('dmStatus').value     = 'ACTIVE';
         document.getElementById('dmVehicleId').value  = '';
         document.getElementById('dmAccessible').checked = false;
@@ -1715,7 +2249,6 @@
             document.getElementById('dmDrawerTitle').textContent = 'Edit bus ' + b.targa;
             document.getElementById('dmTarga').value      = b.targa || '';
             document.getElementById('dmCapacity').value   = b.numeroPosti ?? '';
-            document.getElementById('dmRoute').value      = b.routeId || '';
             document.getElementById('dmStatus').value     = b.status || 'ACTIVE';
             document.getElementById('dmVehicleId').value  = b.currentVehicleId || '';
             document.getElementById('dmAccessible').checked = !!b.wheelchairAccessible;
@@ -1751,7 +2284,7 @@
         const payload = {
             targa:                targa,
             numeroPosti:          capacity,
-            routeId:              document.getElementById('dmRoute').value || null,
+            // routeId intentionally omitted: derived server-side, not editable.
             status:               document.getElementById('dmStatus').value,
             currentVehicleId:     document.getElementById('dmVehicleId').value.trim() || null,
             wheelchairAccessible: document.getElementById('dmAccessible').checked,
@@ -1833,7 +2366,13 @@
         try {
             const r = await fetch(`${API}/buses/${id}`, { method: 'DELETE' });
             if (r.status === 403) { alert('You need FLEET_MANAGER rights to delete buses.'); return; }
-            if (!r.ok && r.status !== 204) { alert(`Delete failed (${r.status}).`); return; }
+            if (!r.ok && r.status !== 204) {
+                // The server explains *why* a delete is refused (e.g. "assigned to
+                // 24 trips"). Show that instead of a bare status code.
+                const data = await r.json().catch(() => ({}));
+                alert(data.message || data.error || `Delete failed (${r.status}).`);
+                return;
+            }
             dmCloseConfirm();
             dmLoadBuses();
         } catch (e) {

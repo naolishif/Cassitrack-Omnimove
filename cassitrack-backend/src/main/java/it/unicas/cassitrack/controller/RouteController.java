@@ -7,10 +7,12 @@ import it.unicas.cassitrack.repository.RouteShapeRepository;
 import it.unicas.cassitrack.repository.ScheduledStopRepository;
 import it.unicas.cassitrack.repository.StopRepository;
 import it.unicas.cassitrack.repository.TripRepository;
+import it.unicas.cassitrack.service.TimetableService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -26,6 +28,7 @@ public class RouteController {
     private final ScheduledStopRepository scheduledStopRepository;
     private final StopRepository stopRepository;
     private final TripRepository tripRepository;
+    private final TimetableService timetableService;
 
     private static final Pattern ROUTE_ID_RE = Pattern.compile("^[A-Za-z0-9_\\-]{1,50}$");
     private static final Pattern COLOR_RE    = Pattern.compile("^[0-9A-Fa-f]{6}$");
@@ -85,9 +88,23 @@ public class RouteController {
     // public (map geometry for OMNIMOVE); listForManagement returns raw records.
     // ─────────────────────────────────────────────────────────────────────────
 
-    /** Editable fields accepted from the client. */
+    /**
+     * Editable fields accepted from the client.
+     *
+     * On CREATE the caller may also describe the line's itinerary: the ordered
+     * stops plus the bus running its first journey. The schema has no table for
+     * "the stops of a line" — that information only exists inside a trip's
+     * scheduled_stops, and the rest of the system reads it back through
+     * findRepresentativeSequence(). So defining a line's path means creating
+     * its first run, which we do here in the same transaction.
+     *
+     * On UPDATE these fields are ignored: changing an existing line's itinerary
+     * would silently rewrite the schedule of every run on it.
+     */
     public record RouteRequest(String id, String shortName, String longName,
-                               String color, Boolean active) {}
+                               String color, Boolean active,
+                               Integer busId,
+                               List<TimetableService.CreateTripRequest.ManualStop> stops) {}
 
     private static ResponseEntity<?> err(HttpStatus status, String msg) {
         return ResponseEntity.status(status).body(Map.of("error", msg));
@@ -98,7 +115,10 @@ public class RouteController {
         return routeRepository.findAll(Sort.by(Sort.Direction.ASC, "id"));
     }
 
+    // @Transactional: keeps each check-then-write pair (existsById → save,
+    // countByRouteId → delete) atomic against concurrent edits.
     @PostMapping
+    @Transactional
     public ResponseEntity<?> createRoute(@RequestBody RouteRequest req) {
         String id    = req.id() == null ? null : req.id().trim();
         String color = normalizeColor(req.color());
@@ -106,13 +126,35 @@ public class RouteController {
         if (bad != null) return err(HttpStatus.BAD_REQUEST, bad);
         if (routeRepository.existsById(id))
             return err(HttpStatus.CONFLICT, "A route with id '" + id + "' already exists.");
+
+        boolean withRun = req.stops() != null && !req.stops().isEmpty();
+
+        // Validate BEFORE the first write. A `return err(...)` after save()
+        // would end the method normally, so the transaction would COMMIT and
+        // leave a line with no run — i.e. a line with no path at all. Only a
+        // thrown exception rolls back, hence this check comes first.
+        if (withRun && req.busId() == null)
+            return err(HttpStatus.BAD_REQUEST,
+                    "Pick the bus that runs this line's first journey.");
+
         Route r = new Route();
         r.setId(id);
         applyRoute(r, req, color);
-        return ResponseEntity.status(HttpStatus.CREATED).body(routeRepository.save(r));
+        routeRepository.save(r);
+
+        // Materialise the itinerary as the line's first run, in this same
+        // transaction. create() validates the stops and — importantly here —
+        // refuses if the bus is already running another trip in that window;
+        // it throws, so the line is rolled back with it.
+        if (withRun) {
+            timetableService.create(new TimetableService.CreateTripRequest(
+                    id, req.busId(), null, req.stops()));
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(r);
     }
 
     @PutMapping("/{id}")
+    @Transactional
     public ResponseEntity<?> updateRoute(@PathVariable String id, @RequestBody RouteRequest req) {
         Route r = routeRepository.findById(id).orElse(null);
         if (r == null) return err(HttpStatus.NOT_FOUND, "Route not found.");
@@ -124,6 +166,7 @@ public class RouteController {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<?> deleteRoute(@PathVariable String id) {
         Route r = routeRepository.findById(id).orElse(null);
         if (r == null) return err(HttpStatus.NOT_FOUND, "Route not found.");
@@ -147,6 +190,21 @@ public class RouteController {
         if (c == null) return null;
         String t = c.trim().replaceFirst("^#", "");
         return t.isEmpty() ? null : t.toUpperCase();
+    }
+
+    /**
+     * TimetableService signals invalid itineraries with ResponseStatusException
+     * (unknown stop, times not increasing, bus already busy…). Translate it to
+     * the {status, error, message} shape the Data Management UI reads, instead
+     * of letting it surface as a bare 500.
+     */
+    @org.springframework.web.bind.annotation.ExceptionHandler(
+            org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleStatus(
+            org.springframework.web.server.ResponseStatusException ex) {
+        String msg = ex.getReason() == null ? "Request failed" : ex.getReason();
+        return ResponseEntity.status(ex.getStatusCode())
+                .body(Map.of("status", ex.getStatusCode().value(), "error", msg, "message", msg));
     }
 
     private static String validateRoute(String id, RouteRequest req, String color) {

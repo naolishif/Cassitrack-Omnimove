@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -123,7 +124,11 @@ public class StopController {
         return stopRepository.findAll(Sort.by(Sort.Direction.ASC, "id"));
     }
 
+    // @Transactional: the check-then-write pairs below (existsById → save,
+    // countByStopId → delete) must run as one unit, so a concurrent change
+    // can't slip between the check and the write.
     @PostMapping
+    @Transactional
     @Operation(summary = "Create a stop")
     public ResponseEntity<?> createStop(@RequestBody StopRequest req) {
         String id = req.id() == null ? null : req.id().trim();
@@ -139,6 +144,7 @@ public class StopController {
     }
 
     @PutMapping("/{id}")
+    @Transactional
     @Operation(summary = "Update a stop")
     public ResponseEntity<?> updateStop(@PathVariable String id, @RequestBody StopRequest req) {
         Stop s = stopRepository.findById(id).orElse(null);
@@ -150,6 +156,7 @@ public class StopController {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     @Operation(summary = "Delete a stop (blocked if used in the timetable)")
     public ResponseEntity<?> deleteStop(@PathVariable String id) {
         Stop s = stopRepository.findById(id).orElse(null);
