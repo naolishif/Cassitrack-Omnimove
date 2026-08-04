@@ -21,6 +21,12 @@ document.getElementById('paymentEmail').textContent = _user.email || '';
 
 // Apply saved language on load
 applyTranslations();
+// Sync the search button's data-label attribute (CSS ::after uses attr(data-label))
+function syncSearchBtn() {
+    const btn = document.getElementById('searchBtn');
+    if (btn) btn.setAttribute('data-label', t('search_btn'));
+}
+syncSearchBtn();
 
 const _name = _user.name || _user.username || 'there';
 document.getElementById('aiGreeting').textContent =
@@ -229,6 +235,8 @@ window._onLangChange = () => {
     loadHistory();
     loadFavorites();
     updateWeatherPill();
+    syncSearchBtn();
+    updateTimeDisplay();
 };
 
 // ── Weather pill on page load ──────────────────────────────────────
@@ -245,6 +253,158 @@ async function updateWeatherPill() {
     } catch (e) { /* keep placeholder */ }
 }
 updateWeatherPill();
+
+// ── Time Picker ─────────────────────────────────────────────────────
+const _TP_ITEM_H = 40; // must match CSS .tp-drum-item height
+const _TP_REPS   = 7;  // repetitions for seamless infinite scroll
+const _TP_MID    = Math.floor(_TP_REPS / 2);
+
+let _pickerHour = null;
+let _pickerMin  = null;
+let _pickerMode = 'depart'; // 'depart' | 'arrive'
+
+/** Returns a Date for the user's chosen departure time (or now if nothing chosen). */
+function _getPickerTripStart() {
+    if (_pickerHour === null) return new Date();
+    const d = new Date();
+    d.setHours(_pickerHour, _pickerMin, 0, 0);
+    // If the chosen time is already past today, shift to tomorrow
+    if (d < new Date()) d.setDate(d.getDate() + 1);
+    return d;
+}
+/** Format a Date as "HH:MM". */
+function _fmtHHMM(date) {
+    return date.getHours().toString().padStart(2,'0') + ':' + date.getMinutes().toString().padStart(2,'0');
+}
+
+function updateTimeDisplay() {
+    const el = document.getElementById('timeDisplay');
+    if (!el) return;
+    if (_pickerHour === null) {
+        el.textContent = t('time_now');
+    } else {
+        const hh = String(_pickerHour).padStart(2, '0');
+        const mm = String(_pickerMin).padStart(2, '0');
+        const modeLabel = _pickerMode === 'arrive' ? t('time_arrive') : t('time_depart');
+        el.textContent = `${modeLabel} ${hh}:${mm}`;
+    }
+}
+updateTimeDisplay();
+
+function _buildDrum(drumId, range, selected) {
+    const drum = document.getElementById(drumId);
+    drum.innerHTML = '';
+    // 2 invisible pads at top — lets value 0 snap-center at scrollTop 0
+    for (let i = 0; i < 2; i++) {
+        const p = document.createElement('div');
+        p.className = 'tp-drum-item tp-pad';
+        drum.appendChild(p);
+    }
+    // _TP_REPS full cycles of 0…range-1
+    for (let rep = 0; rep < _TP_REPS; rep++) {
+        for (let v = 0; v < range; v++) {
+            const el = document.createElement('div');
+            el.className = 'tp-drum-item';
+            el.textContent = String(v).padStart(2, '0');
+            drum.appendChild(el);
+        }
+    }
+    // 2 invisible pads at bottom
+    for (let i = 0; i < 2; i++) {
+        const p = document.createElement('div');
+        p.className = 'tp-drum-item tp-pad';
+        drum.appendChild(p);
+    }
+    // Position at middle rep, selected value (instant — no smooth-scroll)
+    drum.scrollTop = (_TP_MID * range + selected) * _TP_ITEM_H;
+}
+
+// Attach loop-back listeners ONCE per drum (idempotent)
+let _tpListenersAttached = false;
+function _attachDrumLoops() {
+    if (_tpListenersAttached) return;
+    _tpListenersAttached = true;
+    _attachLoop('drumHours', 24);
+    _attachLoop('drumMins',  60);
+}
+function _attachLoop(drumId, range) {
+    const drum = document.getElementById(drumId);
+    const reset = () => {
+        const idx = Math.round(drum.scrollTop / _TP_ITEM_H);
+        if (idx < range || idx >= (_TP_REPS - 1) * range) {
+            const val = ((idx % range) + range) % range;
+            drum.scrollTop = (_TP_MID * range + val) * _TP_ITEM_H;
+        }
+    };
+    // scrollend fires after snap animation settles — perfect for loop reset
+    if ('onscrollend' in document) {
+        drum.addEventListener('scrollend', reset);
+    } else {
+        let timer;
+        drum.addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(reset, 120); }, { passive: true });
+    }
+}
+
+function openTimePicker() {
+    const now = new Date();
+    const selH = _pickerHour !== null ? _pickerHour : now.getHours();
+    const selM = _pickerMin  !== null ? _pickerMin  : now.getMinutes();
+
+    // Build DOM while hidden, then show — scroll must be set AFTER display:flex takes effect
+    _buildDrum('drumHours', 24, selH);
+    _buildDrum('drumMins',  60, selM);
+    _attachDrumLoops();
+
+    document.getElementById('tpDepart').classList.toggle('active', _pickerMode === 'depart');
+    document.getElementById('tpArrive').classList.toggle('active', _pickerMode === 'arrive');
+    document.querySelectorAll('#timePickerOverlay [data-i18n]').forEach(el => {
+        el.textContent = t(el.dataset.i18n);
+    });
+
+    // Show overlay first — otherwise scrollTop on display:none elements is ignored
+    document.getElementById('timePickerOverlay').classList.add('open');
+
+    // Re-apply scroll positions after the browser has rendered the overlay
+    requestAnimationFrame(() => {
+        document.getElementById('drumHours').scrollTop = (_TP_MID * 24 + selH) * _TP_ITEM_H;
+        document.getElementById('drumMins').scrollTop  = (_TP_MID * 60 + selM) * _TP_ITEM_H;
+    });
+}
+
+function closeTimePicker(e) {
+    if (e && e.target !== document.getElementById('timePickerOverlay')) return;
+    document.getElementById('timePickerOverlay').classList.remove('open');
+}
+
+function setTimeMode(mode) {
+    _pickerMode = mode;
+    document.getElementById('tpDepart').classList.toggle('active', mode === 'depart');
+    document.getElementById('tpArrive').classList.toggle('active', mode === 'arrive');
+}
+
+function _getDrumValue(drumId, range) {
+    const drum = document.getElementById(drumId);
+    const idx = Math.round(drum.scrollTop / _TP_ITEM_H);
+    return ((idx % range) + range) % range;
+}
+
+function confirmTimePicker() {
+    _pickerHour = _getDrumValue('drumHours', 24);
+    _pickerMin  = _getDrumValue('drumMins',  60);
+    document.getElementById('timePickerOverlay').classList.remove('open');
+    updateTimeDisplay();
+}
+
+function resetTimeToNow() {
+    _pickerHour = null;
+    _pickerMin  = null;
+    _pickerMode = 'depart';
+    document.getElementById('timePickerOverlay').classList.remove('open');
+    updateTimeDisplay();
+    // Re-sync the Depart toggle to active
+    document.getElementById('tpDepart')?.classList.add('active');
+    document.getElementById('tpArrive')?.classList.remove('active');
+}
 
 async function apiFetch(path, options = {}) {
     const token = localStorage.getItem('omnimove_token');
@@ -617,6 +777,9 @@ function sortOptions(options) {
 // ── Search ────────────────────────────────────────────────────────
 async function doSearch() {
     _acHide();   // close the suggestion list on search
+    // Reset time to "Now" on every new search (like Google Maps "Leave now")
+    _pickerHour = null; _pickerMin = null; _pickerMode = 'depart';
+    updateTimeDisplay();
     const destId = document.getElementById('destSelect').dataset.id;
     const dest   = STOPS[destId];
     let origin   = getOrigin();
@@ -655,8 +818,12 @@ async function doSearch() {
         if (activeModes.length > 0) {
             payload.modes = [...activeModes];
         }
-        const departVal = document.getElementById('departTime')?.value;
-        if (departVal) payload.departure_time = departVal;
+        if (_pickerHour !== null) {
+            const hh = String(_pickerHour).padStart(2, '0');
+            const mm = String(_pickerMin).padStart(2, '0');
+            payload.departure_time = `${hh}:${mm}`;
+            if (_pickerMode === 'arrive') payload.arrive_by = true;
+        }
 
         const r = await apiFetch('/journeys/search', {
             method: 'POST',
@@ -740,11 +907,21 @@ function renderRoutes(data) {
             : '';
         const warn = opt.weather_warning
             ? `<span class="status-badge s-delay">${opt.weather_warning}</span>` : '';
+        // Departure / arrival time labels for the card
+        const _depDate = _getPickerTripStart();
+        const _arrDate = new Date(_depDate.getTime() + (opt.duration_minutes || 0) * 60000);
+        const _depTime = _fmtHHMM(_depDate);
+        const _arrTime = _fmtHHMM(_arrDate);
         return `
 <div class="route-card" id="card-${opt.mode}">
     <div class="route-top">
         <div class="route-name">${icon} ${modeLabel}</div>
         <div class="route-time">${opt.duration_minutes} min</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin:-4px 0 6px;font-size:12px;color:var(--text-mid);font-weight:600">
+        <span>${_depTime}</span>
+        <span style="color:var(--border-mid)">→</span>
+        <span>${_arrTime}</span>
     </div>
     <div class="status-row">
         ${warn || `<span class="status-badge s-ok">${t('badge_available')}</span>`}
@@ -869,42 +1046,304 @@ function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
     const card = document.getElementById('card-' + mode);
     if (card) { card.style.border = '2px solid var(--primary)'; card.style.opacity = '1'; }
 
-    // Remove old banner if any
-    const existing = document.getElementById('start-banner');
-    if (existing) existing.remove();
-
-    const modeEmoji = MODE_ICONS[mode];
-
-    const banner = document.createElement('div');
-    banner.id = 'start-banner';
-    banner.style.cssText = 'position:sticky;bottom:0;background:var(--bg-white);border-top:2px solid var(--primary);padding:14px;margin:0 -14px -14px';
-
-    const infoDiv = document.createElement('div');
-    infoDiv.style.cssText = 'font-size:11px;color:var(--text-soft);margin-bottom:8px;font-weight:600';
-    infoDiv.textContent = `${modeEmoji} ${label} · 🌱 ${greenIndex}/100 · ${(distanceMetres/1000).toFixed(1)} km`;
-
-    const startBtn = document.createElement('button');
-    startBtn.className = 'action-btn btn-green';
-    startBtn.style.cssText = 'width:100%;font-size:14px;padding:13px';
-    startBtn.textContent = t('btn_start_journey');
-    startBtn.onclick = startJourney;
-
-    banner.appendChild(infoDiv);
-    banner.appendChild(startBtn);
-    document.querySelector('.routes-list').appendChild(banner);
-
-    if (!window.matchMedia('(max-width: 768px)').matches) showToast(`${modeEmoji} ${label} selected — tap ${t('btn_start_journey')}`);
-
     // Show dashed preview on map immediately
     showRoutePreview(mode, selectedJourney.legs || []);
+
+    // Open detail sheet instead of a sticky banner
+    _openRouteDetail(mode, label, greenIndex, distanceMetres, costEuros);
 }
+
+// ── Route detail preview sheet ────────────────────────────────────────
+function _openRouteDetail(mode, label, greenIndex, distanceMetres, costEuros) {
+    const opt = window._routeOptions?.[mode] || {};
+    const durationMin = opt.duration_minutes
+        || selectedJourney.durationMinutes
+        || Math.ceil((distanceMetres/1000) / (mode==='WALK'?5:mode==='BIKE'?15:mode==='SCOOTER'?20:25) * 60);
+    const distanceKm  = distanceMetres / 1000;
+    const modeEmoji   = MODE_ICONS[mode] || '🚗';
+    const co2g        = opt.co2_grams ?? selectedJourney.co2Grams ?? 0;
+
+    const depDate = _getPickerTripStart();
+    const arrDate = new Date(depDate.getTime() + durationMin * 60000);
+
+    const isBusMode = mode === 'BUS' && selectedJourney.legs?.length > 0;
+    const timelineHtml = isBusMode
+        ? buildTimeline(selectedJourney.legs, durationMin, greenIndex)
+        : buildSingleLegTimeline(mode, selectedJourney.legs || [], distanceKm, co2g);
+
+    const modeLabel = isBusMode ? (fmtRouteLabel(label) || label) : label;
+    const costTxt   = (!costEuros || costEuros === 0) ? t('lbl_free') : '€' + costEuros.toFixed(2);
+    const co2Txt    = Math.round(co2g) + ' g CO₂';
+    const gcol      = greenColor(greenIndex);
+
+    document.getElementById('rdEmoji').textContent = modeEmoji;
+    document.getElementById('rdLabel').innerHTML   = modeLabel;
+    document.getElementById('rdTimes').textContent = `${_fmtHHMM(depDate)} → ${_fmtHHMM(arrDate)}`;
+    document.getElementById('rdDur').textContent   = durationMin + ' min';
+    document.getElementById('rdTimeline').innerHTML = timelineHtml;
+    document.getElementById('rdCost').textContent  = costTxt;
+    document.getElementById('rdCo2').textContent   = co2Txt;
+    document.getElementById('rdGreen').textContent = greenIndex + '/100';
+    document.getElementById('rdGreen').style.color = gcol;
+
+    // Always reset the start button in case a previous journey left it disabled
+    const rdBtn = document.getElementById('rdStartBtn');
+    if (rdBtn) { rdBtn.disabled = false; rdBtn.textContent = t('btn_start_journey'); }
+
+    document.getElementById('routeDetailSheet').classList.add('open');
+}
+
+function closeRouteDetail() {
+    document.getElementById('routeDetailSheet').classList.remove('open');
+    // De-select all route cards
+    document.querySelectorAll('.route-card').forEach(c => {
+        c.style.border = '1px solid var(--border-mid)';
+        c.style.opacity = '1';
+    });
+    // Clear map preview
+    (window._previewLayers || []).forEach(l => map.removeLayer(l));
+    window._previewLayers = [];
+    selectedJourney = null;
+}
+
+function startJourneyFromDetail() {
+    document.getElementById('routeDetailSheet').classList.remove('open');
+    startJourney();
+}
+
+// ── Helpers shared by selectMode preview and startJourney ───────────
+function fmtD(m) { return m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(1) + ' km'; }
+
+
+// ── Route label: "3 → Dest" or "3 → Dest + 1 → Dest2" → circles ──
+function fmtRouteLabel(instruction, circleStyle) {
+    if (!instruction) return 'Bus';
+    // Transfer labels contain " + " separating each leg label — stack vertically
+    if (instruction.includes(' + ')) {
+        return instruction.split(' + ')
+            .map(part => `<div style="line-height:1.6">${fmtRouteLabel(part.trim(), circleStyle)}</div>`)
+            .join('');
+    }
+    const sep = instruction.indexOf(' → ');
+    if (sep === -1) return escHtml(instruction);
+    const num = escHtml(instruction.slice(0, sep).trim());
+    const dest = escHtml(instruction.slice(sep + 3).trim());
+    const cs  = circleStyle || 'background:#1d4ed8;color:#fff';
+    return `<span class="rnum-bus" style="${cs}">${num}</span> → ${dest}`;
+}
+
+// ── Build Google Maps-style vertical timeline ──────────────────────
+function buildTimeline(legs, totalMin, greenIdx) {
+    const C = { WALK:'#6366f1', WAIT:'#f59e0b', BUS:'#10b981', TRANSFER:'#ef4444' };
+    let html = '';
+    let busIndex = 0;
+
+    // Running clock — starts at the user's chosen departure time (or now)
+    const _tripStart = _getPickerTripStart();
+    let   _runMs     = 0;
+    function _tick(min) { _runMs += (min || 0) * 60000; }
+    function _fmtTime(offsetMs) {
+        const d = new Date(_tripStart.getTime() + offsetMs);
+        return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+    }
+    // Inline time badge — prominent black HH:MM
+    function _timeBadge(ms) {
+        return `<span style="font-size:13px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;flex-shrink:0">${_fmtTime(ms)}</span>`;
+    }
+    // Stop name row with time right-aligned
+    function _stopRow(name, timeMs) {
+        return `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+                  <span class="tl-from" style="margin:0">${name}</span>
+                  ${_timeBadge(timeMs)}
+                </div>`;
+    }
+
+    legs.forEach((leg, i) => {
+        const isLast = i === legs.length - 1;
+        const col = C[leg.mode] || '#94a3b8';
+        const names = leg.stop_names || [];
+        const isTransfer = leg.mode === 'WAIT' && leg.instruction && leg.instruction.toLowerCase().includes('change at');
+
+        if (leg.mode === 'WALK') {
+            // ── WALK row ──────────────────────────────────────────────
+            const walkDepMs = _runMs;
+            _tick(leg.duration_minutes);
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+                ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
+              </div>
+              <div class="tl-body">
+                ${_stopRow(leg.from || 'Start', walkDepMs)}
+                <div class="tl-meta">
+                  <span class="tl-badge" style="background:${col}18;color:${col}">🚶 ${t('walk')} · ${leg.duration_minutes || 0} min</span>
+                  ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
+                </div>
+              </div>
+            </div>`;
+
+        } else if (isTransfer) {
+            // ── TRANSFER / CHANGE BUS ────────────────────────────────
+            const xferMs = _runMs;
+            _tick(leg.duration_minutes);
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-transfer" style="background:white;border-color:#ef4444"></div>
+                ${!isLast ? `<div class="tl-line" style="background:#ef444433"></div>` : ''}
+              </div>
+              <div class="tl-body">
+                <div class="tl-transfer-badge">
+                  <span style="font-size:14px">🔄</span>
+                  <div style="flex:1">
+                    <div style="font-size:12px;font-weight:700;color:#ef4444">${leg.instruction || 'Change bus'}</div>
+                    <div style="font-size:11px;color:#64748b">${leg.duration_minutes || 0} ${t('min_wait')} · ${t('next_bus')} ${_fmtTime(_runMs)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+
+        } else if (leg.mode === 'WAIT') {
+            // ── WAIT (no change) ─────────────────────────────────────
+            _tick(leg.duration_minutes);
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+                ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
+              </div>
+              <div class="tl-body">
+                <div class="tl-meta">
+                  <span class="tl-badge" style="background:${col}18;color:${col}">🕐 ${t('wait_lbl')} · ${leg.duration_minutes || 0} min</span>
+                </div>
+              </div>
+            </div>`;
+
+        } else if (leg.mode === 'BUS') {
+            // ── BUS row with collapsible stop list ───────────────────
+            busIndex++;
+            const stopListId = `tl-stops-${busIndex}`;
+            const intermediates = names.slice(1, -1);
+            const boardStop  = names[0]  || leg.from || '';
+            const alightStop = names[names.length - 1] || leg.to || '';
+            const stopListHtml = intermediates.map(n =>
+                `<div class="tl-stop-item"><div class="tl-stop-dot"></div><span>${n}</span></div>`
+            ).join('');
+
+            const boardMs = _runMs;
+            _tick(leg.duration_minutes);
+            const alightMs = _runMs;
+
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-board" style="background:${col};border-color:${col}"></div>
+                <div class="tl-line tl-line-bus" style="background:${col}"></div>
+              </div>
+              <div class="tl-body">
+                ${_stopRow(boardStop, boardMs)}
+                <div class="tl-meta">
+                  <span class="tl-badge" style="background:${col}18;color:${col}">🚌 ${fmtRouteLabel(leg.instruction, `background:${col};color:#fff`)} · ${leg.duration_minutes || 0} min</span>
+                  ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
+                </div>
+                ${intermediates.length > 0 ? `
+                <button class="tl-expand-btn" onclick="
+                  var el=document.getElementById('${stopListId}');
+                  var btn=this;
+                  var open=el.style.display==='block';
+                  el.style.display=open?'none':'block';
+                  btn.textContent=open?'▾ ${intermediates.length} '+window.t(${intermediates.length}===1?'lbl_stop':'lbl_stops'):window.t('stops_hide');
+                ">▾ ${intermediates.length} ${intermediates.length === 1 ? t('lbl_stop') : t('lbl_stops')}</button>
+                <div id="${stopListId}" class="tl-stop-list" style="display:none">
+                  ${stopListHtml}
+                </div>` : ''}
+              </div>
+            </div>
+            <!-- Alight stop row -->
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-alight" style="background:white;border-color:${col}"></div>
+                ${!isLast ? `<div class="tl-line" style="background:#e2e8f0"></div>` : ''}
+              </div>
+              <div class="tl-body" style="padding-bottom:${isLast?'0':'12px'}">
+                ${_stopRow(alightStop, alightMs)}
+                ${isLast ? `<div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">${t('your_destination')}</div>` : ''}
+              </div>
+            </div>`;
+        }
+    });
+    return html;
+}
+
+// ── non-BUS modes: single-leg vertical timeline (Option A) ──────────
+function buildSingleLegTimeline(mode, legs, distKm, co2g) {
+    const COLORS = { WALK:'#6366f1', BIKE:'#3b82f6', SCOOTER:'#7c3aed' };
+    const ICONS  = { WALK:'🚶', BIKE:'🚲', SCOOTER:'🛴' };
+    const LABEL  = { WALK:t('walk'), BIKE:t('bike'), SCOOTER:t('scooter') };
+    const DASH   = { WALK:'8,6', BIKE:'6,4', SCOOTER:'4,3' };
+    const col    = COLORS[mode] || '#94a3b8';
+    const icon   = ICONS[mode]  || '🚶';
+    const lbl    = LABEL[mode]  || mode;
+
+    // Prefer leg from/to if available, fall back to selectedJourney label
+    const leg    = (legs && legs.length > 0) ? legs[0] : null;
+    const from   = leg?.from || 'Start';
+    const to     = leg?.to   || 'Destination';
+    const dist   = leg?.distance_metres ? fmtD(leg.distance_metres) : `${distKm.toFixed(1)} km`;
+    const co2    = co2g > 0 ? `${Math.round(co2g)} g CO₂` : '0 g CO₂';
+    const durMin = leg?.duration_minutes;
+    const durStr = durMin ? `${durMin} min` : '';
+
+    // Departure / arrival timestamps from picker
+    const depDate = _getPickerTripStart();
+    const arrDate = new Date(depDate.getTime() + (durMin || 0) * 60000);
+    const depTime = _fmtHHMM(depDate);
+    const arrTime = _fmtHHMM(arrDate);
+    const timeStyle = 'font-size:13px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;flex-shrink:0';
+
+    // dashed SVG line encoded as background-image
+    const svgLine = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='100'%3E%3Cline x1='1' y1='0' x2='1' y2='100' stroke='${encodeURIComponent(col)}' stroke-width='2' stroke-dasharray='${DASH[mode]}'/%3E%3C/svg%3E")`;
+
+    return `
+    <div class="tl-row">
+      <div class="tl-left">
+        <div class="tl-dot" style="background:white;border-color:${col};border-width:2px"></div>
+        <div class="tl-line" style="background-image:${svgLine};background-color:transparent;background-repeat:repeat-y;background-size:2px 100%"></div>
+      </div>
+      <div class="tl-body">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+          <div class="tl-from" style="margin:0">${from}</div>
+          <span style="${timeStyle}">${depTime}</span>
+        </div>
+        <div class="tl-meta">
+          <span class="tl-badge" style="background:${col}18;color:${col}">${icon} ${lbl}${durStr ? ' · ' + durStr : ''}</span>
+          <span class="tl-sub">${dist}</span>
+          <span class="tl-sub" style="color:#10b981">🌱 ${co2}</span>
+        </div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-left">
+        <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+      </div>
+      <div class="tl-body" style="padding-bottom:0">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+          <div class="tl-from" style="margin:0">${to}</div>
+          <span style="${timeStyle}">${arrTime}</span>
+        </div>
+        <div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">${t('your_destination')}</div>
+      </div>
+    </div>`;
+}
+
 
 async function startJourney() {
     if (!selectedJourney) return;
     if (window._journeyStarting) return;
     window._journeyStarting = true;
-    const _startBtn = document.querySelector('#start-banner button');
-    if (_startBtn) { _startBtn.disabled = true; _startBtn.textContent = '⏳ Starting…'; }
+    const _startBtn = document.getElementById('rdStartBtn');
+    if (_startBtn) { _startBtn.disabled = true; _startBtn.textContent = '⏳'; }
 
     try {
         const origin = window._currentOrigin;
@@ -1039,217 +1478,6 @@ async function startJourney() {
         const durationMin = selectedJourney.durationMinutes
             || Math.ceil(distanceKm / (mode==='WALK'?5:mode==='BIKE'?15:mode==='SCOOTER'?20:25) * 60);
         const modeEmoji = MODE_ICONS[mode];
-        const fmtD = m => m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(1) + ' km';
-
-        // ── Route label: "3 → Dest" or "3 → Dest + 1 → Dest2" → circles ──
-        function fmtRouteLabel(instruction, circleStyle) {
-            if (!instruction) return 'Bus';
-            // Transfer labels contain " + " separating each leg label — stack vertically
-            if (instruction.includes(' + ')) {
-                return instruction.split(' + ')
-                    .map(part => `<div style="line-height:1.6">${fmtRouteLabel(part.trim(), circleStyle)}</div>`)
-                    .join('');
-            }
-            const sep = instruction.indexOf(' → ');
-            if (sep === -1) return escHtml(instruction);
-            const num = escHtml(instruction.slice(0, sep).trim());
-            const dest = escHtml(instruction.slice(sep + 3).trim());
-            const cs  = circleStyle || 'background:#1d4ed8;color:#fff';
-            return `<span class="rnum-bus" style="${cs}">${num}</span> → ${dest}`;
-        }
-
-        // ── Build Google Maps-style vertical timeline ──────────────────────
-        function buildTimeline(legs, totalMin, greenIdx) {
-            const C = { WALK:'#6366f1', WAIT:'#f59e0b', BUS:'#10b981', TRANSFER:'#ef4444' };
-            let html = '';
-            let busIndex = 0;
-
-            // Running clock — starts at now, accumulates each leg's duration
-            const _tripStart = new Date();
-            let   _runMs     = 0;
-            function _tick(min) { _runMs += (min || 0) * 60000; }
-            function _fmtTime(offsetMs) {
-                const d = new Date(_tripStart.getTime() + offsetMs);
-                return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
-            }
-            // Inline time badge — prominent black HH:MM
-            function _timeBadge(ms) {
-                return `<span style="font-size:13px;font-weight:800;color:#0f172a;letter-spacing:-0.3px;flex-shrink:0">${_fmtTime(ms)}</span>`;
-            }
-            // Stop name row with time right-aligned
-            function _stopRow(name, timeMs) {
-                return `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
-                          <span class="tl-from" style="margin:0">${name}</span>
-                          ${_timeBadge(timeMs)}
-                        </div>`;
-            }
-
-            legs.forEach((leg, i) => {
-                const isLast = i === legs.length - 1;
-                const col = C[leg.mode] || '#94a3b8';
-                const names = leg.stop_names || [];
-                const isTransfer = leg.mode === 'WAIT' && leg.instruction && leg.instruction.toLowerCase().includes('change at');
-
-                if (leg.mode === 'WALK') {
-                    // ── WALK row ──────────────────────────────────────────────
-                    const walkDepMs = _runMs;
-                    _tick(leg.duration_minutes);
-                    html += `
-                    <div class="tl-row">
-                      <div class="tl-left">
-                        <div class="tl-dot" style="background:${col};border-color:${col}"></div>
-                        ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
-                      </div>
-                      <div class="tl-body">
-                        ${_stopRow(leg.from || 'Start', walkDepMs)}
-                        <div class="tl-meta">
-                          <span class="tl-badge" style="background:${col}18;color:${col}">🚶 ${t('walk')} · ${leg.duration_minutes || 0} min</span>
-                          ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
-                        </div>
-                      </div>
-                    </div>`;
-
-                } else if (isTransfer) {
-                    // ── TRANSFER / CHANGE BUS ────────────────────────────────
-                    const xferMs = _runMs;
-                    _tick(leg.duration_minutes);
-                    html += `
-                    <div class="tl-row">
-                      <div class="tl-left">
-                        <div class="tl-dot tl-dot-transfer" style="background:white;border-color:#ef4444"></div>
-                        ${!isLast ? `<div class="tl-line" style="background:#ef444433"></div>` : ''}
-                      </div>
-                      <div class="tl-body">
-                        <div class="tl-transfer-badge">
-                          <span style="font-size:14px">🔄</span>
-                          <div style="flex:1">
-                            <div style="font-size:12px;font-weight:700;color:#ef4444">${leg.instruction || 'Change bus'}</div>
-                            <div style="font-size:11px;color:#64748b">${leg.duration_minutes || 0} ${t('min_wait')} · ${t('next_bus')} ${_fmtTime(_runMs)}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>`;
-
-                } else if (leg.mode === 'WAIT') {
-                    // ── WAIT (no change) ─────────────────────────────────────
-                    _tick(leg.duration_minutes);
-                    html += `
-                    <div class="tl-row">
-                      <div class="tl-left">
-                        <div class="tl-dot" style="background:${col};border-color:${col}"></div>
-                        ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
-                      </div>
-                      <div class="tl-body">
-                        <div class="tl-meta">
-                          <span class="tl-badge" style="background:${col}18;color:${col}">🕐 ${t('wait_lbl')} · ${leg.duration_minutes || 0} min</span>
-                        </div>
-                      </div>
-                    </div>`;
-
-                } else if (leg.mode === 'BUS') {
-                    // ── BUS row with collapsible stop list ───────────────────
-                    busIndex++;
-                    const stopListId = `tl-stops-${busIndex}`;
-                    const intermediates = names.slice(1, -1);
-                    const boardStop  = names[0]  || leg.from || '';
-                    const alightStop = names[names.length - 1] || leg.to || '';
-                    const stopListHtml = intermediates.map(n =>
-                        `<div class="tl-stop-item"><div class="tl-stop-dot"></div><span>${n}</span></div>`
-                    ).join('');
-
-                    const boardMs = _runMs;
-                    _tick(leg.duration_minutes);
-                    const alightMs = _runMs;
-
-                    html += `
-                    <div class="tl-row">
-                      <div class="tl-left">
-                        <div class="tl-dot tl-dot-board" style="background:${col};border-color:${col}"></div>
-                        <div class="tl-line tl-line-bus" style="background:${col}"></div>
-                      </div>
-                      <div class="tl-body">
-                        ${_stopRow(boardStop, boardMs)}
-                        <div class="tl-meta">
-                          <span class="tl-badge" style="background:${col}18;color:${col}">🚌 ${fmtRouteLabel(leg.instruction, `background:${col};color:#fff`)} · ${leg.duration_minutes || 0} min</span>
-                          ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
-                        </div>
-                        ${intermediates.length > 0 ? `
-                        <button class="tl-expand-btn" onclick="
-                          var el=document.getElementById('${stopListId}');
-                          var btn=this;
-                          var open=el.style.display==='block';
-                          el.style.display=open?'none':'block';
-                          btn.textContent=open?'▾ ${intermediates.length} '+window.t(${intermediates.length}===1?'lbl_stop':'lbl_stops'):window.t('stops_hide');
-                        ">▾ ${intermediates.length} ${intermediates.length === 1 ? t('lbl_stop') : t('lbl_stops')}</button>
-                        <div id="${stopListId}" class="tl-stop-list" style="display:none">
-                          ${stopListHtml}
-                        </div>` : ''}
-                      </div>
-                    </div>
-                    <!-- Alight stop row -->
-                    <div class="tl-row">
-                      <div class="tl-left">
-                        <div class="tl-dot tl-dot-alight" style="background:white;border-color:${col}"></div>
-                        ${!isLast ? `<div class="tl-line" style="background:#e2e8f0"></div>` : ''}
-                      </div>
-                      <div class="tl-body" style="padding-bottom:${isLast?'0':'12px'}">
-                        ${_stopRow(alightStop, alightMs)}
-                        ${isLast ? `<div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">${t('your_destination')}</div>` : ''}
-                      </div>
-                    </div>`;
-                }
-            });
-            return html;
-        }
-
-        // ── non-BUS modes: single-leg vertical timeline (Option A) ──────────
-        function buildSingleLegTimeline(mode, legs, distKm, co2g) {
-            const COLORS = { WALK:'#6366f1', BIKE:'#3b82f6', SCOOTER:'#7c3aed' };
-            const ICONS  = { WALK:'🚶', BIKE:'🚲', SCOOTER:'🛴' };
-            const LABEL  = { WALK:t('walk'), BIKE:t('bike'), SCOOTER:t('scooter') };
-            const DASH   = { WALK:'8,6', BIKE:'6,4', SCOOTER:'4,3' };
-            const col    = COLORS[mode] || '#94a3b8';
-            const icon   = ICONS[mode]  || '🚶';
-            const lbl    = LABEL[mode]  || mode;
-
-            // Prefer leg from/to if available, fall back to selectedJourney label
-            const leg    = (legs && legs.length > 0) ? legs[0] : null;
-            const from   = leg?.from || 'Start';
-            const to     = leg?.to   || 'Destination';
-            const dist   = leg?.distance_metres ? fmtD(leg.distance_metres) : `${distKm.toFixed(1)} km`;
-            const co2    = co2g > 0 ? `${Math.round(co2g)} g CO₂` : '0 g CO₂';
-            const durMin = leg?.duration_minutes;
-            const durStr = durMin ? `${durMin} min` : '';
-
-            // dashed SVG line encoded as background-image
-            const svgLine = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='100'%3E%3Cline x1='1' y1='0' x2='1' y2='100' stroke='${encodeURIComponent(col)}' stroke-width='2' stroke-dasharray='${DASH[mode]}'/%3E%3C/svg%3E")`;
-
-            return `
-            <div class="tl-row">
-              <div class="tl-left">
-                <div class="tl-dot" style="background:white;border-color:${col};border-width:2px"></div>
-                <div class="tl-line" style="background-image:${svgLine};background-color:transparent;background-repeat:repeat-y;background-size:2px 100%"></div>
-              </div>
-              <div class="tl-body">
-                <div class="tl-from">${from}</div>
-                <div class="tl-meta">
-                  <span class="tl-badge" style="background:${col}18;color:${col}">${icon} ${lbl}${durStr ? ' · ' + durStr : ''}</span>
-                  <span class="tl-sub">${dist}</span>
-                  <span class="tl-sub" style="color:#10b981">🌱 ${co2}</span>
-                </div>
-              </div>
-            </div>
-            <div class="tl-row">
-              <div class="tl-left">
-                <div class="tl-dot" style="background:${col};border-color:${col}"></div>
-              </div>
-              <div class="tl-body" style="padding-bottom:0">
-                <div class="tl-from">${to}</div>
-                <div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">🏁 Your destination</div>
-              </div>
-            </div>`;
-        }
-
         const isBusMode = mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0;
         const timelineHtml = isBusMode
             ? buildTimeline(selectedJourney.legs, durationMin, greenIndex)
@@ -1443,6 +1671,8 @@ function endJourney() {
     window._activeBusRouteIds = [];
     selectedJourney = null;
     window._journeyStarting = false;
+    const _rdBtn = document.getElementById('rdStartBtn');
+    if (_rdBtn) { _rdBtn.disabled = false; _rdBtn.textContent = t('btn_start_journey'); }
 
     // Remove all journey map layers
     ['_routeLine','_routeLineGps','_journeyDestMarker','_journeyOriginMarker','_journeyGpsMarker']
@@ -1460,12 +1690,18 @@ function endJourney() {
 
     map.setView([41.4901, 13.8303], 15);
 
-    document.querySelector('.routes-list').innerHTML =
-        '<div style="text-align:center;padding:48px 20px;color:var(--text-soft)">'
-        + '<div style="font-size:36px;margin-bottom:12px">🌱</div>'
-        + `<div style="font-size:14px;font-weight:700;color:var(--text-dark)">${t('journey_completed')}</div>`
-        + `<div style="font-size:12px;margin-top:6px">${t('search_new_route')}</div>`
-        + '</div>';
+    // Restore route cards from the last search so the user can pick again without re-searching
+    if (window._lastSearchData) {
+        renderRoutes(window._lastSearchData);
+        showToast(`🏁 ${t('journey_completed')} — ${t('search_new_route')}`);
+    } else {
+        document.querySelector('.routes-list').innerHTML =
+            '<div style="text-align:center;padding:48px 20px;color:var(--text-soft)">'
+            + '<div style="font-size:36px;margin-bottom:12px">🌱</div>'
+            + `<div style="font-size:14px;font-weight:700;color:var(--text-dark)">${t('journey_completed')}</div>`
+            + `<div style="font-size:12px;margin-top:6px">${t('search_new_route')}</div>`
+            + '</div>';
+    }
 
     if (!window.matchMedia('(max-width: 768px)').matches) showToast('🏁 Journey ended — great trip!');
     loadEcoStats();

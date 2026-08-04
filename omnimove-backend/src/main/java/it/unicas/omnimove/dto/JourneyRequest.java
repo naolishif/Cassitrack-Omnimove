@@ -25,9 +25,12 @@ public class JourneyRequest {
 
     @JsonProperty("messages") private List<String> messages = new ArrayList<>();
     @JsonProperty("lang") private String lang;
+    /** True when departure_time should be treated as the desired *arrival* time. */
+    @JsonProperty("arrive_by") private Boolean arriveBy;
 
     public void addMessage(String msg) { this.messages.add(msg); }
     private List<String> modes;
 
     public boolean isItalian() { return "it".equalsIgnoreCase(lang); }
+    public boolean isArriveBy() { return Boolean.TRUE.equals(arriveBy); }
 }

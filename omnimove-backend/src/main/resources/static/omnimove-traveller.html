@@ -91,14 +91,12 @@
                 <span>🏁</span>
                 <input id="destSelect" type="text" autocomplete="off" data-i18n="ph_dest" placeholder="Destination" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
             </div>
-            <div class="search-seg">
+            <div class="search-seg" onclick="openTimePicker()" style="cursor:pointer;flex-shrink:0">
                 <span>🕐</span>
-                <input id="departTime" type="time" step="60"
-                       style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;cursor:pointer;"
-                       title="Leave blank for now">
+                <span id="timeDisplay">Now</span>
             </div>
             <button class="search-btn" onclick="swapStops()" style="background:var(--bg-app);color:var(--text-dark);border-left:1px solid var(--border-mid);padding:10px 14px;font-size:16px" title="Swap">⇄</button>
-            <button class="search-btn" onclick="doSearch()" data-i18n="search_btn">Search →</button>
+            <button class="search-btn" id="searchBtn" onclick="doSearch()" data-i18n="search_btn" data-label="Search">Search</button>
         </div>
         <div class="cats" id="sortChips">
             <div class="cat-chip active" data-sort="eco" onclick="setSort(this)" data-i18n="chip_eco">🌱 Eco</div>
@@ -136,6 +134,39 @@
                     </div>
 
                 </div>
+
+                <!-- Route Detail Sheet — lives inside the sidebar so it matches its bounds -->
+                <div id="routeDetailSheet" class="rd-overlay">
+                    <div class="rd-sheet">
+                        <div class="rd-handle"></div>
+                        <div class="rd-header">
+                            <div class="rd-icon-wrap">
+                                <span id="rdEmoji" style="font-size:24px"></span>
+                            </div>
+                            <div class="rd-title-col">
+                                <div id="rdLabel" style="font-size:15px;font-weight:700;color:#0f172a"></div>
+                                <div id="rdTimes" style="font-size:12px;color:#64748b;margin-top:2px;font-weight:600"></div>
+                            </div>
+                            <div class="rd-dur-badge">
+                                <div id="rdDur" style="font-size:18px;font-weight:900;color:#059669;line-height:1"></div>
+                                <div style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase">min</div>
+                            </div>
+                            <button class="rd-close-btn" onclick="closeRouteDetail()" aria-label="Close">✕</button>
+                        </div>
+                        <div class="rd-pills">
+                            <div class="rd-pill">🌱 <span id="rdGreen"></span></div>
+                            <div class="rd-pill">💶 <span id="rdCost"></span></div>
+                            <div class="rd-pill">☁️ <span id="rdCo2"></span></div>
+                        </div>
+                        <div class="rd-timeline-scroll">
+                            <div class="journey-timeline" id="rdTimeline"></div>
+                        </div>
+                        <div class="rd-footer">
+                            <button id="rdStartBtn" class="action-btn btn-green rd-start-btn" onclick="startJourneyFromDetail()" data-i18n="btn_start_journey">Start Journey</button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -517,6 +548,32 @@
 </div>
 
 <div class="ac-list" id="acList"></div>
+
+<!-- ── TIME PICKER OVERLAY ── -->
+<div id="timePickerOverlay" class="tp-overlay" onclick="closeTimePicker(event)">
+    <div class="tp-sheet" onclick="event.stopPropagation()">
+        <div class="tp-toolbar">
+            <div class="tp-toggle-wrap">
+                <button id="tpDepart" class="tp-toggle active" onclick="setTimeMode('depart')" data-i18n="time_depart">Depart at</button>
+                <button id="tpArrive" class="tp-toggle" onclick="setTimeMode('arrive')" data-i18n="time_arrive">Arrive by</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+                <button class="tp-now-btn" onclick="resetTimeToNow()" data-i18n="time_now">Now</button>
+                <button class="tp-done" onclick="confirmTimePicker()" data-i18n="btn_done">Done</button>
+            </div>
+        </div>
+        <div class="tp-picker-wrap">
+            <div class="tp-mask-top"></div>
+            <div class="tp-mask-bot"></div>
+            <div class="tp-selector"></div>
+            <div class="tp-drums">
+                <div class="tp-drum" id="drumHours"></div>
+                <div class="tp-colon">:</div>
+                <div class="tp-drum" id="drumMins"></div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script src="omnimove-traveller.js"></script>
 </body>

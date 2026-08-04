@@ -251,12 +251,21 @@ public class JourneyPlannerService {
                 : findNearestStopId(req.getDestLat(), req.getDestLon());
 
         // Punto 3: base oraria del viaggio e stato del flag google.search.
+        boolean isNow = (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
         java.time.Instant departureBase = resolveDepartureBase(req.getDepartureTime(), msgs);
+
+        // "Arrive by" mode: shift search window back by 45 min so found routes arrive near target time
+        if (req.isArriveBy() && !isNow) {
+            departureBase = departureBase.minus(45, java.time.temporal.ChronoUnit.MINUTES);
+            msgs.add(req.isItalian()
+                ? "ℹ️ Percorso pianificato per arrivare entro le " + req.getDepartureTime() + "."
+                : "ℹ️ Route planned to arrive by " + req.getDepartureTime() + ".");
+        }
+
         boolean useGoogle = googleApiSettings.isSearchEnabled();
 
         // Il ritardo ha senso solo per una ricerca "adesso": per un viaggio
         // futuro il ritardo attuale di un bus che gira ora non significa nulla.
-        boolean isNow = (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
 
 
         // --- Step 1: walk to bus stop ---
