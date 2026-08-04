@@ -5,6 +5,7 @@ import it.unicas.cassitrack.model.Bus;
 import it.unicas.cassitrack.model.Route;
 import it.unicas.cassitrack.repository.BusRepository;
 import it.unicas.cassitrack.repository.RouteRepository;
+import it.unicas.cassitrack.repository.ScheduledStopRepository;
 import it.unicas.cassitrack.repository.TripRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,9 @@ public class BusService {
     private final BusRepository busRepository;
     private final RouteRepository routeRepository;
     private final TripRepository tripRepository;
+    private final ScheduledStopRepository scheduledStopRepository;
+
+    private static final java.time.ZoneId ITALY_TZ = java.time.ZoneId.of("Europe/Rome");
 
     private static final Set<String> VALID_STATUSES =
             Set.of("ACTIVE", "INACTIVE", "MAINTENANCE");
@@ -51,9 +55,11 @@ public class BusService {
     @Transactional(readOnly = true)
     public List<BusDTO> getAll(String search, String status, String routeId) {
         Map<String, String> routeLabels = routeLabelMap();
+        // Resolved once for the whole fleet (two queries), not per row.
+        Map<Integer, DerivedRoute> derived = derivedRoutes();
 
         return busRepository.findAll().stream()
-                .map(bus -> toDto(bus, routeLabels))
+                .map(bus -> toDto(bus, routeLabels, derived))
                 .filter(dto -> matchesStatus(dto, status))
                 .filter(dto -> matchesRoute(dto, routeId))
                 .filter(dto -> matchesSearch(dto, search))
@@ -83,7 +89,7 @@ public class BusService {
         validateStatus(dto.getStatus());
         ensurePlateFree(dto.getTarga(), null);
         ensureVehicleIdFree(dto.getCurrentVehicleId(), null);
-        ensureRouteExists(dto.getRouteId());
+        // No route validation: the route is derived, never submitted.
 
         Bus bus = new Bus();
         applyDto(bus, dto);
@@ -99,7 +105,7 @@ public class BusService {
         validateStatus(dto.getStatus());
         ensurePlateFree(dto.getTarga(), id);
         ensureVehicleIdFree(dto.getCurrentVehicleId(), id);
-        ensureRouteExists(dto.getRouteId());
+        // No route validation: the route is derived, never submitted.
 
         applyDto(bus, dto);
         return toDto(busRepository.save(bus), routeLabelMap());
@@ -167,12 +173,9 @@ public class BusService {
                 });
     }
 
-    private void ensureRouteExists(String routeId) {
-        if (routeId == null || routeId.isBlank()) return;   // unassigned is allowed
-        if (!routeRepository.existsById(routeId))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "No route found with id '" + routeId + "'");
-    }
+    // ensureRouteExists() removed: the route is no longer submitted by the
+    // client, so there is nothing to validate. routeRepository is still used
+    // by routeLabelMap() / getRouteOptions() for the filter dropdown.
 
     private ResponseStatusException notFound(Integer id) {
         return new ResponseStatusException(HttpStatus.NOT_FOUND, "No bus found with id " + id);
@@ -218,9 +221,10 @@ public class BusService {
         bus.setStatus(dto.getStatus());
         bus.setMapVisible(dto.getMapVisible() == null || dto.getMapVisible());
 
-        // Normalise blanks to null so the UNIQUE / FK constraints behave
-        String routeId = dto.getRouteId();
-        bus.setRouteId(routeId == null || routeId.isBlank() ? null : routeId);
+        // routeId is deliberately NOT written: the route shown in the registry
+        // is derived from the timetable (see derivedRoutes()), so storing a
+        // manual value here could only contradict it. The column still exists
+        // in the schema, it is simply no longer maintained from the UI.
 
         String vehicleId = dto.getCurrentVehicleId();
         bus.setCurrentVehicleId(vehicleId == null || vehicleId.isBlank() ? null : vehicleId.trim());
@@ -230,17 +234,93 @@ public class BusService {
     }
 
     private BusDTO toDto(Bus bus, Map<String, String> routeLabels) {
+        return toDto(bus, routeLabels, derivedRoutes());
+    }
+
+    private BusDTO toDto(Bus bus, Map<String, String> routeLabels,
+                         Map<Integer, DerivedRoute> derived) {
         BusDTO dto = new BusDTO();
         dto.setBusId(bus.getBusId());
         dto.setTarga(bus.getTarga());
         dto.setNumeroPosti(bus.getNumeroPosti());
         dto.setWheelchairAccessible(bus.getWheelchairAccessible());
         dto.setStatus(bus.getStatus());
-        dto.setRouteId(bus.getRouteId());
-        dto.setRouteName(bus.getRouteId() == null ? null : routeLabels.get(bus.getRouteId()));
         dto.setMapVisible(bus.getMapVisible());
         dto.setCurrentVehicleId(bus.getCurrentVehicleId());
+
+        // Route is derived from the timetable (antenna → bus → trips → route),
+        // never from the manual buses.route_id column: a bus can serve several
+        // lines a day, so a single stored value could not represent reality.
+        DerivedRoute dr = derived.get(bus.getBusId());
+        if (dr != null) {
+            dto.setRouteId(dr.routeId());
+            dto.setRouteName(dr.label());
+            dto.setRouteLive(dr.live());
+        }
         return dto;
+    }
+
+    // ── Route derivation ────────────────────────────────────────────
+
+    /**
+     * What the registry shows in the "route" column for one bus.
+     *
+     * @param routeId the line in service now, or the first scheduled one
+     * @param label   display text ("2 — Anello Liceo", or "1, 2" when idle)
+     * @param live    true when the bus is inside a trip's service window
+     */
+    private record DerivedRoute(String routeId, String label, boolean live) {}
+
+    /**
+     * Resolve the route of EVERY bus in two queries (no N+1):
+     *   · the trip whose service window covers now  → live line
+     *   · every route the bus serves in the timetable → fallback when idle
+     */
+    private Map<Integer, DerivedRoute> derivedRoutes() {
+        int now = java.time.LocalTime.now(ITALY_TZ).toSecondOfDay();
+        Map<Integer, DerivedRoute> out = new HashMap<>();
+
+        // Fallback first: all lines this bus serves today, de-duplicated by
+        // short name (LINEA_2 and LINEA_2_LIC are both line "2").
+        Map<Integer, LinkedHashSet<String>> scheduled = new LinkedHashMap<>();
+        Map<Integer, String> anyRouteId = new HashMap<>();
+        for (Object[] r : scheduledStopRepository.findScheduledRoutesPerBus()) {
+            Integer busId = ((Number) r[0]).intValue();
+            String  rid   = (String) r[1];
+            String  shrt  = (String) r[2];
+            String  lng   = (String) r[3];
+            scheduled.computeIfAbsent(busId, k -> new LinkedHashSet<>())
+                     .add(shortLabel(shrt, lng, rid));
+            anyRouteId.putIfAbsent(busId, rid);
+        }
+        scheduled.forEach((busId, lines) -> out.put(busId,
+                new DerivedRoute(anyRouteId.get(busId), String.join(", ", lines), false)));
+
+        // Live wins: the query is ordered by latest departure first, so the
+        // first row seen for a bus is its current trip.
+        for (Object[] r : scheduledStopRepository.findActiveTripsForAllBuses(now)) {
+            Integer busId = ((Number) r[0]).intValue();
+            if (out.containsKey(busId) && out.get(busId).live()) continue;   // already set
+            String rid  = (String) r[1];
+            String shrt = (String) r[2];
+            String lng  = (String) r[3];
+            out.put(busId, new DerivedRoute(rid, fullLabel(shrt, lng, rid), true));
+        }
+        return out;
+    }
+
+    /** Compact form for the idle list: just the line number. */
+    private String shortLabel(String shortName, String longName, String routeId) {
+        if (shortName != null && !shortName.isBlank()) return shortName;
+        return longName == null || longName.isBlank() ? routeId : longName;
+    }
+
+    /** Full form for the line currently in service. */
+    private String fullLabel(String shortName, String longName, String routeId) {
+        if (shortName == null || shortName.isBlank())
+            return longName == null || longName.isBlank() ? routeId : longName;
+        return longName == null || longName.isBlank()
+                ? shortName : shortName + " — " + longName;
     }
 
     private Map<String, String> routeLabelMap() {

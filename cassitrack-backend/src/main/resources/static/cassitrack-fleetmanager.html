@@ -351,6 +351,7 @@
             <button type="button" class="dm-subtab bm-subnav-btn active" id="dmTabBuses">Buses</button>
             <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabStops">Stops</button>
             <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabRoutes">Routes</button>
+            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTimetable">Timetable</button>
         </div>
 
         <!-- ══════════ BUSES PANEL (US-01 registry) ══════════ -->
@@ -375,6 +376,7 @@
                 </select>
 
                 <button class="dm-btn dm-btn-ghost" id="dmResetBtn">Reset</button>
+                <button type="button" class="dm-btn dm-btn-ghost" id="dmExportBtn" title="Download this table as CSV">Export CSV</button>
                 <button class="dm-btn dm-btn-primary" id="dmNewBtn">+ New bus</button>
             </div>
 
@@ -385,7 +387,7 @@
                     <tr>
                         <th>Bus ID</th>
                         <th>Plate</th>
-                        <th>Assigned route</th>
+                        <th>Route</th>
                         <th class="dm-num">Capacity</th>
                         <th>Status</th>
                         <th>Antenna ID</th>
@@ -404,9 +406,21 @@
 
         <!-- ══════════ STOPS PANEL ══════════ -->
         <div id="dm-panel-stops" class="dm-panel">
-            <div class="bm-panel-head">
-                <div class="bm-panel-title">Stops</div>
-                <button type="button" class="apply-btn" id="stAddBtn">＋ Add stop</button>
+            <!-- Client-side search: the full list is already in memory, so
+                 filtering is instant and needs no extra backend call.
+                 Add button lives inside the toolbar (same one-row layout as Buses). -->
+            <div class="dm-toolbar">
+                <input type="search" id="stSearch" class="dm-input dm-search"
+                       placeholder="Search id, name..."
+                       aria-label="Search stops">
+                <select id="stFilterActive" class="dm-input dm-select" aria-label="Filter by state">
+                    <option value="">All states</option>
+                    <option value="true">Active</option>
+                    <option value="false">Inactive</option>
+                </select>
+                <button class="dm-btn dm-btn-ghost" id="stResetBtn">Reset</button>
+                <button type="button" class="dm-btn dm-btn-ghost" id="stExportBtn" title="Download this table as CSV">Export CSV</button>
+                <button type="button" class="dm-btn dm-btn-primary" id="stAddBtn">+ New stop</button>
             </div>
 
             <div id="stForm" class="bm-form" hidden>
@@ -447,8 +461,8 @@
                 </div>
             </div>
 
-            <div class="bm-table-wrap">
-                <table class="bm-table">
+            <div class="dm-table-wrap">
+                <table class="dm-table">
                     <thead>
                         <tr>
                             <th>ID</th>
@@ -466,9 +480,19 @@
 
         <!-- ══════════ ROUTES PANEL ══════════ -->
         <div id="dm-panel-routes" class="dm-panel">
-            <div class="bm-panel-head">
-                <div class="bm-panel-title">Routes</div>
-                <button type="button" class="apply-btn" id="rtAddBtn">＋ Add route</button>
+            <!-- Client-side search (same approach as the Stops panel). -->
+            <div class="dm-toolbar">
+                <input type="search" id="rtSearch" class="dm-input dm-search"
+                       placeholder="Search id, name..."
+                       aria-label="Search routes">
+                <select id="rtFilterActive" class="dm-input dm-select" aria-label="Filter by state">
+                    <option value="">All states</option>
+                    <option value="true">Active</option>
+                    <option value="false">Inactive</option>
+                </select>
+                <button class="dm-btn dm-btn-ghost" id="rtResetBtn">Reset</button>
+                <button type="button" class="dm-btn dm-btn-ghost" id="rtExportBtn" title="Download this table as CSV">Export CSV</button>
+                <button type="button" class="dm-btn dm-btn-primary" id="rtAddBtn">+ New route</button>
             </div>
 
             <div id="rtForm" class="bm-form" hidden>
@@ -497,7 +521,28 @@
                             <option value="false">No</option>
                         </select>
                     </div>
+                    <div class="bm-field" id="rtBusField">
+                        <label class="bm-lbl" for="rtBus">Bus running it</label>
+                        <select class="bm-input" id="rtBus"></select>
+                    </div>
                 </div>
+
+                <!-- Creating a line also creates its first run: that run's stops
+                     are what the rest of the system reads as "the line's path"
+                     (findRepresentativeSequence). Say so explicitly, so the bus
+                     and the times don't look out of place here. -->
+                <div id="rtItinerary">
+                    <div class="tt-manual-head">
+                        <span class="bm-lbl">First run of this line — stops and times</span>
+                        <button type="button" class="bm-btn-ghost" id="rtAddStopBtn">+ Add stop</button>
+                    </div>
+                    <div class="rt-itn-hint">
+                        A line exists through its runs, so creating one also creates its first run.
+                        These stops become the line's route; further runs are added from the Timetable tab.
+                    </div>
+                    <div class="tt-stops" id="rtStops"></div>
+                </div>
+
                 <div class="bm-form-actions">
                     <span class="bm-msg" id="rtFormMsg"></span>
                     <button type="button" class="bm-btn-ghost" id="rtCancelBtn">Cancel</button>
@@ -505,8 +550,8 @@
                 </div>
             </div>
 
-            <div class="bm-table-wrap">
-                <table class="bm-table">
+            <div class="dm-table-wrap">
+                <table class="dm-table">
                     <thead>
                         <tr>
                             <th>ID</th>
@@ -521,6 +566,80 @@
                 </table>
             </div>
         </div><!-- /dm-panel-routes -->
+
+        <!-- ══════════ TIMETABLE PANEL ══════════ -->
+        <div id="dm-panel-timetable" class="dm-panel">
+            <div class="dm-toolbar">
+                <input type="search" id="ttSearch" class="dm-input dm-search"
+                       placeholder="Search run, line, plate..."
+                       aria-label="Search runs">
+                <select id="ttFilterRoute" class="dm-input dm-select" aria-label="Filter by line">
+                    <option value="">All lines</option>
+                </select>
+                <select id="ttFilterBus" class="dm-input dm-select" aria-label="Filter by bus">
+                    <option value="">All buses</option>
+                </select>
+                <button class="dm-btn dm-btn-ghost" id="ttResetBtn">Reset</button>
+                <button type="button" class="dm-btn dm-btn-ghost" id="ttExportBtn" title="One row per run (summary)">Export runs</button>
+                <button type="button" class="dm-btn dm-btn-ghost" id="ttExportStopsBtn" title="One row per run and stop, with arrival times">Export stop times</button>
+                <button type="button" class="dm-btn dm-btn-primary" id="ttAddBtn">+ New run</button>
+            </div>
+
+            <!-- Create a run: line + bus + departure. The stop sequence is
+                 copied from an existing run of the same line. -->
+            <div id="ttForm" class="bm-form" hidden>
+                <div class="bm-form-title">New run</div>
+
+                <div class="bm-form-grid">
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="ttRoute">Line</label>
+                        <select class="bm-input" id="ttRoute"></select>
+                    </div>
+                    <div class="bm-field">
+                        <label class="bm-lbl" for="ttBus">Bus</label>
+                        <select class="bm-input" id="ttBus"></select>
+                    </div>
+                    <div class="bm-field" id="ttDepartureField">
+                        <label class="bm-lbl" for="ttDeparture">Departure (HH:mm)</label>
+                        <input type="time" class="bm-input" id="ttDeparture" value="08:00">
+                    </div>
+                </div>
+
+                <div class="bm-form-actions">
+                    <span class="bm-msg" id="ttFormMsg">The stops come from the line's itinerary — a run only sets when and with which bus.</span>
+                    <button type="button" class="bm-btn-ghost" id="ttCancelBtn">Cancel</button>
+                    <button type="button" class="apply-btn" id="ttSaveBtn">Create run</button>
+                </div>
+            </div>
+
+            <!-- Stop-by-stop editor for one run -->
+            <div id="ttDetail" class="bm-form" hidden>
+                <div class="bm-form-title" id="ttDetailTitle">Run</div>
+                <div class="tt-stops" id="ttStops"></div>
+                <div class="bm-form-actions">
+                    <span class="bm-msg" id="ttDetailMsg"></span>
+                    <button type="button" class="bm-btn-ghost" id="ttDetailCloseBtn">Close</button>
+                    <button type="button" class="apply-btn" id="ttTimesSaveBtn">Save times</button>
+                </div>
+            </div>
+
+            <div class="dm-table-wrap">
+                <table class="dm-table">
+                    <thead>
+                        <tr>
+                            <th>Run</th>
+                            <th>Line</th>
+                            <th>Bus</th>
+                            <th>Departs</th>
+                            <th>Arrives</th>
+                            <th>Stops</th>
+                            <th class="bm-actions-col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ttTableBody"></tbody>
+                </table>
+            </div>
+        </div><!-- /dm-panel-timetable -->
 
     </div>
 
@@ -540,10 +659,9 @@
             <label class="dm-label" for="dmCapacity">Capacity (seats)</label>
             <input type="number" id="dmCapacity" class="dm-input" min="1" placeholder="85">
 
-            <label class="dm-label" for="dmRoute">Assigned route</label>
-            <select id="dmRoute" class="dm-input dm-select">
-                <option value="">— Unassigned —</option>
-            </select>
+            <!-- Route field removed: the route shown in the table is derived
+                 from the timetable (bus + current time → active trip), so a
+                 manual assignment here would have no visible effect. -->
 
             <label class="dm-label" for="dmStatus">Status</label>
             <select id="dmStatus" class="dm-input dm-select">

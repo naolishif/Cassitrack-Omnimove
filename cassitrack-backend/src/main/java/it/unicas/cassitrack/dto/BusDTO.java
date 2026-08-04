@@ -35,7 +35,12 @@ public class BusDTO {
             message = "Status must be ACTIVE, INACTIVE or MAINTENANCE")
     private String status;
 
-    /** Assigned route id, or null when the bus is unassigned. */
+    /**
+     * Route the bus is running, DERIVED from the timetable — not the manual
+     * buses.route_id column. Resolved as: antenna → bus → trips → route,
+     * picking the trip whose service window covers the current time.
+     * Read-only: ignored on create/update.
+     */
     private String routeId;
 
     /**
@@ -43,6 +48,15 @@ public class BusDTO {
      * Read-only: ignored on create/update.
      */
     private String routeName;
+
+    /**
+     * True  → routeName is the line in service RIGHT NOW.
+     * False → the bus is outside service hours, so routeName lists the lines
+     *         it serves according to the timetable.
+     * Null  → the bus has no trips at all.
+     * Lets the UI show live and scheduled values differently.
+     */
+    private Boolean routeLive;
 
     /** Whether the bus is shown on the fleet map. */
     @NotNull(message = "Map visibility must be specified")

@@ -1059,6 +1059,20 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 
 .dm-footer { font-family: var(--mono); font-size: 10px; color: var(--dim); flex-shrink: 0; }
 
+/* Marks a route value that comes from the timetable rather than from a trip
+   in service right now. */
+.dm-route-tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-left: 6px;
+    opacity: .8;
+}
+
 /* ── Status pills ─────────────────────────────────────────────── */
 .dm-pill {
     display: inline-block;
@@ -1076,21 +1090,24 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .dm-pill-maintenance { color: var(--amber); border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.10); }
 
 /* ── Row action buttons ───────────────────────────────────────── */
+/* Kept visually identical to .bm-row-btn (Stops/Routes tables) so the row
+   actions look the same across every Data Management panel. The old rule used
+   color:var(--dim) + 10px, which read as "disabled" next to the other tabs. */
 .dm-row-btn {
-    background: rgba(255,255,255,.04);
+    background: var(--panel2);
     border: 1px solid var(--border);
     border-radius: 6px;
-    color: var(--dim);
+    color: var(--text);
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 11px;
     padding: 5px 10px;
     cursor: pointer;
-    transition: all .2s ease;
+    transition: border-color .2s, color .2s;
     margin-left: 6px;
 }
 
-.dm-row-btn:hover { color: var(--text); border-color: var(--accent); }
-.dm-row-btn.dm-row-del:hover { color: var(--red); border-color: rgba(239,68,68,.5); }
+.dm-row-btn:hover { border-color: var(--accent); }
+.dm-row-btn.dm-row-del:hover { color: var(--red); border-color: rgba(239,68,68,.6); }
 
 /* ── Map-visibility switch ────────────────────────────────────── */
 .dm-switch { display: inline-block; position: relative; width: 34px; height: 18px; cursor: pointer; }
@@ -1259,11 +1276,12 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .dm-confirm-actions { display: flex; gap: 10px; justify-content: center; }
 
 /* ── Entity panels (Buses / Stops / Routes) ───────────────────── */
-/* The Buses panel is a flex column so its table can scroll; Stops and
-   Routes are simple scrolling blocks. */
+/* Every panel is a flex column: the table gets the remaining height (and
+   scrolls internally), and toolbar / form / table are spaced consistently by
+   the gap. Previously only Buses did this, which is why Stops and Routes
+   looked cramped and didn't fill the view. */
 .dm-panel { display: none; min-height: 0; }
-.dm-panel.active { display: block; overflow: auto; }
-#dm-panel-buses.active { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+.dm-panel.active { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
 
 /* ── Stops / Routes panels ─────────────────────────────────────────────────
    These two still render through the original markup and their JS builders
@@ -1273,10 +1291,13 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
    .bm-subnav-btn — the merged view uses .dm-wrap and .dm-subtab for those,
    and duplicating them would resurrect the redundancy this merge removed.
    ───────────────────────────────────────────────────────────────────────── */
-.bm-panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
-.bm-panel-title{font-family:var(--mono);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+/* Stops/Routes reuse the Buses toolbar + table classes verbatim, so the search
+   stretches (flex:1) and the table fills the full width with the same spacing. */
 
-.bm-form{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+/* No margin-bottom: the panel's flex gap already spaces the form from the
+   table, and the two would otherwise stack. flex-shrink:0 keeps the form at
+   its natural height so only the table scrolls. */
+.bm-form{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;flex-shrink:0}
 .bm-form-title{font-family:var(--mono);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
 .bm-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
 .bm-field{display:flex;flex-direction:column;gap:5px}
@@ -1307,3 +1328,16 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .bm-row-btn:hover{border-color:var(--accent)}
 .bm-row-btn.danger:hover{border-color:rgba(239,68,68,.6);color:#EF4444}
 .rt-swatch{display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid var(--border);vertical-align:middle;margin-right:6px}
+
+/* Timetable: stop-by-stop time editor for one run */
+.tt-stops{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;padding-right:4px}
+.tt-stop-row{display:flex;align-items:center;gap:10px}
+.tt-seq{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:22px;text-align:right}
+.tt-stop-name{flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tt-time{width:110px;flex-shrink:0}
+
+/* Timetable: manual stop-list builder */
+.tt-manual-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px}
+.rt-itn-hint{font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--dim);margin-bottom:10px}
+.tt-stop-select{flex:1;min-width:0}
+.tt-del-stop{flex-shrink:0;padding:5px 9px;margin-left:0}
