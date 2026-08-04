@@ -183,7 +183,7 @@ public class MqttConfig {
      * ------------
      * A client id is an IDENTITY, so it belongs in configuration. Set
      * MQTT_OBU_CLIENT_ID per environment (e.g. cassitrack-obu-server in
-     * .env_server, cassitrack-obu-ferran in a developer's .env) and that value
+     * .env_server, cassitrack-obu-dev1 on a developer's laptop) and that value
      * is used verbatim — which keeps the broker's connection log readable and
      * leaves the door open to per-client ACLs or cleanSession=false later.
      *

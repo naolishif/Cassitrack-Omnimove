@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -45,6 +46,16 @@ public class ScheduleAdherenceService {
      */
     private static final double RECESSION_MARGIN_METRES = 18.0;
 
+    /**
+     * Limiti oltre i quali la retta fra due fix non rappresenta più il percorso
+     * davvero seguito. 3 minuti coprono con margine l'invio a 60 s dell'OBU
+     * reale, anche saltandone uno; 2 km sono più di quanto un bus urbano
+     * percorra in quel tempo, ma molto meno del salto che si vede dopo
+     * un'assenza vera.
+     */
+    private static final Duration MAX_SEGMENT_GAP    = Duration.ofMinutes(3);
+    private static final double   MAX_SEGMENT_METRES = 2000.0;
+
     /** Unica fonte di verità: da minuti di ritardo a stato di puntualità. */
     public static ScheduleStatus statusFromDelay(Integer delayMinutes) {
         if (delayMinutes == null)                       return ScheduleStatus.UNKNOWN;
@@ -65,25 +76,31 @@ public class ScheduleAdherenceService {
 
     public void processBusAdherence(VehiclePosition pos) {
         try {
-            if (pos.getLat() == null || pos.getLon() == null) {
-                pos.setScheduleStatus(ScheduleStatus.UNKNOWN);
-                return;
-            }
-            if (pos.getTripId() == null) {
-                pos.setScheduleStatus(ScheduleStatus.UNKNOWN);
-                return;
-            }
-
-            // L'entità arriva "nuda" dal MqttMessageHandler: lo stato dell'avvicinamento
-            // e l'ultimo ritardo vivono in Redis. Riportali su questa istanza.
+            // PRIMA di ogni altra cosa: recupera quello che già sappiamo di
+            // questo veicolo. Le uscite qui sotto non devono MAI cancellare
+            // un'aderenza già misurata.
             carryOverState(pos);
+
+            if (pos.getLat() == null || pos.getLon() == null) return;
+
+            // Fra una corsa e l'altra il bus non ha un trip: TripResolutionService
+            // non restituisce nulla finché non inizia la successiva. Non è una
+            // perdita di informazione — il bus è ancora in ritardo di quanto lo
+            // era al capolinea — quindi l'ultimo stato misurato resta.
+            if (pos.getTripId() == null) return;
 
             int nowSeconds = secondsOfDay(pos.getTimestamp());
 
             // ── Aggancio iniziale ────────────────────────────────
             if (pos.getLastStopSequence() == null) {
                 Integer seq = routeMatchingService.bootstrapSequence(pos.getTripId(), nowSeconds);
-                if (seq == null) { pos.setScheduleStatus(ScheduleStatus.UNKNOWN); return; }
+                if (seq == null) {
+                    // Corsa senza fermate: non è tracciabile. Non cancella però
+                    // una misura già riportata — resterebbe comunque l'ultima
+                    // informazione vera che abbiamo su questo bus.
+                    if (pos.getScheduleStatus() == null) pos.setScheduleStatus(ScheduleStatus.UNKNOWN);
+                    return;
+                }
 
                 pos.setLastStopSequence(seq);
                 var anchor = routeMatchingService.stopAtSequence(pos.getTripId(), seq);
@@ -93,7 +110,10 @@ public class ScheduleAdherenceService {
                 log.info("Bus {} agganciato alla corsa {} da seq {} ({})",
                         pos.getVehicleId(), pos.getTripId(), seq,
                         anchor != null ? anchor.stopId() : "?");
-                return;   // nessun ritardo: quell'arrivo non l'abbiamo osservato
+                // Nessun ritardo NUOVO: quell'arrivo non l'abbiamo osservato.
+                // Lo stato riportato da carryOverState resta valido fino alla
+                // prossima fermata, che lo ricalcolerà.
+                return;
             }
 
             // ── Il candidato è SEMPRE la fermata successiva. Mai una precedente. ──
@@ -101,23 +121,26 @@ public class ScheduleAdherenceService {
                     pos.getTripId(), pos.getLastStopSequence() + 1);
             if (candidate == null) return;   // capolinea: TripResolutionService riaggancerà
 
-            Double d = routeMatchingService.distanceToStop(
-                    candidate.stopId(), pos.getLat(), pos.getLon());
-            if (d == null) return;
+            // Distanza e istante di massimo avvicinamento sul TRATTO percorso
+            // dall'ultimo fix, non sul fix isolato. Vedi measureApproach().
+            Approach ap = measureApproach(pos, candidate.stopId());
+            if (ap == null) return;
+            double  d      = ap.metres();
+            Instant closest = ap.at();
 
             // Nuovo candidato → inizializza il minimo
             if (!Integer.valueOf(candidate.stopSequence()).equals(pos.getApproachStopSequence())
                     || pos.getApproachMinDistanceMetres() == null) {
                 pos.setApproachStopSequence(candidate.stopSequence());
                 pos.setApproachMinDistanceMetres(d);
-                pos.setApproachMinTimestamp(pos.getTimestamp());
+                pos.setApproachMinTimestamp(closest);
                 return;
             }
 
             // Ancora in avvicinamento → il minimo scende
             if (d < pos.getApproachMinDistanceMetres()) {
                 pos.setApproachMinDistanceMetres(d);
-                pos.setApproachMinTimestamp(pos.getTimestamp());
+                pos.setApproachMinTimestamp(closest);
                 return;
             }
 
@@ -154,19 +177,48 @@ public class ScheduleAdherenceService {
 
         } catch (Exception e) {
             log.warn("Adherence non calcolabile per {}: {}", pos.getVehicleId(), e.getMessage());
-            pos.setScheduleStatus(ScheduleStatus.UNKNOWN);
+            // Un errore di calcolo non è una notizia sul bus: se un ritardo era
+            // già stato misurato resta valido. UNKNOWN solo se non sappiamo nulla.
+            if (pos.getScheduleStatus() == null) pos.setScheduleStatus(ScheduleStatus.UNKNOWN);
+        } finally {
+            // In finally perché il metodo ha una dozzina di uscite anticipate e
+            // il tratto successivo deve comunque partire da qui.
+            rememberFix(pos);
         }
     }
 
-    /** Lo stato vive in Redis. Se la corsa è cambiata, riparte da zero. */
+    /**
+     * Lo stato vive in Redis. Due categorie, con regole diverse.
+     *
+     * ANCORAGGIO (lastStopSequence, approach*) — relativo alla CORSA. Al cambio
+     * di corsa riparte da zero: una sequenza della corsa precedente farebbe
+     * cercare la fermata sbagliata.
+     *
+     * ADERENZA (delayMinutes, scheduleStatus e il contesto della misura) —
+     * relativa al VEICOLO. Un bus arrivato con 6 minuti di ritardo al capolinea
+     * è ancora in ritardo di 6 minuti quando parte per la corsa successiva: il
+     * ritardo non si azzera perché cambia l'identificativo della corsa. Quindi
+     * l'ultimo stato misurato viene mantenuto fino alla fermata successiva, che
+     * lo ricalcola — invece di tornare UNKNOWN a ogni inizio corsa.
+     */
     private void carryOverState(VehiclePosition pos) {
         vehicleStateCache.get(pos.getVehicleId()).ifPresent(prev -> {
-            if (!java.util.Objects.equals(prev.getTripId(), pos.getTripId())) return;
-            pos.setLastStopSequence(prev.getLastStopSequence());
-            pos.setLastStopRegisteredId(prev.getLastStopRegisteredId());
-            pos.setApproachStopSequence(prev.getApproachStopSequence());
-            pos.setApproachMinDistanceMetres(prev.getApproachMinDistanceMetres());
-            pos.setApproachMinTimestamp(prev.getApproachMinTimestamp());
+            // Il fix precedente è un fatto sul VEICOLO: vale anche se nel
+            // frattempo è cambiata la corsa, perché il bus il tratto lo ha
+            // percorso comunque.
+            pos.setPrevFixLat(prev.getPrevFixLat());
+            pos.setPrevFixLon(prev.getPrevFixLon());
+            pos.setPrevFixAt(prev.getPrevFixAt());
+
+            if (java.util.Objects.equals(prev.getTripId(), pos.getTripId())) {
+                pos.setLastStopSequence(prev.getLastStopSequence());
+                pos.setLastStopRegisteredId(prev.getLastStopRegisteredId());
+                pos.setApproachStopSequence(prev.getApproachStopSequence());
+                pos.setApproachMinDistanceMetres(prev.getApproachMinDistanceMetres());
+                pos.setApproachMinTimestamp(prev.getApproachMinTimestamp());
+            }
+            if (!adherenceStillMeaningful(prev)) return;
+
             pos.setDelayMinutes(prev.getDelayMinutes());
             pos.setScheduleStatus(prev.getScheduleStatus());
             pos.setDelayStopId(prev.getDelayStopId());
@@ -175,6 +227,28 @@ public class ScheduleAdherenceService {
             pos.setDelayMeasuredAt(prev.getDelayMeasuredAt());
         });
         if (pos.getScheduleStatus() == null) pos.setScheduleStatus(ScheduleStatus.UNKNOWN);
+    }
+
+    /**
+     * Un ritardo misurato vale per tutta la giornata di servizio in cui è stato
+     * preso, e solo per quella.
+     *
+     * Il criterio è la DATA, non un intervallo di tempo. Una soglia a minuti
+     * sembrava prudente ma è sbagliata: basta che un bus passi troppo lontano
+     * dalle sue fermate per un po' — succede davvero, vedi il gate degli 80 m —
+     * e lo stato tornerebbe a UNKNOWN nel mezzo del servizio, che è esattamente
+     * ciò che non deve accadere. Il record Redis però non scade, quindi senza
+     * alcun limite un bus fermo in deposito ripartirebbe la mattina dopo
+     * esibendo il ritardo del giorno prima: da qui il confronto fra date.
+     */
+    private boolean adherenceStillMeaningful(VehiclePosition prev) {
+        if (prev.getScheduleStatus() == null) return false;
+        Instant measuredAt = prev.getDelayMeasuredAt();
+        // Nessuna misura da riportare: c'è solo lo stato, che a questo punto
+        // non può che essere UNKNOWN.
+        if (measuredAt == null) return false;
+        return measuredAt.atZone(ITALY_TZ).toLocalDate()
+                .equals(Instant.now().atZone(ITALY_TZ).toLocalDate());
     }
 
     /**
@@ -195,10 +269,15 @@ public class ScheduleAdherenceService {
         Integer pax = CrowdingService.effectivePassengers(
                 pos.getPassengers(), pos.getBleDeviceCount());
 
+        // trip_id is what makes an arrival attributable to a RUN rather than just
+        // to a bus at a stop. Without it the Active Trips view cannot tell which
+        // of the day's passes through this stop it is looking at — the routes are
+        // rings, so the same stop_id recurs many times per vehicle per day.
         Point arrivalEvent = Point.measurement("stop_arrival")
                 .addTag("vehicle_id", pos.getVehicleId())
                 .addTag("stop_id",    stop.stopId())
                 .addTag("route_id",   routeId)
+                .addTag("trip_id",    pos.getTripId() != null ? pos.getTripId() : "UNKNOWN_TRIP")
                 .addField("bus_id",               pos.getBusId() != null ? pos.getBusId() : 0)
                 .addField("stop_sequence",        stop.stopSequence())
                 .addField("delay_minutes",        delayMinutes)
@@ -206,6 +285,80 @@ public class ScheduleAdherenceService {
                 .time(arrivedAt != null ? arrivedAt : Instant.now(), WritePrecision.S);
 
         influxWriteApi.writePoint(arrivalEvent);
+    }
+
+    /** Massimo avvicinamento a una fermata, con l'istante in cui è avvenuto. */
+    private record Approach(double metres, Instant at) {}
+
+    /**
+     * Quanto il bus si è avvicinato alla fermata DA QUANDO l'abbiamo visto
+     * l'ultima volta, e quando.
+     *
+     * Il fix isolato non basta più. Un OBU reale trasmette una volta al minuto:
+     * a 25 km/h sono circa 420 m fra un punto e il successivo, e la fermata
+     * finisce quasi sempre nel mezzo, mai abbastanza vicina a un fix da
+     * superare il gate degli 80 m. Il risultato era un bus che non registrava
+     * MAI un arrivo e restava eternamente UNKNOWN.
+     *
+     * Si misura quindi la distanza dal segmento fra il fix precedente e questo,
+     * e si data l'arrivo interpolando fra i due istanti: su 60 s di intervallo
+     * attribuirlo a uno dei due estremi significherebbe sbagliare il ritardo
+     * fino a un minuto.
+     */
+    private Approach measureApproach(VehiclePosition pos, String stopId) {
+        Instant now = pos.getTimestamp() != null ? pos.getTimestamp() : Instant.now();
+
+        Double  pLat = pos.getPrevFixLat();
+        Double  pLon = pos.getPrevFixLon();
+        Instant pAt  = pos.getPrevFixAt();
+
+        if (pLat != null && pLon != null && pAt != null && usableSegment(pos, pLat, pLon, pAt)) {
+            var seg = routeMatchingService.approachToStopAlongSegment(
+                    stopId, pLat, pLon, pos.getLat(), pos.getLon());
+            if (seg != null) {
+                long span = Duration.between(pAt, now).toMillis();
+                Instant at = span > 0
+                        ? pAt.plusMillis(Math.round(seg.t() * span))
+                        : now;
+                return new Approach(seg.metres(), at);
+            }
+        }
+
+        // Primo fix dopo un riavvio, o salto troppo grande per fidarsi della
+        // retta: si ricade sulla misura puntuale, come prima.
+        Double d = routeMatchingService.distanceToStop(stopId, pos.getLat(), pos.getLon());
+        return d == null ? null : new Approach(d, now);
+    }
+
+    /**
+     * Il segmento vale solo se i due fix sono abbastanza vicini nel tempo e
+     * nello spazio da rendere plausibile la retta che li unisce.
+     *
+     * Dopo un'assenza lunga — bus spento, unità in avaria, backend riavviato —
+     * la congiungente attraversa mezza città e passerebbe "sopra" fermate che
+     * il bus non ha mai servito, inventando arrivi.
+     */
+    private boolean usableSegment(VehiclePosition pos, double pLat, double pLon, Instant pAt) {
+        Instant now = pos.getTimestamp() != null ? pos.getTimestamp() : Instant.now();
+        Duration gap = Duration.between(pAt, now);
+        if (gap.isNegative() || gap.compareTo(MAX_SEGMENT_GAP) > 0) return false;
+
+        double span = routeMatchingService.haversineMetres(pLat, pLon, pos.getLat(), pos.getLon());
+        return span <= MAX_SEGMENT_METRES;
+    }
+
+    /**
+     * Ricorda questo fix come punto di partenza del prossimo tratto.
+     *
+     * Va fatto a ogni messaggio, qualunque strada prenda il calcolo: se un
+     * ritorno anticipato saltasse l'aggiornamento, il tratto successivo
+     * partirebbe da un punto vecchio e coprirebbe due intervalli.
+     */
+    private void rememberFix(VehiclePosition pos) {
+        if (pos.getLat() == null || pos.getLon() == null) return;   // niente da ricordare
+        pos.setPrevFixLat(pos.getLat());
+        pos.setPrevFixLon(pos.getLon());
+        pos.setPrevFixAt(pos.getTimestamp() != null ? pos.getTimestamp() : Instant.now());
     }
 
     private void resetApproach(VehiclePosition pos) {

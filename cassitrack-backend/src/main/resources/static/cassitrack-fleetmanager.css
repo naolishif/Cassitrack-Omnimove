@@ -1023,6 +1023,9 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .dm-table thead th {
     position: sticky;
     top: 0;
+    /* Above the rows: cells scrolling underneath must not paint over the
+       header, which they do at equal stacking order once a row is tinted. */
+    z-index: 2;
     background: var(--panel2);
     color: var(--dim);
     font-family: var(--mono);
@@ -1048,6 +1051,72 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .dm-center { text-align: center; }
 .dm-plate { font-family: var(--mono); font-weight: 700; color: var(--light); }
 .dm-muted { color: var(--dim); }
+.dm-mono  { font-family: var(--mono); }
+
+/* Active Trips: the secondary lines under a progress bar (stop count, next stop).
+   A class rather than style="" because CSP has no 'unsafe-inline' in style-src. */
+.trip-sub { font-size: 10px; color: var(--dim); margin-top: 3px; line-height: 1.35; }
+.dm-table td .cbar { min-width: 90px; }
+
+/* Phase tinting: the day should read at a glance — what is over, what is
+   happening, what is still to come. Hovering restores full contrast so a
+   dimmed row is still readable when you actually look at it. */
+.trip-done   > td { opacity: .55; }
+.trip-future > td { opacity: .82; }
+.trip-active > td { background: rgba(34,197,94,.05); }
+.dm-table tbody tr.trip-done:hover > td,
+.dm-table tbody tr.trip-future:hover > td { opacity: 1; }
+
+.trip-pill-done   { color: var(--accent); border-color: rgba(59,130,246,.35); background: rgba(59,130,246,.10); }
+.trip-pill-active { color: var(--green);  border-color: rgba(34,197,94,.35);  background: rgba(34,197,94,.10); }
+.trip-pill-future { color: var(--dim);    border-color: rgba(75,85,99,.45);   background: rgba(75,85,99,.12); }
+
+
+/* Filter bar: many controls on one row, wrapping on narrow screens. */
+.dm-toolbar-sub { padding-top: 0; margin-top: -4px; }
+.dm-filter { width: auto; min-width: 118px; flex: 0 0 auto; }
+.dm-search { width: auto; min-width: 210px; flex: 1 1 210px; }
+
+/* A field that is present but not editable right now — visibly inert, still
+   readable, so the value it holds is not mistaken for missing. */
+.dm-input-locked, .dm-input:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+    background: rgba(255,255,255,.02);
+}
+
+/* An irreversible consequence deserves more than a hint. */
+.dm-warn {
+    margin: 14px 0 0;
+    padding: 10px 12px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--amber);
+    background: rgba(245,158,11,.08);
+    border: 1px solid rgba(245,158,11,.35);
+    border-radius: 6px;
+}
+.dm-warn strong { color: var(--light); }
+
+/* Marks a stop count inferred from the timetable rather than observed. */
+.trip-inferred {
+    font-style: italic;
+    opacity: .75;
+    cursor: help;
+    border-bottom: 1px dotted var(--dim);
+}
+
+/* Read-only context rows in the trip drawer — same rhythm as .dm-input,
+   without looking like something you can type into. */
+.dm-readonly {
+    margin: 0 0 14px;
+    padding: 9px 11px;
+    background: rgba(255,255,255,.02);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+}
 
 .dm-empty {
     text-align: center;
@@ -1281,6 +1350,16 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
    the gap. Previously only Buses did this, which is why Stops and Routes
    looked cramped and didn't fill the view. */
 .dm-panel { display: none; min-height: 0; }
+/* Every panel is a flex column: the table gets the remaining height (and
+   scrolls internally), and toolbar / form / table are spaced consistently by
+   the gap. Previously only Buses did this, which is why Stops and Routes
+   looked cramped and didn't fill the view.
+
+   This is also what makes the sticky table header work. `position: sticky` on
+   a <th> anchors to the nearest scrolling ancestor: if the PANEL scrolls it
+   drags .dm-table-wrap — and the header with it — out of view. Because the
+   panel is fixed-height and overflow:hidden, .dm-table-wrap (flex:1,
+   overflow:auto) is the scroller instead, and the header stays put. */
 .dm-panel.active { display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
 
 /* ── Stops / Routes panels ─────────────────────────────────────────────────

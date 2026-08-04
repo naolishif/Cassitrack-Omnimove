@@ -88,6 +88,9 @@ services:
       CASSITRACK_URL: ${CASSITRACK_URL}
       CASSITRACK_API_TOKEN: ${CASSITRACK_API_TOKEN}
       CASSITRACK_NETEX_URL: ${CASSITRACK_NETEX_URL}
+      # How often to check CassiTrack for static-data changes. The URL itself is
+      # derived from CASSITRACK_NETEX_URL, so there is nothing else to configure.
+      CASSITRACK_POLL_INTERVAL_MS: ${CASSITRACK_POLL_INTERVAL_MS:-60000}
 
       # External APIs
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}

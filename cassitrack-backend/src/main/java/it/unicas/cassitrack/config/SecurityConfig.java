@@ -114,8 +114,9 @@ public class SecurityConfig {
                                 "/cassitrack-fleetmanager.css",
                                 "/cassitrack-fleetmanager.js",
                                 "/api/v1/analytics/**",
-                                "/api/v1/buses/**",         // fleet CRUD (Data Management) — all methods
-                                "/api/v1/timetable/**"      // trips + stop times (Data Management)
+                                "/api/v1/buses/**",
+                                "/api/v1/trips/**",
+                                "/api/v1/timetable/**" // fleet CRUD (Data Management) — all methods
                         ).hasAnyAuthority("FLEET_MANAGER", "ROLE_FLEET_MANAGER")
 
                         // V-10 FIX (OWASP A01): /api/v1/ai/** was mapped to two conflicting rules;

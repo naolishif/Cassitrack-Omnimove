@@ -1,6 +1,7 @@
 package it.unicas.omnimove;
 
 import it.unicas.omnimove.service.NetexImportService;
+import it.unicas.omnimove.service.StaticDataSyncService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -27,9 +28,14 @@ public class OmnimoveApplication {
     // 1. 👈 DICHIARIAMO il servizio come variabile privata
     private final NetexImportService netexImportService;
 
+    /** Takes over the import if the retry loop below never manages one. */
+    private final StaticDataSyncService staticDataSyncService;
+
     // 2. 👈 CREIAMO IL COSTRUTTORE per iniettarlo in OmnimoveApplication
-    public OmnimoveApplication(NetexImportService netexImportService) {
+    public OmnimoveApplication(NetexImportService netexImportService,
+                               StaticDataSyncService staticDataSyncService) {
         this.netexImportService = netexImportService;
+        this.staticDataSyncService = staticDataSyncService;
     }
 
     public static void main(String[] args) {
@@ -56,8 +62,14 @@ public class OmnimoveApplication {
                         attempt, MAX_ATTEMPTS, e.getMessage());
 
                 if (attempt == MAX_ATTEMPTS) {
+                    // No restart needed: hand the job to the version poller, which
+                    // will import as soon as CassiTrack answers. Without this the
+                    // poller would mistake CassiTrack's counters for data it
+                    // already holds and never catch up.
+                    staticDataSyncService.markFullImportOwed();
                     System.err.println("[OMNIMOVE] Tutti i tentativi esauriti. " +
-                            "OmniMove partirà con tabelle vuote — riprovare manualmente o riavviare.");
+                            "I dati restano quelli precedenti; l'importazione verrà " +
+                            "ritentata dal controllo versioni appena CassiTrack risponde.");
                     return;
                 }
 
@@ -66,6 +78,9 @@ public class OmnimoveApplication {
                     Thread.sleep(delay);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
+                    // Interrupted mid-retry: no import happened, so the poller
+                    // must not assume the data is current.
+                    staticDataSyncService.markFullImportOwed();
                     return;
                 }
 

@@ -61,413 +61,421 @@
 
         <div class="sidebar">
 
-        <!-- Fleet Tab -->
+            <!-- Fleet Tab -->
             <div id="tab-fleet" class="tab-fleet-col">
-            <div class="section">
-                <div class="fm-filter-title">FILTERS</div>
-                <div class="fm-filter-row">
-                    <label class="fm-filter-lbl" for="routeFilter">Route</label>
-                    <select class="filter-select fm-filter-select" id="routeFilter">
-                        <option value="">All routes</option>
-                    </select>
-                </div>
-                <div class="fm-filter-row">
-                    <label class="fm-filter-lbl" for="serviceFilter">Service</label>
-                    <select class="filter-select fm-filter-select" id="serviceFilter">
-                        <option value="all">All</option>
-                        <option value="in">In service</option>
-                        <option value="out">Out of service</option>
-                    </select>
-                </div>
-                <div class="fm-filter-row">
-                    <label class="fm-filter-lbl" for="delayFilter">Min delay</label>
-                    <input type="range" class="fm-filter-range" id="delayFilter" min="0" max="20" step="1" value="0">
-                    <span class="fm-filter-val" id="delayFilterVal">off</span>
-                </div>
-            </div>
-            <div class="section">
-                <div class="analytics-box">
-                    <div class="analytics-title">FLEET OVERVIEW</div>
-
-                    <div class="analytics-grid">
-                        <div class="analytics-card">
-                            <div class="analytics-value" id="anActiveRatio">0/0</div>
-                            <div class="analytics-label">BUSES ACTIVE</div>
-                        </div>
-
-                        <div class="analytics-card">
-                            <div class="analytics-value" id="anPassengers">0</div>
-                            <div class="analytics-label">TOTAL PAX</div>
-                        </div>
+                <div class="section">
+                    <div class="fm-filter-title">FILTERS</div>
+                    <div class="fm-filter-row">
+                        <label class="fm-filter-lbl" for="routeFilter">Route</label>
+                        <select class="filter-select fm-filter-select" id="routeFilter">
+                            <option value="">All routes</option>
+                        </select>
+                    </div>
+                    <div class="fm-filter-row">
+                        <label class="fm-filter-lbl" for="serviceFilter">Service</label>
+                        <select class="filter-select fm-filter-select" id="serviceFilter">
+                            <option value="all">All</option>
+                            <option value="in">In service</option>
+                            <option value="out">Out of service</option>
+                        </select>
+                    </div>
+                    <div class="fm-filter-row">
+                        <label class="fm-filter-lbl" for="delayFilter">Min delay</label>
+                        <input type="range" class="fm-filter-range" id="delayFilter" min="0" max="20" step="1" value="0">
+                        <span class="fm-filter-val" id="delayFilterVal">off</span>
                     </div>
                 </div>
+                <div class="section">
+                    <div class="analytics-box">
+                        <div class="analytics-title">FLEET OVERVIEW</div>
 
+                        <div class="analytics-grid">
+                            <div class="analytics-card">
+                                <div class="analytics-value" id="anActiveRatio">0/0</div>
+                                <div class="analytics-label">BUSES ACTIVE</div>
+                            </div>
+
+                            <div class="analytics-card">
+                                <div class="analytics-value" id="anPassengers">0</div>
+                                <div class="analytics-label">TOTAL PAX</div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+                <div id="vehicle-list"></div>
+                <div class="footer">UNICAS · Distributed Programming 2025/2026<br>CASSITRACK + OMNIMOVE v0.1 · Cassino</div>
             </div>
-            <div id="vehicle-list"></div>
-            <div class="footer">UNICAS · Distributed Programming 2025/2026<br>CASSITRACK + OMNIMOVE v0.1 · Cassino</div>
         </div>
     </div>
-</div>
 
-<!-- ========================================= -->
-<!-- ANALYTICS VIEW -->
-<!-- ========================================= -->
+    <!-- ========================================= -->
+    <!-- ANALYTICS VIEW -->
+    <!-- ========================================= -->
 
-<div id="analytics-view" class="main-view">
+    <div id="analytics-view" class="main-view">
 
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- FILTER BAR                                                  -->
-    <!-- ═══════════════════════════════════════════════════════════ -->
-    <div class="filter-bar" id="filterBar">
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- FILTER BAR                                                  -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <div class="filter-bar" id="filterBar">
 
-        <!-- Time presets -->
-        <span class="filter-label">PERIOD</span>
-        <button class="preset-btn active" data-preset="today" id="presetBtnToday">Today</button>
-        <button class="preset-btn" data-preset="yesterday" id="presetBtnYesterday">Yesterday</button>
-        <button class="preset-btn" data-preset="week" id="presetBtnWeek">Last 7 Days</button>
-        <button class="preset-btn" data-preset="month" id="presetBtnMonth">This Month</button>
-        <button class="preset-btn" data-preset="lastmonth" id="presetBtnLastMonth">Last Month</button>
-        <button class="preset-btn" data-preset="custom" id="presetBtnCustom">Custom</button>
+            <!-- Time presets -->
+            <span class="filter-label">PERIOD</span>
+            <button class="preset-btn active" data-preset="today" id="presetBtnToday">Today</button>
+            <button class="preset-btn" data-preset="yesterday" id="presetBtnYesterday">Yesterday</button>
+            <button class="preset-btn" data-preset="week" id="presetBtnWeek">Last 7 Days</button>
+            <button class="preset-btn" data-preset="month" id="presetBtnMonth">This Month</button>
+            <button class="preset-btn" data-preset="lastmonth" id="presetBtnLastMonth">Last Month</button>
+            <button class="preset-btn" data-preset="custom" id="presetBtnCustom">Custom</button>
 
-        <div id="customDateRange" class="custom-date-range">
-            <input type="date" class="filter-date" id="filterFrom" title="From date">
-            <span class="range-arrow">→</span>
-            <input type="date" class="filter-date" id="filterTo"   title="To date">
-        </div>
-
-        <div class="filter-sep"></div>
-
-        <!-- Route multi-select -->
-        <span class="filter-label">ROUTES</span>
-        <div class="route-dropdown-wrap" id="routeDropdownWrap">
-            <button class="preset-btn" id="routeDropdownBtn">All Routes ▾</button>
-            <div class="route-dropdown" id="routeDropdown">
-                <div class="rdrop-header">
-                    <span>LINES</span>
-                    <span id="clearRoutesBtn">Clear all</span>
-                </div>
-                <div id="routeCheckList">
-                    <div class="rdrop-item-empty">Loading routes...</div>
-                </div>
-            </div>
-        </div>
-        <div class="route-pills" id="selectedRoutePills"></div>
-
-        <div class="filter-sep"></div>
-
-        <!-- Bus select -->
-        <span class="filter-label">BUS</span>
-        <select class="filter-select" id="filterBus" title="Filter by bus">
-            <option value="">All Buses</option>
-        </select>
-
-        <div class="filter-sep"></div>
-
-        <!-- Group by -->
-        <span class="filter-label">GROUP</span>
-        <select class="filter-select filter-select-narrow" id="filterGroupBy" title="Group by hour or day">
-            <option value="hour">By Hour</option>
-            <option value="day">By Day</option>
-        </select>
-
-        <!-- Apply -->
-        <button class="apply-btn" id="applyFiltersBtn">Apply Filters</button>
-
-    </div>
-
-    <div class="analytics-dashboard">
-
-        <!-- LEFT COLUMN -->
-        <div class="analytics-left">
-
-            <!-- KPI GRID -->
-            <div class="kpi-grid compact-kpis">
-
-
-
-                <div class="kpi-card">
-                    <div class="kpi-label">Average Delay</div>
-                    <div class="kpi-row">
-                        <div class="kpi-value" id="kpiDelay">—</div>
-                    </div>
-                    <div class="kpi-sub" id="kpiDelaySub">mean across selected period</div>
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">Average Occupancy</div>
-                    <div class="kpi-row">
-                        <div class="kpi-value" id="kpiPassengers">—</div>
-                    </div>
-                    <div class="kpi-sub" id="kpiPaxSub">mean passengers per slot</div>
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">CO₂ Saved</div>
-                    <div class="kpi-row">
-                        <div class="kpi-value" id="kpiCo2">—</div>
-                    </div>
-                    <div class="kpi-sub" id="kpiCo2Sub">vs private cars</div>
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">On-Time Performance</div>
-                    <div class="kpi-row">
-                        <div class="kpi-value" id="kpiOnTimePct">—</div>
-                    </div>
-                    <div class="kpi-sub" id="kpiOnTimeSub">% buses on schedule (live)</div>
-                </div>
-
+            <div id="customDateRange" class="custom-date-range">
+                <input type="date" class="filter-date" id="filterFrom" title="From date">
+                <span class="range-arrow">→</span>
+                <input type="date" class="filter-date" id="filterTo"   title="To date">
             </div>
 
-            <!-- DONUT -->
-            <div class="chart-card small-chart">
+            <div class="filter-sep"></div>
 
-                <div class="chart-header">
-                    <div>
-                        <div class="chart-title">Fleet Status</div>
-
-                        <div class="chart-subtitle">
-                            Real-time operational state
-                        </div>
+            <!-- Route multi-select -->
+            <span class="filter-label">ROUTES</span>
+            <div class="route-dropdown-wrap" id="routeDropdownWrap">
+                <button class="preset-btn" id="routeDropdownBtn">All Routes ▾</button>
+                <div class="route-dropdown" id="routeDropdown">
+                    <div class="rdrop-header">
+                        <span>LINES</span>
+                        <span id="clearRoutesBtn">Clear all</span>
                     </div>
-                </div>
-
-                <div class="fleet-status">
-
-                    <div class="donut-wrapper">
-                        <div class="fake-donut">
-                            <span id="kpiOnTime">—</span>
-                        </div>
+                    <div id="routeCheckList">
+                        <div class="rdrop-item-empty">Loading routes...</div>
                     </div>
-
-                    <div class="status-legend">
-
-                        <div class="legend-item">
-                            <span class="legend-dot green"></span>
-                            ON TIME
-                        </div>
-
-                        <div class="legend-item">
-                            <span class="legend-dot amber"></span>
-                            SLIGHT DELAY
-                        </div>
-
-                        <div class="legend-item">
-                            <span class="legend-dot red"></span>
-                            LATE
-                        </div>
-
-                        <!-- CSP FIX (A05): .legend-dot.amber, never style="background:#F59E0B" -->
-                        <div class="legend-item">
-                            <span class="legend-dot amber"></span>
-                            NO TRIP
-                        </div>
-
-                    </div>
-
                 </div>
             </div>
+            <div class="route-pills" id="selectedRoutePills"></div>
+
+            <div class="filter-sep"></div>
+
+            <!-- Bus select -->
+            <span class="filter-label">BUS</span>
+            <select class="filter-select" id="filterBus" title="Filter by bus">
+                <option value="">All Buses</option>
+            </select>
+
+            <div class="filter-sep"></div>
+
+            <!-- Group by -->
+            <span class="filter-label">GROUP</span>
+            <select class="filter-select filter-select-narrow" id="filterGroupBy" title="Group by hour or day">
+                <option value="hour">By Hour</option>
+                <option value="day">By Day</option>
+            </select>
+
+            <!-- Apply -->
+            <button class="apply-btn" id="applyFiltersBtn">Apply Filters</button>
 
         </div>
 
-        <!-- RIGHT COLUMN -->
-        <div class="analytics-right">
+        <div class="analytics-dashboard">
 
-            <!-- MAIN CHART -->
-            <div class="chart-card big-chart">
+            <!-- LEFT COLUMN -->
+            <div class="analytics-left">
 
-                <div class="chart-header">
-                    <div>
-                        <div class="chart-title">
-                            Network Punctuality
+                <!-- KPI GRID -->
+                <div class="kpi-grid compact-kpis">
+
+
+
+                    <div class="kpi-card">
+                        <div class="kpi-label">Average Delay</div>
+                        <div class="kpi-row">
+                            <div class="kpi-value" id="kpiDelay">—</div>
                         </div>
+                        <div class="kpi-sub" id="kpiDelaySub">mean across selected period</div>
+                    </div>
 
-                        <div class="chart-subtitle" id="delayChartSub">
-                            Delay by line · per hour
+                    <div class="kpi-card">
+                        <div class="kpi-label">Average Occupancy</div>
+                        <div class="kpi-row">
+                            <div class="kpi-value" id="kpiPassengers">—</div>
+                        </div>
+                        <div class="kpi-sub" id="kpiPaxSub">mean passengers per slot</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-label">CO₂ Saved</div>
+                        <div class="kpi-row">
+                            <div class="kpi-value" id="kpiCo2">—</div>
+                        </div>
+                        <div class="kpi-sub" id="kpiCo2Sub">vs private cars</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-label">On-Time Performance</div>
+                        <div class="kpi-row">
+                            <div class="kpi-value" id="kpiOnTimePct">—</div>
+                        </div>
+                        <div class="kpi-sub" id="kpiOnTimeSub">% buses on schedule (live)</div>
+                    </div>
+
+                </div>
+
+                <!-- DONUT -->
+                <div class="chart-card small-chart">
+
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">Fleet Status</div>
+
+                            <div class="chart-subtitle">
+                                Real-time operational state
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div id="delay-chart-wrap" class="chart-wrap">
-                    <canvas id="delayChart" class="chart-canvas"></canvas>
-                </div>
-                <div id="delayChartEmpty" class="chart-empty">
-                    No data for the selected filters — try a different period or route.
+                    <div class="fleet-status">
+
+                        <div class="donut-wrapper">
+                            <div class="fake-donut">
+                                <span id="kpiOnTime">—</span>
+                            </div>
+                        </div>
+
+                        <div class="status-legend">
+
+                            <div class="legend-item">
+                                <span class="legend-dot green"></span>
+                                ON TIME
+                            </div>
+
+                            <div class="legend-item">
+                                <span class="legend-dot amber"></span>
+                                SLIGHT DELAY
+                            </div>
+
+                            <div class="legend-item">
+                                <span class="legend-dot red"></span>
+                                LATE
+                            </div>
+
+                            <!-- CSP FIX (A05): .legend-dot.amber, never style="background:#F59E0B" -->
+                            <div class="legend-item">
+                                <span class="legend-dot amber"></span>
+                                NO TRIP
+                            </div>
+
+                        </div>
+
+                    </div>
                 </div>
 
             </div>
 
-            <!-- BOTTOM GRID -->
-            <div class="bottom-grid">
+            <!-- RIGHT COLUMN -->
+            <div class="analytics-right">
 
-                <!-- MOST USED ROUTES -->
-                <div class="chart-card">
+                <!-- MAIN CHART -->
+                <div class="chart-card big-chart">
 
                     <div class="chart-header">
                         <div>
                             <div class="chart-title">
-                                Network Occupancy
+                                Network Punctuality
                             </div>
 
-                            <div class="chart-subtitle" id="paxChartSub">
-                                Passenger demand by line · per hour
+                            <div class="chart-subtitle" id="delayChartSub">
+                                Delay by line · per hour
                             </div>
                         </div>
                     </div>
 
-                    <div id="routes-chart-wrap" class="chart-wrap">
-                        <canvas id="routesChart" class="chart-canvas"></canvas>
+                    <div id="delay-chart-wrap" class="chart-wrap">
+                        <canvas id="delayChart" class="chart-canvas"></canvas>
                     </div>
-                    <div id="routesChartEmpty" class="chart-empty">
+                    <div id="delayChartEmpty" class="chart-empty">
                         No data for the selected filters — try a different period or route.
                     </div>
 
                 </div>
 
+                <!-- BOTTOM GRID -->
+                <div class="bottom-grid">
+
+                    <!-- MOST USED ROUTES -->
+                    <div class="chart-card">
+
+                        <div class="chart-header">
+                            <div>
+                                <div class="chart-title">
+                                    Network Occupancy
+                                </div>
+
+                                <div class="chart-subtitle" id="paxChartSub">
+                                    Passenger demand by line · per hour
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="routes-chart-wrap" class="chart-wrap">
+                            <canvas id="routesChart" class="chart-canvas"></canvas>
+                        </div>
+                        <div id="routesChartEmpty" class="chart-empty">
+                            No data for the selected filters — try a different period or route.
+                        </div>
+
+                    </div>
+
+                </div>
+
             </div>
 
         </div>
 
     </div>
 
-</div>
+    <!-- ========================================= -->
+    <!-- DATA MANAGEMENT VIEW                      -->
+    <!--                                           -->
+    <!-- Merged view: the Buses panel uses the new -->
+    <!-- search/filter/drawer UI (US-01), while    -->
+    <!-- Stops and Routes keep their working CRUD  -->
+    <!-- panels. Sub-tab buttons carry BOTH class  -->
+    <!-- names so the new .dm-subtab styling and   -->
+    <!-- the existing .bm-subnav-btn active-state  -->
+    <!-- JS both keep working.                     -->
+    <!--                                           -->
+    <!-- Timetable and Trips are BOTH kept: they   -->
+    <!-- answer different questions. Timetable is  -->
+    <!-- the editor (create a run, retime it stop  -->
+    <!-- by stop, export). Trips is the operational-->
+    <!-- view (what is running now, phase, delay,  -->
+    <!-- progress, reassign a vehicle).            -->
+    <!-- ========================================= -->
+    <div id="data-management" class="main-view">
+        <div class="dm-wrap">
 
-<!-- ========================================= -->
-<!-- DATA MANAGEMENT VIEW                      -->
-<!--                                           -->
-<!-- Merged view: the Buses panel uses the new -->
-<!-- search/filter/drawer UI (US-01), while    -->
-<!-- Stops and Routes keep their working CRUD  -->
-<!-- panels. Sub-tab buttons carry BOTH class  -->
-<!-- names so the new .dm-subtab styling and   -->
-<!-- the existing .bm-subnav-btn active-state  -->
-<!-- JS both keep working.                     -->
-<!-- ========================================= -->
-<div id="data-management" class="main-view">
-    <div class="dm-wrap">
-
-        <!-- Sub-tabs -->
-        <div class="dm-subtabs">
-            <button type="button" class="dm-subtab bm-subnav-btn active" id="dmTabBuses">Buses</button>
-            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabStops">Stops</button>
-            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabRoutes">Routes</button>
-            <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTimetable">Timetable</button>
-        </div>
-
-        <!-- ══════════ BUSES PANEL (US-01 registry) ══════════ -->
-        <div id="dm-panel-buses" class="dm-panel active">
-
-            <!-- Toolbar: search + filters + new -->
-            <div class="dm-toolbar">
-                <input type="search" id="dmSearch" class="dm-input dm-search"
-                       placeholder="Search plate, route, antenna id..."
-                       aria-label="Search buses">
-
-                <select id="dmFilterStatus" class="dm-input dm-select" aria-label="Filter by status">
-                    <option value="">All statuses</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="INACTIVE">Inactive</option>
-                    <option value="MAINTENANCE">Maintenance</option>
-                </select>
-
-                <select id="dmFilterRoute" class="dm-input dm-select" aria-label="Filter by route">
-                    <option value="">All routes</option>
-                    <option value="UNASSIGNED">Unassigned</option>
-                </select>
-
-                <button class="dm-btn dm-btn-ghost" id="dmResetBtn">Reset</button>
-                <button type="button" class="dm-btn dm-btn-ghost" id="dmExportBtn" title="Download this table as CSV">Export CSV</button>
-                <button class="dm-btn dm-btn-primary" id="dmNewBtn">+ New bus</button>
+            <!-- Sub-tabs -->
+            <div class="dm-subtabs">
+                <button type="button" class="dm-subtab bm-subnav-btn active" id="dmTabBuses">Buses</button>
+                <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabStops">Stops</button>
+                <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabRoutes">Routes</button>
+                <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTimetable">Timetable</button>
+                <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTrips">Trips</button>
             </div>
 
-            <!-- Table -->
-            <div class="dm-table-wrap">
-                <table class="dm-table">
-                    <thead>
-                    <tr>
-                        <th>Bus ID</th>
-                        <th>Plate</th>
-                        <th>Route</th>
-                        <th class="dm-num">Capacity</th>
-                        <!-- Registry state (is this vehicle in the fleet / laid up
-                             / in the workshop) — NOT what it is doing right now. -->
-                        <th>Fleet status</th>
-                        <!-- What it is doing right now, from the live feed. -->
-                        <th>Live</th>
-                        <th>Antenna ID</th>
-                        <th class="dm-center">On map</th>
-                        <th class="dm-right">Actions</th>
-                    </tr>
-                    </thead>
-                    <tbody id="dmTableBody">
-                    <tr><td colspan="9" class="dm-empty">Loading…</td></tr>
-                    </tbody>
-                </table>
-            </div>
+            <!-- ══════════ BUSES PANEL (US-01 registry) ══════════ -->
+            <div id="dm-panel-buses" class="dm-panel active">
 
-            <div class="dm-footer" id="dmCount"></div>
-        </div><!-- /dm-panel-buses -->
+                <!-- Toolbar: search + filters + new -->
+                <div class="dm-toolbar">
+                    <input type="search" id="dmSearch" class="dm-input dm-search"
+                           placeholder="Search plate, route, antenna id..."
+                           aria-label="Search buses">
 
-        <!-- ══════════ STOPS PANEL ══════════ -->
-        <div id="dm-panel-stops" class="dm-panel">
-            <!-- Client-side search: the full list is already in memory, so
-                 filtering is instant and needs no extra backend call.
-                 Add button lives inside the toolbar (same one-row layout as Buses). -->
-            <div class="dm-toolbar">
-                <input type="search" id="stSearch" class="dm-input dm-search"
-                       placeholder="Search id, name..."
-                       aria-label="Search stops">
-                <select id="stFilterActive" class="dm-input dm-select" aria-label="Filter by state">
-                    <option value="">All states</option>
-                    <option value="true">Active</option>
-                    <option value="false">Inactive</option>
-                </select>
-                <button class="dm-btn dm-btn-ghost" id="stResetBtn">Reset</button>
-                <button type="button" class="dm-btn dm-btn-ghost" id="stExportBtn" title="Download this table as CSV">Export CSV</button>
-                <button type="button" class="dm-btn dm-btn-primary" id="stAddBtn">+ New stop</button>
-            </div>
+                    <select id="dmFilterStatus" class="dm-input dm-select" aria-label="Filter by status">
+                        <option value="">All statuses</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="INACTIVE">Inactive</option>
+                        <option value="MAINTENANCE">Maintenance</option>
+                    </select>
 
-            <div id="stForm" class="bm-form" hidden>
-                <div class="bm-form-title" id="stFormTitle">New stop</div>
-                <div class="bm-form-grid">
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="stId">Stop id</label>
-                        <input type="text" class="bm-input" id="stId" maxlength="50" placeholder="e.g. PSB">
+                    <select id="dmFilterRoute" class="dm-input dm-select" aria-label="Filter by route">
+                        <option value="">All routes</option>
+                        <option value="UNASSIGNED">Unassigned</option>
+                    </select>
+
+                    <button class="dm-btn dm-btn-ghost" id="dmResetBtn">Reset</button>
+                    <button type="button" class="dm-btn dm-btn-ghost" id="dmExportBtn" title="Download this table as CSV">Export CSV</button>
+                    <button class="dm-btn dm-btn-primary" id="dmNewBtn">+ New bus</button>
+                </div>
+
+                <!-- Table -->
+                <div class="dm-table-wrap">
+                    <table class="dm-table">
+                        <thead>
+                        <tr>
+                            <th>Bus ID</th>
+                            <th>Plate</th>
+                            <th>Route</th>
+                            <th class="dm-num">Capacity</th>
+                            <!-- Registry state (is this vehicle in the fleet / laid up
+                                 / in the workshop) — NOT what it is doing right now. -->
+                            <th>Fleet status</th>
+                            <!-- What it is doing right now, from the live feed. -->
+                            <th>Live</th>
+                            <th>Antenna ID</th>
+                            <th class="dm-center">On map</th>
+                            <th class="dm-right">Actions</th>
+                        </tr>
+                        </thead>
+                        <tbody id="dmTableBody">
+                        <tr><td colspan="9" class="dm-empty">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="dm-footer" id="dmCount"></div>
+            </div><!-- /dm-panel-buses -->
+
+            <!-- ══════════ STOPS PANEL ══════════ -->
+            <div id="dm-panel-stops" class="dm-panel">
+                <!-- Client-side search: the full list is already in memory, so
+                     filtering is instant and needs no extra backend call.
+                     Add button lives inside the toolbar (same one-row layout as Buses). -->
+                <div class="dm-toolbar">
+                    <input type="search" id="stSearch" class="dm-input dm-search"
+                           placeholder="Search id, name..."
+                           aria-label="Search stops">
+                    <select id="stFilterActive" class="dm-input dm-select" aria-label="Filter by state">
+                        <option value="">All states</option>
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                    </select>
+                    <button class="dm-btn dm-btn-ghost" id="stResetBtn">Reset</button>
+                    <button type="button" class="dm-btn dm-btn-ghost" id="stExportBtn" title="Download this table as CSV">Export CSV</button>
+                    <button type="button" class="dm-btn dm-btn-primary" id="stAddBtn">+ New stop</button>
+                </div>
+
+                <div id="stForm" class="bm-form" hidden>
+                    <div class="bm-form-title" id="stFormTitle">New stop</div>
+                    <div class="bm-form-grid">
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="stId">Stop id</label>
+                            <input type="text" class="bm-input" id="stId" maxlength="50" placeholder="e.g. PSB">
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="stName">Name</label>
+                            <input type="text" class="bm-input" id="stName" maxlength="200" placeholder="e.g. Piazza San Benedetto">
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="stLat">Latitude</label>
+                            <input type="number" step="any" class="bm-input" id="stLat" placeholder="41.4901">
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="stLon">Longitude</label>
+                            <input type="number" step="any" class="bm-input" id="stLon" placeholder="13.8265">
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="stActive">Active</label>
+                            <select class="bm-input" id="stActive">
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="stDesc">Description (optional)</label>
+                            <input type="text" class="bm-input" id="stDesc" maxlength="255" placeholder="Notes…">
+                        </div>
                     </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="stName">Name</label>
-                        <input type="text" class="bm-input" id="stName" maxlength="200" placeholder="e.g. Piazza San Benedetto">
-                    </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="stLat">Latitude</label>
-                        <input type="number" step="any" class="bm-input" id="stLat" placeholder="41.4901">
-                    </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="stLon">Longitude</label>
-                        <input type="number" step="any" class="bm-input" id="stLon" placeholder="13.8265">
-                    </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="stActive">Active</label>
-                        <select class="bm-input" id="stActive">
-                            <option value="true">Yes</option>
-                            <option value="false">No</option>
-                        </select>
-                    </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="stDesc">Description (optional)</label>
-                        <input type="text" class="bm-input" id="stDesc" maxlength="255" placeholder="Notes…">
+                    <div class="bm-form-actions">
+                        <span class="bm-msg" id="stFormMsg"></span>
+                        <button type="button" class="bm-btn-ghost" id="stCancelBtn">Cancel</button>
+                        <button type="button" class="apply-btn" id="stSaveBtn">Save</button>
                     </div>
                 </div>
-                <div class="bm-form-actions">
-                    <span class="bm-msg" id="stFormMsg"></span>
-                    <button type="button" class="bm-btn-ghost" id="stCancelBtn">Cancel</button>
-                    <button type="button" class="apply-btn" id="stSaveBtn">Save</button>
-                </div>
-            </div>
 
-            <div class="dm-table-wrap">
-                <table class="dm-table">
-                    <thead>
+                <div class="dm-table-wrap">
+                    <table class="dm-table">
+                        <thead>
                         <tr>
                             <th>ID</th>
                             <th>Name</th>
@@ -476,87 +484,87 @@
                             <th>Active</th>
                             <th class="bm-actions-col">Actions</th>
                         </tr>
-                    </thead>
-                    <tbody id="stTableBody"></tbody>
-                </table>
-            </div>
-        </div><!-- /dm-panel-stops -->
+                        </thead>
+                        <tbody id="stTableBody"></tbody>
+                    </table>
+                </div>
+            </div><!-- /dm-panel-stops -->
 
-        <!-- ══════════ ROUTES PANEL ══════════ -->
-        <div id="dm-panel-routes" class="dm-panel">
-            <!-- Client-side search (same approach as the Stops panel). -->
-            <div class="dm-toolbar">
-                <input type="search" id="rtSearch" class="dm-input dm-search"
-                       placeholder="Search id, name..."
-                       aria-label="Search routes">
-                <select id="rtFilterActive" class="dm-input dm-select" aria-label="Filter by state">
-                    <option value="">All states</option>
-                    <option value="true">Active</option>
-                    <option value="false">Inactive</option>
-                </select>
-                <button class="dm-btn dm-btn-ghost" id="rtResetBtn">Reset</button>
-                <button type="button" class="dm-btn dm-btn-ghost" id="rtExportBtn" title="Download this table as CSV">Export CSV</button>
-                <button type="button" class="dm-btn dm-btn-primary" id="rtAddBtn">+ New route</button>
-            </div>
+            <!-- ══════════ ROUTES PANEL ══════════ -->
+            <div id="dm-panel-routes" class="dm-panel">
+                <!-- Client-side search (same approach as the Stops panel). -->
+                <div class="dm-toolbar">
+                    <input type="search" id="rtSearch" class="dm-input dm-search"
+                           placeholder="Search id, name..."
+                           aria-label="Search routes">
+                    <select id="rtFilterActive" class="dm-input dm-select" aria-label="Filter by state">
+                        <option value="">All states</option>
+                        <option value="true">Active</option>
+                        <option value="false">Inactive</option>
+                    </select>
+                    <button class="dm-btn dm-btn-ghost" id="rtResetBtn">Reset</button>
+                    <button type="button" class="dm-btn dm-btn-ghost" id="rtExportBtn" title="Download this table as CSV">Export CSV</button>
+                    <button type="button" class="dm-btn dm-btn-primary" id="rtAddBtn">+ New route</button>
+                </div>
 
-            <div id="rtForm" class="bm-form" hidden>
-                <div class="bm-form-title" id="rtFormTitle">New route</div>
-                <div class="bm-form-grid">
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="rtId">Route id</label>
-                        <input type="text" class="bm-input" id="rtId" maxlength="50" placeholder="e.g. LINEA_4">
+                <div id="rtForm" class="bm-form" hidden>
+                    <div class="bm-form-title" id="rtFormTitle">New route</div>
+                    <div class="bm-form-grid">
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="rtId">Route id</label>
+                            <input type="text" class="bm-input" id="rtId" maxlength="50" placeholder="e.g. LINEA_4">
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="rtShort">Short name</label>
+                            <input type="text" class="bm-input" id="rtShort" maxlength="20" placeholder="e.g. 4">
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="rtLong">Long name</label>
+                            <input type="text" class="bm-input" id="rtLong" maxlength="200" placeholder="e.g. Anello Centro">
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="rtColor">Color</label>
+                            <input type="color" class="bm-input bm-input-color" id="rtColor" value="#3B82F6">
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="rtActive">Active</label>
+                            <select class="bm-input" id="rtActive">
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                            </select>
+                        </div>
+                        <div class="bm-field" id="rtBusField">
+                            <label class="bm-lbl" for="rtBus">Bus running it</label>
+                            <select class="bm-input" id="rtBus"></select>
+                        </div>
                     </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="rtShort">Short name</label>
-                        <input type="text" class="bm-input" id="rtShort" maxlength="20" placeholder="e.g. 4">
+
+                    <!-- Creating a line also creates its first run: that run's stops
+                         are what the rest of the system reads as "the line's path"
+                         (findRepresentativeSequence). Say so explicitly, so the bus
+                         and the times don't look out of place here. -->
+                    <div id="rtItinerary">
+                        <div class="tt-manual-head">
+                            <span class="bm-lbl">First run of this line — stops and times</span>
+                            <button type="button" class="bm-btn-ghost" id="rtAddStopBtn">+ Add stop</button>
+                        </div>
+                        <div class="rt-itn-hint">
+                            A line exists through its runs, so creating one also creates its first run.
+                            These stops become the line's route; further runs are added from the Timetable tab.
+                        </div>
+                        <div class="tt-stops" id="rtStops"></div>
                     </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="rtLong">Long name</label>
-                        <input type="text" class="bm-input" id="rtLong" maxlength="200" placeholder="e.g. Anello Centro">
-                    </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="rtColor">Color</label>
-                        <input type="color" class="bm-input bm-input-color" id="rtColor" value="#3B82F6">
-                    </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="rtActive">Active</label>
-                        <select class="bm-input" id="rtActive">
-                            <option value="true">Yes</option>
-                            <option value="false">No</option>
-                        </select>
-                    </div>
-                    <div class="bm-field" id="rtBusField">
-                        <label class="bm-lbl" for="rtBus">Bus running it</label>
-                        <select class="bm-input" id="rtBus"></select>
+
+                    <div class="bm-form-actions">
+                        <span class="bm-msg" id="rtFormMsg"></span>
+                        <button type="button" class="bm-btn-ghost" id="rtCancelBtn">Cancel</button>
+                        <button type="button" class="apply-btn" id="rtSaveBtn">Save</button>
                     </div>
                 </div>
 
-                <!-- Creating a line also creates its first run: that run's stops
-                     are what the rest of the system reads as "the line's path"
-                     (findRepresentativeSequence). Say so explicitly, so the bus
-                     and the times don't look out of place here. -->
-                <div id="rtItinerary">
-                    <div class="tt-manual-head">
-                        <span class="bm-lbl">First run of this line — stops and times</span>
-                        <button type="button" class="bm-btn-ghost" id="rtAddStopBtn">+ Add stop</button>
-                    </div>
-                    <div class="rt-itn-hint">
-                        A line exists through its runs, so creating one also creates its first run.
-                        These stops become the line's route; further runs are added from the Timetable tab.
-                    </div>
-                    <div class="tt-stops" id="rtStops"></div>
-                </div>
-
-                <div class="bm-form-actions">
-                    <span class="bm-msg" id="rtFormMsg"></span>
-                    <button type="button" class="bm-btn-ghost" id="rtCancelBtn">Cancel</button>
-                    <button type="button" class="apply-btn" id="rtSaveBtn">Save</button>
-                </div>
-            </div>
-
-            <div class="dm-table-wrap">
-                <table class="dm-table">
-                    <thead>
+                <div class="dm-table-wrap">
+                    <table class="dm-table">
+                        <thead>
                         <tr>
                             <th>ID</th>
                             <th>Short</th>
@@ -565,71 +573,74 @@
                             <th>Active</th>
                             <th class="bm-actions-col">Actions</th>
                         </tr>
-                    </thead>
-                    <tbody id="rtTableBody"></tbody>
-                </table>
-            </div>
-        </div><!-- /dm-panel-routes -->
+                        </thead>
+                        <tbody id="rtTableBody"></tbody>
+                    </table>
+                </div>
+            </div><!-- /dm-panel-routes -->
 
-        <!-- ══════════ TIMETABLE PANEL ══════════ -->
-        <div id="dm-panel-timetable" class="dm-panel">
-            <div class="dm-toolbar">
-                <input type="search" id="ttSearch" class="dm-input dm-search"
-                       placeholder="Search run, line, plate..."
-                       aria-label="Search runs">
-                <select id="ttFilterRoute" class="dm-input dm-select" aria-label="Filter by line">
-                    <option value="">All lines</option>
-                </select>
-                <select id="ttFilterBus" class="dm-input dm-select" aria-label="Filter by bus">
-                    <option value="">All buses</option>
-                </select>
-                <button class="dm-btn dm-btn-ghost" id="ttResetBtn">Reset</button>
-                <button type="button" class="dm-btn dm-btn-ghost" id="ttExportBtn" title="One row per run (summary)">Export runs</button>
-                <button type="button" class="dm-btn dm-btn-ghost" id="ttExportStopsBtn" title="One row per run and stop, with arrival times">Export stop times</button>
-                <button type="button" class="dm-btn dm-btn-primary" id="ttAddBtn">+ New run</button>
-            </div>
+            <!-- ══════════ TIMETABLE PANEL ══════════ -->
+            <!-- The EDITOR half of trip management: define runs and their times.
+                 The Trips panel below is the operational half — what those runs are
+                 actually doing today. -->
+            <div id="dm-panel-timetable" class="dm-panel">
+                <div class="dm-toolbar">
+                    <input type="search" id="ttSearch" class="dm-input dm-search"
+                           placeholder="Search run, line, plate..."
+                           aria-label="Search runs">
+                    <select id="ttFilterRoute" class="dm-input dm-select" aria-label="Filter by line">
+                        <option value="">All lines</option>
+                    </select>
+                    <select id="ttFilterBus" class="dm-input dm-select" aria-label="Filter by bus">
+                        <option value="">All buses</option>
+                    </select>
+                    <button class="dm-btn dm-btn-ghost" id="ttResetBtn">Reset</button>
+                    <button type="button" class="dm-btn dm-btn-ghost" id="ttExportBtn" title="One row per run (summary)">Export runs</button>
+                    <button type="button" class="dm-btn dm-btn-ghost" id="ttExportStopsBtn" title="One row per run and stop, with arrival times">Export stop times</button>
+                    <button type="button" class="dm-btn dm-btn-primary" id="ttAddBtn">+ New run</button>
+                </div>
 
-            <!-- Create a run: line + bus + departure. The stop sequence is
-                 copied from an existing run of the same line. -->
-            <div id="ttForm" class="bm-form" hidden>
-                <div class="bm-form-title">New run</div>
+                <!-- Create a run: line + bus + departure. The stop sequence is
+                     copied from an existing run of the same line. -->
+                <div id="ttForm" class="bm-form" hidden>
+                    <div class="bm-form-title">New run</div>
 
-                <div class="bm-form-grid">
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="ttRoute">Line</label>
-                        <select class="bm-input" id="ttRoute"></select>
+                    <div class="bm-form-grid">
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="ttRoute">Line</label>
+                            <select class="bm-input" id="ttRoute"></select>
+                        </div>
+                        <div class="bm-field">
+                            <label class="bm-lbl" for="ttBus">Bus</label>
+                            <select class="bm-input" id="ttBus"></select>
+                        </div>
+                        <div class="bm-field" id="ttDepartureField">
+                            <label class="bm-lbl" for="ttDeparture">Departure (HH:mm)</label>
+                            <input type="time" class="bm-input" id="ttDeparture" value="08:00">
+                        </div>
                     </div>
-                    <div class="bm-field">
-                        <label class="bm-lbl" for="ttBus">Bus</label>
-                        <select class="bm-input" id="ttBus"></select>
-                    </div>
-                    <div class="bm-field" id="ttDepartureField">
-                        <label class="bm-lbl" for="ttDeparture">Departure (HH:mm)</label>
-                        <input type="time" class="bm-input" id="ttDeparture" value="08:00">
+
+                    <div class="bm-form-actions">
+                        <span class="bm-msg" id="ttFormMsg">The stops come from the line's itinerary — a run only sets when and with which bus.</span>
+                        <button type="button" class="bm-btn-ghost" id="ttCancelBtn">Cancel</button>
+                        <button type="button" class="apply-btn" id="ttSaveBtn">Create run</button>
                     </div>
                 </div>
 
-                <div class="bm-form-actions">
-                    <span class="bm-msg" id="ttFormMsg">The stops come from the line's itinerary — a run only sets when and with which bus.</span>
-                    <button type="button" class="bm-btn-ghost" id="ttCancelBtn">Cancel</button>
-                    <button type="button" class="apply-btn" id="ttSaveBtn">Create run</button>
+                <!-- Stop-by-stop editor for one run -->
+                <div id="ttDetail" class="bm-form" hidden>
+                    <div class="bm-form-title" id="ttDetailTitle">Run</div>
+                    <div class="tt-stops" id="ttStops"></div>
+                    <div class="bm-form-actions">
+                        <span class="bm-msg" id="ttDetailMsg"></span>
+                        <button type="button" class="bm-btn-ghost" id="ttDetailCloseBtn">Close</button>
+                        <button type="button" class="apply-btn" id="ttTimesSaveBtn">Save times</button>
+                    </div>
                 </div>
-            </div>
 
-            <!-- Stop-by-stop editor for one run -->
-            <div id="ttDetail" class="bm-form" hidden>
-                <div class="bm-form-title" id="ttDetailTitle">Run</div>
-                <div class="tt-stops" id="ttStops"></div>
-                <div class="bm-form-actions">
-                    <span class="bm-msg" id="ttDetailMsg"></span>
-                    <button type="button" class="bm-btn-ghost" id="ttDetailCloseBtn">Close</button>
-                    <button type="button" class="apply-btn" id="ttTimesSaveBtn">Save times</button>
-                </div>
-            </div>
-
-            <div class="dm-table-wrap">
-                <table class="dm-table">
-                    <thead>
+                <div class="dm-table-wrap">
+                    <table class="dm-table">
+                        <thead>
                         <tr>
                             <th>Run</th>
                             <th>Line</th>
@@ -639,77 +650,230 @@
                             <th>Stops</th>
                             <th class="bm-actions-col">Actions</th>
                         </tr>
-                    </thead>
-                    <tbody id="ttTableBody"></tbody>
-                </table>
-            </div>
-        </div><!-- /dm-panel-timetable -->
+                        </thead>
+                        <tbody id="ttTableBody"></tbody>
+                    </table>
+                </div>
+            </div><!-- /dm-panel-timetable -->
 
+            <!-- ══════════ TRIPS PANEL ══════════ -->
+            <!-- The OPERATIONAL half: the whole service day, with each run's phase
+                 (not started / active / finished), measured punctuality, progress
+                 in stops actually reached, and the vehicle working it. -->
+            <div id="dm-panel-trips" class="dm-panel">
+                <div class="dm-toolbar">
+                    <input type="search" id="tripsSearch" class="dm-input dm-search"
+                           placeholder="Search trip, route, plate or antenna…">
+
+                    <!-- Phase is a different question from punctuality: where the trip
+                         is in its life, versus how it is running. Two filters. -->
+                    <select id="tripsPhase" class="dm-input dm-select dm-filter">
+                        <option value="">All phases</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="NOT_STARTED">Not started</option>
+                        <option value="FINISHED">Finished</option>
+                    </select>
+
+                    <select id="tripsStatus" class="dm-input dm-select dm-filter">
+                        <option value="">Any status</option>
+                        <option value="ON_TIME">On time</option>
+                        <option value="EARLY">Early</option>
+                        <option value="SLIGHTLY_LATE">Slightly late</option>
+                        <option value="SIGNIFICANTLY_LATE">Late</option>
+                        <option value="COMPLETED">Completed</option>
+                        <option value="NO_SIGNAL">No signal</option>
+                        <option value="UNKNOWN">Live (unmeasured)</option>
+                    </select>
+
+                    <select id="tripsSpan" class="dm-input dm-select dm-filter">
+                        <option value="">Whole day</option>
+                        <option value="60">Next hour</option>
+                        <option value="180">Next 3 hours</option>
+                        <option value="past">Earlier today</option>
+                    </select>
+
+                    <select id="tripsRoute" class="dm-input dm-select dm-filter">
+                        <option value="">All routes</option>
+                    </select>
+
+                    <select id="tripsBus" class="dm-input dm-select dm-filter">
+                        <option value="">All buses</option>
+                    </select>
+
+                    <button class="dm-btn dm-btn-ghost" id="tripsClearBtn">Clear</button>
+                    <button class="dm-btn dm-btn-ghost" id="tripsRefreshBtn">Refresh now</button>
+                    <button class="dm-btn dm-btn-primary" id="tripsNewBtn">+ New trip</button>
+                </div>
+
+                <div class="dm-toolbar dm-toolbar-sub">
+                    <span class="dm-footer" id="tripsCount"></span>
+                    <span class="dm-footer dm-muted" id="tripsUpdated"></span>
+                </div>
+
+                <div class="dm-table-wrap">
+                    <table class="dm-table">
+                        <thead>
+                        <tr>
+                            <th>Trip ID</th>
+                            <th>Route</th>
+                            <th>Plate</th>
+                            <th>Antenna</th>
+                            <th>Start</th>
+                            <th>End (sched.)</th>
+                            <th>End (real)</th>
+                            <th>Progress</th>
+                            <th>Phase</th>
+                            <th>Status</th>
+                            <th class="dm-right">Actions</th>
+                        </tr>
+                        </thead>
+                        <tbody id="tripsTableBody">
+                        <tr><td colspan="11" class="dm-empty">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div><!-- /dm-panel-trips -->
+
+        </div>
+
+        <!-- ── Form drawer (slides in from the right) — Buses only ── -->
+        <div class="dm-drawer-backdrop" id="dmDrawerBackdrop"></div>
+
+        <aside class="dm-drawer" id="dmDrawer" aria-hidden="true">
+            <div class="dm-drawer-head">
+                <h3 id="dmDrawerTitle">New bus</h3>
+                <button class="dm-icon-btn" id="dmDrawerClose" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="dm-drawer-body">
+                <label class="dm-label" for="dmTarga">Plate (targa)</label>
+                <input type="text" id="dmTarga" class="dm-input" placeholder="AA123BB" maxlength="20">
+
+                <label class="dm-label" for="dmCapacity">Capacity (seats)</label>
+                <input type="number" id="dmCapacity" class="dm-input" min="1" placeholder="85">
+
+                <!-- Route field removed: the route shown in the table is derived
+                     from the timetable (bus + current time → active trip), so a
+                     manual assignment here would have no visible effect. -->
+
+                <label class="dm-label" for="dmStatus">Status</label>
+                <select id="dmStatus" class="dm-input dm-select">
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                    <option value="MAINTENANCE">Maintenance</option>
+                </select>
+
+                <label class="dm-label" for="dmVehicleId">Antenna / Vehicle ID <span class="dm-hint">(optional)</span></label>
+                <input type="text" id="dmVehicleId" class="dm-input" placeholder="MAGNI-001" maxlength="50">
+
+                <label class="dm-check">
+                    <input type="checkbox" id="dmAccessible">
+                    <span>Wheelchair accessible</span>
+                </label>
+
+                <label class="dm-check">
+                    <input type="checkbox" id="dmMapVisible" checked>
+                    <span>Show on fleet map</span>
+                </label>
+
+                <p class="dm-error" id="dmFormError"></p>
+            </div>
+
+            <div class="dm-drawer-foot">
+                <button class="dm-btn dm-btn-ghost" id="dmCancelBtn">Cancel</button>
+                <button class="dm-btn dm-btn-primary" id="dmSaveBtn">Save</button>
+            </div>
+        </aside>
+
+        <!-- ── Trip drawer — create / reassign / reschedule (Trips panel) ──
+             Separate from the bus drawer above: the two share styling but nothing
+             else, and one drawer serving both would need every field toggled. -->
+        <div class="dm-drawer-backdrop" id="tripDrawerBackdrop"></div>
+
+        <aside class="dm-drawer" id="tripDrawer" aria-hidden="true">
+            <div class="dm-drawer-head">
+                <h3 id="tripDrawerTitle">Edit trip</h3>
+                <button class="dm-icon-btn" id="tripDrawerClose" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="dm-drawer-body">
+                <!-- Read-only context, edit mode only. The route is not editable on
+                     an existing trip: changing it would orphan every one of that
+                     trip's scheduled stops. -->
+                <div id="tripFormEditOnly">
+                    <label class="dm-label">Trip</label>
+                    <p class="dm-readonly dm-mono" id="tripFormId">—</p>
+
+                    <label class="dm-label">Route</label>
+                    <p class="dm-readonly" id="tripFormRoute">—</p>
+
+                    <label class="dm-label">Scheduled window</label>
+                    <p class="dm-readonly dm-mono" id="tripFormWindow">—</p>
+
+                    <label class="dm-label">Progress</label>
+                    <p class="dm-readonly" id="tripFormProgress">—</p>
+                </div>
+
+                <!-- Create mode only. Listed routes are those that already have at
+                     least one trip, because a new trip's timings are copied from an
+                     existing one on the same route. -->
+                <div id="tripFormCreateOnly">
+                    <label class="dm-label" for="tripFormRouteSelect">Route</label>
+                    <select id="tripFormRouteSelect" class="dm-input dm-select">
+                        <option value="">— Choose a route —</option>
+                    </select>
+                    <p class="dm-hint">
+                        The new trip copies this route's stop pattern and running time;
+                        only the departure differs.
+                    </p>
+                </div>
+
+                <label class="dm-label" for="tripFormDeparture">Departure</label>
+                <input type="time" id="tripFormDeparture" class="dm-input dm-mono" step="60">
+                <p class="dm-hint" id="tripFormDepartureHint"></p>
+
+                <label class="dm-label" for="tripFormBus">Assigned bus</label>
+                <select id="tripFormBus" class="dm-input dm-select">
+                    <option value="">Loading…</option>
+                </select>
+                <p class="dm-hint" id="tripFormBusHint">
+                    Only buses with no other trip during this window are listed.
+                </p>
+
+                <!-- The timetable stores arrival_seconds, not dates: there is one
+                     timetable, repeated daily. Saying so here is the difference
+                     between a deliberate change and an unpleasant surprise.
+                     tripSetMode() rewrites this text for create vs edit. -->
+                <p class="dm-warn" id="tripFormPermanentWarning">
+                    <strong>This change is permanent.</strong> The timetable has no
+                    per-day version, so this trip will run with the new settings
+                    <em>every day</em>, not just today. For a one-off swap during a
+                    breakdown, wait for the disruption feature.
+                </p>
+
+                <p class="dm-error" id="tripFormError"></p>
+            </div>
+
+            <div class="dm-drawer-foot">
+                <button class="dm-btn dm-btn-ghost" id="tripCancelBtn">Cancel</button>
+                <button class="dm-btn dm-btn-primary" id="tripSaveBtn">Save</button>
+            </div>
+        </aside>
+
+        <!-- ── Delete confirmation ── -->
+        <div class="dm-confirm-backdrop" id="dmConfirmBackdrop">
+            <div class="dm-confirm">
+                <h4>Delete bus</h4>
+                <p id="dmConfirmText">This cannot be undone.</p>
+                <div class="dm-confirm-actions">
+                    <button class="dm-btn dm-btn-ghost" id="dmConfirmCancel">Cancel</button>
+                    <button class="dm-btn dm-btn-danger" id="dmConfirmOk">Delete</button>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <!-- ── Form drawer (slides in from the right) — Buses only ── -->
-    <div class="dm-drawer-backdrop" id="dmDrawerBackdrop"></div>
 
-    <aside class="dm-drawer" id="dmDrawer" aria-hidden="true">
-        <div class="dm-drawer-head">
-            <h3 id="dmDrawerTitle">New bus</h3>
-            <button class="dm-icon-btn" id="dmDrawerClose" aria-label="Close">&times;</button>
-        </div>
-
-        <div class="dm-drawer-body">
-            <label class="dm-label" for="dmTarga">Plate (targa)</label>
-            <input type="text" id="dmTarga" class="dm-input" placeholder="AA123BB" maxlength="20">
-
-            <label class="dm-label" for="dmCapacity">Capacity (seats)</label>
-            <input type="number" id="dmCapacity" class="dm-input" min="1" placeholder="85">
-
-            <!-- Route field removed: the route shown in the table is derived
-                 from the timetable (bus + current time → active trip), so a
-                 manual assignment here would have no visible effect. -->
-
-            <label class="dm-label" for="dmStatus">Status</label>
-            <select id="dmStatus" class="dm-input dm-select">
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-                <option value="MAINTENANCE">Maintenance</option>
-            </select>
-
-            <label class="dm-label" for="dmVehicleId">Antenna / Vehicle ID <span class="dm-hint">(optional)</span></label>
-            <input type="text" id="dmVehicleId" class="dm-input" placeholder="MAGNI-001" maxlength="50">
-
-            <label class="dm-check">
-                <input type="checkbox" id="dmAccessible">
-                <span>Wheelchair accessible</span>
-            </label>
-
-            <label class="dm-check">
-                <input type="checkbox" id="dmMapVisible" checked>
-                <span>Show on fleet map</span>
-            </label>
-
-            <p class="dm-error" id="dmFormError"></p>
-        </div>
-
-        <div class="dm-drawer-foot">
-            <button class="dm-btn dm-btn-ghost" id="dmCancelBtn">Cancel</button>
-            <button class="dm-btn dm-btn-primary" id="dmSaveBtn">Save</button>
-        </div>
-    </aside>
-
-    <!-- ── Delete confirmation ── -->
-    <div class="dm-confirm-backdrop" id="dmConfirmBackdrop">
-        <div class="dm-confirm">
-            <h4>Delete bus</h4>
-            <p id="dmConfirmText">This cannot be undone.</p>
-            <div class="dm-confirm-actions">
-                <button class="dm-btn dm-btn-ghost" id="dmConfirmCancel">Cancel</button>
-                <button class="dm-btn dm-btn-danger" id="dmConfirmOk">Delete</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-
-<script src="cassitrack-fleetmanager.js"></script>
+    <script src="cassitrack-fleetmanager.js"></script>
 </body>
 </html>
