@@ -446,7 +446,7 @@ public class JourneyPlannerService {
     private JourneyOption planBike(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "bicycling");
         // Fallback to haversine × 1.25 (road factor) when Google is unavailable
-        double roadM = r.map(GoogleMapsService.TrafficResult::distanceMetres)
+        double roadM = r.map(g -> (double) g.distanceMetres())
                         .orElseGet(() -> {
                             log.warn("BIKE: Google non disponibile — uso stima haversine");
                             return haversineMetres(req.getOriginLat(), req.getOriginLon(),
@@ -474,7 +474,7 @@ public class JourneyPlannerService {
 
     private JourneyOption planScooter(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "bicycling");
-        double roadM = r.map(GoogleMapsService.TrafficResult::distanceMetres)
+        double roadM = r.map(g -> (double) g.distanceMetres())
                         .orElseGet(() -> {
                             log.warn("SCOOTER: Google non disponibile — uso stima haversine");
                             return haversineMetres(req.getOriginLat(), req.getOriginLon(),
@@ -500,7 +500,7 @@ public class JourneyPlannerService {
 
     private JourneyOption planWalk(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "walking");
-        double roadM = r.map(GoogleMapsService.TrafficResult::distanceMetres)
+        double roadM = r.map(g -> (double) g.distanceMetres())
                         .orElseGet(() -> {
                             log.warn("WALK: Google non disponibile — uso stima haversine");
                             return haversineMetres(req.getOriginLat(), req.getOriginLon(),
