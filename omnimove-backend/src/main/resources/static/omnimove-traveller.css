@@ -242,6 +242,27 @@ body {
     border-bottom: 1px solid var(--border);
 }
 .map-sidebar-header h2 { font-size: 16px; font-weight: 800; color: var(--text-dark); }
+.sidebar-time-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.sidebar-time-pill:hover { background: #e2e8f0; }
+.sidebar-time-pill--active {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #059669;
+}
 .weather-pill {
     display: inline-flex;
     align-items: center;
@@ -1461,7 +1482,11 @@ body {
     margin: 10px auto 0;
     flex-shrink: 0;
     display: none; /* hidden on desktop; shown on mobile bottom-sheet */
+    cursor: grab;
 }
+.rd-header { cursor: grab; }
+.rd-header * { cursor: default; } /* children keep normal cursors */
+.rd-close-btn { cursor: pointer !important; }
 .rd-header {
     display: flex;
     align-items: center;

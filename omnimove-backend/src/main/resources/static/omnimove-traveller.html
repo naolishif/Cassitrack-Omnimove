@@ -122,7 +122,12 @@
             <div class="map-sidebar">
                 <div class="sheet-handle" id="sheetHandle"><span></span></div>
                 <div class="map-sidebar-header">
-                    <h2 data-i18n="smart_routes">Smart Routes</h2>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <h2 data-i18n="smart_routes">Smart Routes</h2>
+                        <button id="sidebarTimePill" class="sidebar-time-pill" onclick="openTimePicker()">
+                            🕐 <span id="sidebarTimeDisplay">Now</span>
+                        </button>
+                    </div>
                     <div class="weather-pill">☁️ 18°C · Light rain</div>
                 </div>
                 <div class="routes-list">

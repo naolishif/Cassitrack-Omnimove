@@ -278,15 +278,26 @@ function _fmtHHMM(date) {
 }
 
 function updateTimeDisplay() {
-    const el = document.getElementById('timeDisplay');
-    if (!el) return;
+    let label, pillLabel;
     if (_pickerHour === null) {
-        el.textContent = t('time_now');
+        label     = t('time_now');
+        pillLabel = t('time_now');
     } else {
         const hh = String(_pickerHour).padStart(2, '0');
         const mm = String(_pickerMin).padStart(2, '0');
         const modeLabel = _pickerMode === 'arrive' ? t('time_arrive') : t('time_depart');
-        el.textContent = `${modeLabel} ${hh}:${mm}`;
+        label     = `${modeLabel} ${hh}:${mm}`;
+        pillLabel = `${hh}:${mm}`;
+    }
+    const el = document.getElementById('timeDisplay');
+    if (el) el.textContent = label;
+
+    // Sidebar pill: compact — just the time (or "Now"), highlighted when a time is set
+    const sidebarEl   = document.getElementById('sidebarTimeDisplay');
+    const sidebarPill = document.getElementById('sidebarTimePill');
+    if (sidebarEl) sidebarEl.textContent = pillLabel;
+    if (sidebarPill) {
+        sidebarPill.classList.toggle('sidebar-time-pill--active', _pickerHour !== null);
     }
 }
 updateTimeDisplay();
@@ -1008,10 +1019,17 @@ function showRoutePreview(mode, legs) {
             .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
         if (allCoords.length > 1) map.fitBounds(allCoords, { padding: [50, 50] });
 
-        window._activeBusLegs    = activeBusLegs;
+        window._activeBusLegs     = activeBusLegs;
         window._activeBusRouteIds = activeBusLegs.map(l => l.routeId);
-        fetchAndRenderBusMarkers();
-        window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+
+        // Only show live bus positions for "Now" trips — future departures would show
+        // vehicles at their current position, which is irrelevant to the planned time.
+        if (_pickerHour === null) {
+            fetchAndRenderBusMarkers();
+            window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+        } else {
+            showStaleNotice(t('live_buses_future') || '🕐 Live positions not shown for future trips');
+        }
     } else {
         window._previewLayers.push(
             L.polyline(
@@ -1100,9 +1118,14 @@ function closeRouteDetail() {
         c.style.border = '1px solid var(--border-mid)';
         c.style.opacity = '1';
     });
-    // Clear map preview
+    // Stop live bus polling and clear real-time bus markers
+    clearInterval(window._busPollInterval);
+    window._busPollInterval = null;
+    clearBusMarkers();
+    // Clear map preview and restore bus stop markers
     (window._previewLayers || []).forEach(l => map.removeLayer(l));
     window._previewLayers = [];
+    if (window._stopMarkers) window._stopMarkers.forEach(m => m.addTo(map));
     selectedJourney = null;
 }
 
@@ -1540,8 +1563,10 @@ async function startJourney() {
                 }));
             window._activeBusLegs     = activeBusLegs;
             window._activeBusRouteIds = activeBusLegs.map(l => l.routeId);
-            fetchAndRenderBusMarkers();
-            window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+            if (_pickerHour === null) {
+                fetchAndRenderBusMarkers();
+                window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+            }
         }
 
     } catch (err) {
@@ -1613,8 +1638,8 @@ function renderBusMarkers(vehicles) {
     });
 }
 
-function showStaleNotice() {
-    if (document.getElementById('bus-stale-notice')) return;
+function showStaleNotice(msg) {
+    document.getElementById('bus-stale-notice')?.remove(); // replace if already shown
     const el = document.createElement('div');
     el.id = 'bus-stale-notice';
     el.style.cssText = [
@@ -1623,8 +1648,8 @@ function showStaleNotice() {
         'padding:8px 14px;font-size:12px;font-weight:600;z-index:1000',
         'display:flex;align-items:center;gap:8px;white-space:nowrap;pointer-events:auto'
     ].join(';');
-    el.innerHTML = '⚠️ Live bus data unavailable — positions may be outdated'
-        + ' <span onclick="this.parentElement.remove()" style="cursor:pointer;opacity:0.7;margin-left:4px">✕</span>';
+    const text = msg || '⚠️ Live bus data unavailable — positions may be outdated';
+    el.innerHTML = text + ' <span onclick="this.parentElement.remove()" style="cursor:pointer;opacity:0.7;margin-left:4px">✕</span>';
     const mapEl = document.getElementById('map');
     if (mapEl) mapEl.appendChild(el);
 }
@@ -2160,3 +2185,72 @@ function initAutocomplete() {
     window.addEventListener('resize', _acHide);
 }
 initAutocomplete();
+
+// ── Route detail sheet: swipe-down to dismiss ─────────────────────────
+(function initRdDrag() {
+    // Wait for DOM
+    const ready = () => {
+        const sheet   = document.querySelector('.rd-sheet');
+        const overlay = document.getElementById('routeDetailSheet');
+        if (!sheet || !overlay) return;
+
+        // Only start a drag from the non-scrollable zones (handle, header, pills)
+        const dragZones = ['.rd-handle', '.rd-header', '.rd-pills'];
+        let startY = 0, dy = 0, active = false;
+
+        function onStart(clientY) {
+            startY = clientY;
+            dy = 0;
+            active = true;
+            sheet.style.transition = 'none';
+        }
+        function onMove(clientY) {
+            if (!active) return;
+            dy = Math.max(0, clientY - startY);   // only downward
+            sheet.style.transform = `translateY(${dy}px)`;
+        }
+        function onEnd() {
+            if (!active) return;
+            active = false;
+            if (dy > 90) {
+                // Slide fully off then close
+                sheet.style.transition = 'transform 0.22s ease';
+                sheet.style.transform  = 'translateY(110%)';
+                setTimeout(() => {
+                    sheet.style.transition = '';
+                    sheet.style.transform  = '';
+                    closeRouteDetail();
+                }, 230);
+            } else {
+                // Spring back
+                sheet.style.transition = 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)';
+                sheet.style.transform  = '';
+                setTimeout(() => { sheet.style.transition = ''; }, 210);
+            }
+        }
+
+        // Touch
+        sheet.addEventListener('touchstart', e => {
+            if (!dragZones.some(sel => e.target.closest(sel))) return;
+            onStart(e.touches[0].clientY);
+        }, { passive: true });
+        sheet.addEventListener('touchmove', e => {
+            if (!active) return;
+            onMove(e.touches[0].clientY);
+        }, { passive: true });
+        sheet.addEventListener('touchend',   onEnd);
+        sheet.addEventListener('touchcancel', onEnd);
+
+        // Mouse (desktop drag for dev/testing)
+        sheet.addEventListener('mousedown', e => {
+            if (!dragZones.some(sel => e.target.closest(sel))) return;
+            onStart(e.clientY);
+            const move = ev => onMove(ev.clientY);
+            const up   = () => { onEnd(); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+            window.addEventListener('mousemove', move);
+            window.addEventListener('mouseup', up);
+        });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
+    else ready();
+})();
