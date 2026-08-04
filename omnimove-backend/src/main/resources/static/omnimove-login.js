@@ -3,6 +3,12 @@
 // ════════════════════════════════════════════════════════════
 const OMNIMOVE = '/omnimove/api/v1';
 
+// Returns headers with current UI language so the server can send localised emails
+function langHeaders() {
+    return { 'Content-Type': 'application/json',
+             'X-Omnimove-Lang': localStorage.getItem('omnimove_lang') || 'en' };
+}
+
 // Apply stored language on page load
 document.addEventListener('DOMContentLoaded', applyTranslations);
 const REDIRECT = {
@@ -275,7 +281,7 @@ async function handleRegister(e) {
     try {
         const r = await fetch(`${OMNIMOVE}/auth/register`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: langHeaders(),
             body: JSON.stringify({ name, email, password: pass, confirmPassword: confirm })
         });
         const data = await r.json();
@@ -311,7 +317,7 @@ async function resendVerification() {
         try {
             await fetch(`${OMNIMOVE}/auth/forgot-password`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: langHeaders(),
                 body: JSON.stringify({ email })
             });
             showMsg(t('msg_reset_resent'), 'ok');
@@ -326,7 +332,7 @@ async function resendVerificationForEmail(email) {
     try {
         const r = await fetch(`${OMNIMOVE}/auth/resend-verification`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: langHeaders(),
             body: JSON.stringify({ email })
         });
         const data = await r.json();
@@ -353,7 +359,7 @@ async function handleForgot(e) {
     try {
         const r = await fetch(`${OMNIMOVE}/auth/forgot-password`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: langHeaders(),
             body: JSON.stringify({ email })
         });
         const data = await r.json();

@@ -289,9 +289,6 @@ function updateTimeDisplay() {
         label     = `${modeLabel} ${hh}:${mm}`;
         pillLabel = `${hh}:${mm}`;
     }
-    const el = document.getElementById('timeDisplay');
-    if (el) el.textContent = label;
-
     // Sidebar pill: compact — just the time (or "Now"), highlighted when a time is set
     const sidebarEl   = document.getElementById('sidebarTimeDisplay');
     const sidebarPill = document.getElementById('sidebarTimePill');

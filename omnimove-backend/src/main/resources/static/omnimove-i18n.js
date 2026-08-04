@@ -14,6 +14,7 @@ const OMNI_T = {
     btn_resend:'Resend verification email',
     note_forgot:"Enter your email and we'll send you a link to reset your password.",
     note_reset:'Choose a new password for your OMNIMOVE account.',
+    email_sent_to:"We've sent a verification link to",
     email_sent_p:'Open the email and click the link to activate your account, then come back here to sign in.',
     lang_choose:'Language',
     // Sidebar
@@ -201,6 +202,7 @@ const OMNI_T = {
     btn_resend:'Reinvia email di verifica',
     note_forgot:'Inserisci la tua email e ti invieremo un link per reimpostare la password.',
     note_reset:'Scegli una nuova password per il tuo account OMNIMOVE.',
+    email_sent_to:'Abbiamo inviato un link di verifica a',
     email_sent_p:"Apri l'email e clicca sul link per attivare il tuo account, poi torna qui per accedere.",
     lang_choose:'Lingua',
     // Sidebar

@@ -95,7 +95,7 @@ public class AuthController {
                 .build();
         userRepo.save(user);
 
-        emailService.sendVerificationEmail(req.getEmail(), verificationToken);
+        emailService.sendVerificationEmail(req.getEmail(), verificationToken, langFrom(request));
         securityAuditService.registration(user.getEmail(), getClientIp(request));
 
         return ResponseEntity.ok(AuthResponse.builder()
@@ -215,7 +215,8 @@ public class AuthController {
 
     @PostMapping("/resend-verification")
     @Operation(summary = "Resend the email verification link")
-    public ResponseEntity<AuthResponse> resendVerification(@RequestBody LoginRequest req) {
+    public ResponseEntity<AuthResponse> resendVerification(@RequestBody LoginRequest req,
+                                                           HttpServletRequest request) {
 
         // Rate limit: 3 resends per email per hour
         if (!rateLimiter.allowResendVerification(req.getEmail()))
@@ -233,7 +234,7 @@ public class AuthController {
         user.setVerificationTokenExpiry(LocalDateTime.now().plusHours(VERIFY_EXPIRY_HOURS));
         userRepo.save(user);
 
-        emailService.sendVerificationEmail(user.getEmail(), newToken);
+        emailService.sendVerificationEmail(user.getEmail(), newToken, langFrom(request));
         securityAuditService.verificationEmailResent(user.getEmail());
 
         return ResponseEntity.ok(AuthResponse.builder()
@@ -245,7 +246,8 @@ public class AuthController {
 
     @PostMapping("/forgot-password")
     @Operation(summary = "Request a password reset link via email")
-    public ResponseEntity<AuthResponse> forgotPassword(@RequestBody LoginRequest req) {
+    public ResponseEntity<AuthResponse> forgotPassword(@RequestBody LoginRequest req,
+                                                        HttpServletRequest request) {
 
         // Rate limit: 3 requests per email per hour
         if (!rateLimiter.allowForgotPassword(req.getEmail()))
@@ -258,7 +260,7 @@ public class AuthController {
             user.setResetPasswordToken(resetToken);
             user.setResetPasswordTokenExpiry(LocalDateTime.now().plusHours(RESET_EXPIRY_HOURS));
             userRepo.save(user);
-            emailService.sendPasswordResetEmail(user.getEmail(), resetToken);
+            emailService.sendPasswordResetEmail(user.getEmail(), resetToken, langFrom(request));
             securityAuditService.passwordResetRequested(user.getEmail());
         }
 
@@ -453,5 +455,11 @@ public class AuthController {
     private ResponseEntity<AuthResponse> tooManyRequests(String message) {
         return ResponseEntity.status(429)
                 .body(AuthResponse.builder().message(message).build());
+    }
+
+    /** Reads X-Omnimove-Lang header set by the login page; defaults to "en". */
+    private String langFrom(HttpServletRequest request) {
+        String lang = request.getHeader("X-Omnimove-Lang");
+        return (lang != null && lang.equalsIgnoreCase("it")) ? "it" : "en";
     }
 }

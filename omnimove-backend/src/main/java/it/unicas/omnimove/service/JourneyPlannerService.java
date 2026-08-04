@@ -445,12 +445,16 @@ public class JourneyPlannerService {
 
     private JourneyOption planBike(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "bicycling");
-        if (r.isEmpty()) {
-            log.warn("BIKE: percorso reale non disponibile da Google — opzione esclusa");
-            return null;
-        }
-        double roadM = r.get().distanceMetres();
-        int dur = (int) Math.ceil(r.get().durationSeconds() / 60.0);
+        // Fallback to haversine × 1.25 (road factor) when Google is unavailable
+        double roadM = r.map(GoogleMapsService.TrafficResult::distanceMetres)
+                        .orElseGet(() -> {
+                            log.warn("BIKE: Google non disponibile — uso stima haversine");
+                            return haversineMetres(req.getOriginLat(), req.getOriginLon(),
+                                                   req.getDestLat(),   req.getDestLon()) * 1.25;
+                        });
+        // speed: ~15 km/h cycling
+        int dur = r.map(g -> (int) Math.ceil(g.durationSeconds() / 60.0))
+                   .orElse((int) Math.ceil(roadM / 1000.0 / 15.0 * 60));
         double cost = Math.round((bikeUnlock + dur * bikePerMin) * 100) / 100.0;
         return JourneyOption.builder()
                 .mode("BIKE").modeLabel("Elerent Bike Share")
@@ -470,11 +474,12 @@ public class JourneyPlannerService {
 
     private JourneyOption planScooter(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "bicycling");
-        if (r.isEmpty()) {
-            log.warn("SCOOTER: percorso reale non disponibile da Google — opzione esclusa");
-            return null;
-        }
-        double roadM = r.get().distanceMetres();
+        double roadM = r.map(GoogleMapsService.TrafficResult::distanceMetres)
+                        .orElseGet(() -> {
+                            log.warn("SCOOTER: Google non disponibile — uso stima haversine");
+                            return haversineMetres(req.getOriginLat(), req.getOriginLon(),
+                                                   req.getDestLat(),   req.getDestLon()) * 1.25;
+                        });
         int dur = (int) Math.ceil(roadM / 1000.0 / SPEED_SCOOTER * 60);
         double cost = Math.round((scooterUnlock + dur * scooterPerMin) * 100) / 100.0;
         return JourneyOption.builder()
@@ -495,12 +500,15 @@ public class JourneyPlannerService {
 
     private JourneyOption planWalk(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = route(req, "walking");
-        if (r.isEmpty()) {
-            log.warn("WALK: percorso reale non disponibile da Google — opzione esclusa");
-            return null;                       // niente fallback in linea d'aria
-        }
-        double roadM = r.get().distanceMetres();
-        int dur = (int) Math.ceil(r.get().durationSeconds() / 60.0);
+        double roadM = r.map(GoogleMapsService.TrafficResult::distanceMetres)
+                        .orElseGet(() -> {
+                            log.warn("WALK: Google non disponibile — uso stima haversine");
+                            return haversineMetres(req.getOriginLat(), req.getOriginLon(),
+                                                   req.getDestLat(),   req.getDestLon()) * 1.3;
+                        });
+        // speed: ~5 km/h walking
+        int dur = r.map(g -> (int) Math.ceil(g.durationSeconds() / 60.0))
+                   .orElse((int) Math.ceil(roadM / 1000.0 / 5.0 * 60));
         return JourneyOption.builder()
                 .mode("WALK").modeLabel("Walking")
                 .durationMinutes(dur).distanceMetres(roadM)
@@ -665,7 +673,12 @@ public class JourneyPlannerService {
         // the bus follows. Falls back to stop-to-stop when the route has no
         // shape (or the shape cannot be matched) — see roadPathAlong().
         List<double[]> road = roadPathAlong(tripId, legStops);
-        if (!road.isEmpty()) return road;
+        if (!road.isEmpty()) {
+            // Build stop names in travel order alongside the road coords
+            List<String> roadNames = new ArrayList<>();
+            for (String sid : legStops) roadNames.add(fmtStop(sid));
+            return new StopSlice(road, roadNames);
+        }
 
         List<double[]> coords = new ArrayList<>();
         List<String>   names  = new ArrayList<>();
