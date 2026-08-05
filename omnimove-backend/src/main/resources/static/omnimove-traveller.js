@@ -401,6 +401,9 @@ function confirmTimePicker() {
     _pickerMin  = _getDrumValue('drumMins',  60);
     document.getElementById('timePickerOverlay').classList.remove('open');
     updateTimeDisplay();
+    // Re-run search automatically if origin + dest are already set
+    const destId = document.getElementById('destSelect')?.dataset?.id;
+    if (destId && STOPS[destId] && getOrigin()) doSearch();
 }
 
 function resetTimeToNow() {
@@ -412,6 +415,9 @@ function resetTimeToNow() {
     // Re-sync the Depart toggle to active
     document.getElementById('tpDepart')?.classList.add('active');
     document.getElementById('tpArrive')?.classList.remove('active');
+    // Re-run search if origin + dest are already set
+    const destId = document.getElementById('destSelect')?.dataset?.id;
+    if (destId && STOPS[destId] && getOrigin()) doSearch();
 }
 
 async function apiFetch(path, options = {}) {
@@ -785,9 +791,6 @@ function sortOptions(options) {
 // ── Search ────────────────────────────────────────────────────────
 async function doSearch() {
     _acHide();   // close the suggestion list on search
-    // Reset time to "Now" on every new search (like Google Maps "Leave now")
-    _pickerHour = null; _pickerMin = null; _pickerMode = 'depart';
-    updateTimeDisplay();
     const destId = document.getElementById('destSelect').dataset.id;
     const dest   = STOPS[destId];
     let origin   = getOrigin();
