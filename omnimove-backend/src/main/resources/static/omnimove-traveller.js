@@ -2240,7 +2240,6 @@ initAutocomplete();
                 if (dy < -30 && target < s.length - 1) target++;   // flicked up → expand
                 else if (dy > 30 && target > 0) target--;          // flicked down → shrink
                 sidebar.style.height = s[target] + 'px';
-                if (target === 0) setTimeout(closeRouteDetail, 260); // peeked → close detail
                 try { map.invalidateSize(); } catch (e) {}
             } else {
                 if (dy > 90) {
