@@ -1295,6 +1295,8 @@ body {
         justify-content: center;
         align-items: center;
         padding: 10px 0 6px;
+        position: relative;
+        z-index: 11;
         cursor: grab;
         flex-shrink: 0;
     }
@@ -1305,6 +1307,7 @@ body {
         background: var(--border-mid);
     }
     .map-sidebar .routes-list { touch-action: pan-y; }
+    .map-sidebar .rd-timeline-scroll { touch-action: pan-y; }
     /* On mobile the sidebar is already a bottom sheet, so the detail panel slides up inside it */
     .rd-handle { display: block; }
     .rd-sheet { animation: rdSlideUp 0.26s cubic-bezier(0.32,0.72,0,1); }

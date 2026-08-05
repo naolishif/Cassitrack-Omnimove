@@ -2183,63 +2183,92 @@ function initAutocomplete() {
 }
 initAutocomplete();
 
-// ── Route detail sheet: swipe-down to dismiss ─────────────────────────
+// ── Route detail sheet: drag resizes the sidebar (unified with main sheet) ──
 (function initRdDrag() {
-    // Wait for DOM
     const ready = () => {
-        const sheet   = document.querySelector('.rd-sheet');
-        const overlay = document.getElementById('routeDetailSheet');
-        if (!sheet || !overlay) return;
+        const rdSheet  = document.querySelector('.rd-sheet');
+        const overlay  = document.getElementById('routeDetailSheet');
+        const sidebar  = document.querySelector('.map-sidebar');
+        if (!rdSheet || !overlay || !sidebar) return;
 
         // Only start a drag from the non-scrollable zones (handle, header, pills)
         const dragZones = ['.rd-handle', '.rd-header', '.rd-pills'];
-        let startY = 0, dy = 0, active = false;
+
+        function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+        const _pane = document.getElementById('pane-map');
+        function paneH() { return (_pane && _pane.clientHeight) ? _pane.clientHeight : window.innerHeight; }
+        function snapStates() { const h = paneH(); return [110, Math.round(h * 0.45), Math.round(h * 0.94)]; }
+        function clamp(h) { const s = snapStates(); return Math.max(s[0], Math.min(s[s.length - 1], h)); }
+
+        let startY = 0, startH = 0, dy = 0, active = false;
 
         function onStart(clientY) {
             startY = clientY;
             dy = 0;
             active = true;
-            sheet.style.transition = 'none';
+            if (isMobile()) {
+                startH = sidebar.offsetHeight;
+                sidebar.style.transition = 'none';
+            } else {
+                rdSheet.style.transition = 'none';
+            }
         }
         function onMove(clientY) {
             if (!active) return;
-            dy = Math.max(0, clientY - startY);   // only downward
-            sheet.style.transform = `translateY(${dy}px)`;
+            dy = clientY - startY;
+            if (isMobile()) {
+                sidebar.style.height = clamp(startH - dy) + 'px';
+            } else {
+                rdSheet.style.transform = `translateY(${Math.max(0, dy)}px)`;
+            }
         }
         function onEnd() {
             if (!active) return;
             active = false;
-            if (dy > 90) {
-                // Slide fully off then close
-                sheet.style.transition = 'transform 0.22s ease';
-                sheet.style.transform  = 'translateY(110%)';
-                setTimeout(() => {
-                    sheet.style.transition = '';
-                    sheet.style.transform  = '';
-                    closeRouteDetail();
-                }, 230);
+            if (isMobile()) {
+                // Snap sidebar to nearest state with velocity bias
+                sidebar.style.transition = 'height 0.25s ease';
+                const s = snapStates();
+                const curH = sidebar.offsetHeight;
+                let best = Infinity, target = 0;
+                s.forEach((t, i) => { const d = Math.abs(t - curH); if (d < best) { best = d; target = i; } });
+                if (dy < -30 && target < s.length - 1) target++;   // flicked up → expand
+                else if (dy > 30 && target > 0) target--;          // flicked down → shrink
+                sidebar.style.height = s[target] + 'px';
+                if (target === 0) setTimeout(closeRouteDetail, 260); // peeked → close detail
+                try { map.invalidateSize(); } catch (e) {}
             } else {
-                // Spring back
-                sheet.style.transition = 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)';
-                sheet.style.transform  = '';
-                setTimeout(() => { sheet.style.transition = ''; }, 210);
+                if (dy > 90) {
+                    rdSheet.style.transition = 'transform 0.22s ease';
+                    rdSheet.style.transform  = 'translateY(110%)';
+                    setTimeout(() => {
+                        rdSheet.style.transition = '';
+                        rdSheet.style.transform  = '';
+                        closeRouteDetail();
+                    }, 230);
+                } else {
+                    rdSheet.style.transition = 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)';
+                    rdSheet.style.transform  = '';
+                    setTimeout(() => { rdSheet.style.transition = ''; }, 210);
+                }
             }
         }
 
         // Touch
-        sheet.addEventListener('touchstart', e => {
+        rdSheet.addEventListener('touchstart', e => {
             if (!dragZones.some(sel => e.target.closest(sel))) return;
             onStart(e.touches[0].clientY);
         }, { passive: true });
-        sheet.addEventListener('touchmove', e => {
+        rdSheet.addEventListener('touchmove', e => {
             if (!active) return;
             onMove(e.touches[0].clientY);
-        }, { passive: true });
-        sheet.addEventListener('touchend',   onEnd);
-        sheet.addEventListener('touchcancel', onEnd);
+            if (e.cancelable) e.preventDefault();
+        }, { passive: false });
+        rdSheet.addEventListener('touchend',   onEnd);
+        rdSheet.addEventListener('touchcancel', onEnd);
 
         // Mouse (desktop drag for dev/testing)
-        sheet.addEventListener('mousedown', e => {
+        rdSheet.addEventListener('mousedown', e => {
             if (!dragZones.some(sel => e.target.closest(sel))) return;
             onStart(e.clientY);
             const move = ev => onMove(ev.clientY);
