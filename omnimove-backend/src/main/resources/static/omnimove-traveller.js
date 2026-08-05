@@ -987,12 +987,13 @@ function showRoutePreview(mode, legs) {
             if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
                 const legColor = BUS_LEG_COLORS[colorIdx % BUS_LEG_COLORS.length];
                 colorIdx++;
-                const coords = leg.stop_coords.map(c => [c[0], c[1]]);
+                const coords     = leg.stop_coords.map(c => [c[0], c[1]]);
+                const stopDots   = (leg.bus_stop_coords || leg.stop_coords).map(c => [c[0], c[1]]);
                 window._previewLayers.push(
                     L.polyline(coords, { color: legColor, weight: 4, opacity: 0.85 }).addTo(map)
                 );
-                coords.forEach((c, i) => {
-                    const isEnd = i === 0 || i === coords.length - 1;
+                stopDots.forEach((c, i) => {
+                    const isEnd = i === 0 || i === stopDots.length - 1;
                     window._previewLayers.push(
                         L.circleMarker(c, {
                             radius: isEnd ? 7 : 5,
@@ -1458,13 +1459,14 @@ async function startJourney() {
                 if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
                     const legColor = BUS_LEG_COLORS[colorIdx % BUS_LEG_COLORS.length];
                     colorIdx++;
-                    const coords = leg.stop_coords.map(c => [c[0], c[1]]);
+                    const coords   = leg.stop_coords.map(c => [c[0], c[1]]);
+                    const stopDots = (leg.bus_stop_coords || leg.stop_coords).map(c => [c[0], c[1]]);
                     const line = L.polyline(coords, { color: legColor, weight: 5, opacity: 0.9 }).addTo(map);
                     window._busRouteLines.push(line);
 
-                    leg.stop_coords.forEach((c, i) => {
+                    stopDots.forEach((c, i) => {
                         const isFirst = i === 0;
-                        const isLast  = i === leg.stop_coords.length - 1;
+                        const isLast  = i === stopDots.length - 1;
                         const dotColor = isFirst || isLast ? legColor : '#fff';
                         const dot = L.circleMarker([c[0], c[1]], {
                             radius: isFirst || isLast ? 7 : 5,

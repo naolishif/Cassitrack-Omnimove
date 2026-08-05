@@ -332,6 +332,7 @@ public class JourneyPlannerService {
                     .instruction(lineLabel)
                     .stopCoords(slice0.coords())
                     .stopNames(slice0.names())
+                    .busStopCoords(slice0.busStopCoords())
                     .routeId(line.getRouteId())
                     .build());
         } else {
@@ -376,6 +377,7 @@ public class JourneyPlannerService {
                         .instruction(t.l1Label())
                         .stopCoords(slice1.coords())
                         .stopNames(slice1.names())
+                        .busStopCoords(slice1.busStopCoords())
                         .routeId(t.l1RouteId())
                         .build());
                 busLegs.add(JourneyLeg.builder().mode("WAIT")
@@ -388,6 +390,7 @@ public class JourneyPlannerService {
                         .instruction(t.l2Label())
                         .stopCoords(slice2.coords())
                         .stopNames(slice2.names())
+                        .busStopCoords(slice2.busStopCoords())
                         .routeId(t.l2RouteId())
                         .build());
             } else {
@@ -640,10 +643,10 @@ public class JourneyPlannerService {
     }
 
     /** Returns the slice of the trip's stops between origin and dest (inclusive), sorted by sequence. */
-    private record StopSlice(List<double[]> coords, List<String> names) {}
+    private record StopSlice(List<double[]> coords, List<String> names, List<double[]> busStopCoords) {}
 
     private StopSlice stopSliceBetween(String tripId, String originStopId, String destStopId) {
-        if (tripId == null) return new StopSlice(List.of(), List.of());
+        if (tripId == null) return new StopSlice(List.of(), List.of(), List.of());
 
         var seq = new ArrayList<>(scheduledStopRepository.findByTripId(tripId));
         seq.sort(Comparator.comparingInt(it.unicas.omnimove.model.ScheduledStop::getStopSequence));
@@ -660,7 +663,7 @@ public class JourneyPlannerService {
             oi = indexOfStop(seq, originStopId);
             di = indexOfStop(seq, destStopId);
         }
-        if (oi < 0 || di < 0) return new StopSlice(List.of(), List.of());
+        if (oi < 0 || di < 0) return new StopSlice(List.of(), List.of(), List.of());
 
         int from = Math.min(oi, di);
         int to   = Math.max(oi, di);
@@ -669,24 +672,24 @@ public class JourneyPlannerService {
         List<String> legStops = new ArrayList<>();
         for (int i = from; i <= to; i++) legStops.add(seq.get(i).getStopId());
 
+        // Actual stop coordinates (used for dot markers regardless of road geometry).
+        List<double[]> stopPoints = new ArrayList<>();
+        List<String>   names      = new ArrayList<>();
+        for (String sid : legStops) {
+            stopPoints.add(new double[]{ getStopLat(sid), getStopLon(sid) });
+            names.add(fmtStop(sid));
+        }
+
         // Prefer the real road geometry, so the drawn leg follows the streets
         // the bus follows. Falls back to stop-to-stop when the route has no
         // shape (or the shape cannot be matched) — see roadPathAlong().
         List<double[]> road = roadPathAlong(tripId, legStops);
         if (!road.isEmpty()) {
-            // Build stop names in travel order alongside the road coords
-            List<String> roadNames = new ArrayList<>();
-            for (String sid : legStops) roadNames.add(fmtStop(sid));
-            return new StopSlice(road, roadNames);
+            return new StopSlice(road, names, stopPoints);
         }
 
-        List<double[]> coords = new ArrayList<>();
-        List<String>   names  = new ArrayList<>();
-        for (String sid : legStops) {
-            coords.add(new double[]{ getStopLat(sid), getStopLon(sid) });
-            names.add(fmtStop(sid));
-        }
-        return new StopSlice(coords, names);
+        // No road shape: the stop coords are the polyline as well.
+        return new StopSlice(stopPoints, names, stopPoints);
     }
 
     private List<double[]> stopCoordsBetween(String tripId, String originStopId, String destStopId) {
