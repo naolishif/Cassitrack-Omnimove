@@ -549,6 +549,25 @@
     </div>
 </div>
 
+<!-- ── Route stop list — full-screen overlay with embedded map ── -->
+<div id="stopListPanel">
+    <div class="slp-topbar">
+        <button class="slp-back" onclick="closeStopListPanel()" aria-label="Back">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div class="slp-title" id="stopListTitle"></div>
+        <button class="slp-invert" id="slpInvertBtn" onclick="invertRoute()" aria-label="Invert route" title="Invert direction">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+            </svg>
+        </button>
+        <button class="slp-close" onclick="closeStopListPanel()" aria-label="Close">✕</button>
+    </div>
+    <div id="slpMap" class="slp-map"></div>
+    <div class="slp-body" id="stopListBody"></div>
+</div>
+
 <div class="ac-list" id="acList"></div>
 
 <!-- ── TIME PICKER OVERLAY ── -->

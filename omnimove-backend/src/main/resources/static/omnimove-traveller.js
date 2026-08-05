@@ -533,7 +533,10 @@ function getCrowdingLabel(level) {
     return t(map[level] || level);
 }
 
+let _sheetCurrentStopId = null;   // stop whose arrivals are currently showing
+
 async function showStopArrivals(stopId, stopName) {
+    _sheetCurrentStopId = stopId;
     const overlay  = document.getElementById('stopSheetOverlay');
     const title    = document.getElementById('stopSheetTitle');
     const subtitle = document.getElementById('stopSheetSubtitle');
@@ -569,6 +572,249 @@ function handleSheetBackdrop(e) {
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeStopSheet(); });
+
+// ── Route shape drawing from next-bus cards ────────────────────────
+let _busRouteLayers  = [];   // polyline + circle markers for the drawn route
+let _busRouteBanner  = null; // the dismissible banner element
+
+document.addEventListener('click', e => {
+    const row = e.target.closest('.tmb-route-tappable');
+    if (!row) return;
+    const routeId  = row.dataset.routeId;
+    const name     = row.dataset.routeShort;
+    const color    = row.dataset.routeColor;
+    const routeDir = row.dataset.routeDir || '';
+    if (routeId) drawBusRoute(routeId, name, color, routeDir);
+});
+
+let _slpPreviousStopId   = null;
+let _slpPreviousStopName = null;
+
+// State for the invert-route feature
+let _slpShapePoints = null;
+let _slpStopList    = null;
+let _slpShortName   = null;
+let _slpColor       = null;
+let _slpRouteDir    = null;
+let _slpReversed    = false;
+
+async function drawBusRoute(routeId, shortName, color, routeDir = '') {
+    clearBusRoute();
+
+    // Remember context so back button can reopen the arrivals sheet
+    _slpPreviousStopId   = _sheetCurrentStopId;
+    _slpPreviousStopName = document.getElementById('stopSheetTitle')?.textContent || null;
+    _slpReversed         = false;
+
+    // Close the arrivals sheet — the stop list panel takes its place
+    closeStopSheet();
+
+    // Hide generic stop markers while route is shown
+    (window._stopMarkers || []).forEach(m => { try { map.removeLayer(m); } catch(_) {} });
+
+    // Fetch shape + stop list in parallel
+    try {
+        const [shapeRes, stopsRes] = await Promise.all([
+            apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/shape'),
+            apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/stops')
+        ]);
+        if (!shapeRes.ok) { showToast('Route shape not available', true); clearBusRoute(); return; }
+
+        const points   = await shapeRes.json();   // [[lat, lon, isStop], ...]
+        const stopList = stopsRes.ok ? await stopsRes.json() : [];
+
+        if (!points.length) { showToast('No shape data for this route', true); clearBusRoute(); return; }
+
+        // Draw polyline
+        const line = L.polyline(points.map(p => [p[0], p[1]]), { color, weight: 4, opacity: 0.88 }).addTo(map);
+        _busRouteLayers.push(line);
+
+        // Build stop lookup from stopList for name resolution
+        const stopByLatLon = {};
+        stopList.forEach(s => { stopByLatLon[`${s.lat.toFixed(4)},${s.lon.toFixed(4)}`] = s; });
+
+        // Interactive white dots at stop vertices only
+        const currentStopLat = _sheetCurrentStopId ? (STOPS[_sheetCurrentStopId] || {}).lat : null;
+        const currentStopLon = _sheetCurrentStopId ? (STOPS[_sheetCurrentStopId] || {}).lon : null;
+
+        points.filter(p => p[2]).forEach(p => {
+            const isCurrent = currentStopLat != null
+                && Math.abs(p[0] - currentStopLat) < 0.0002
+                && Math.abs(p[1] - currentStopLon) < 0.0002;
+
+            // Resolve stop name from stopList
+            const key  = `${p[0].toFixed(4)},${p[1].toFixed(4)}`;
+            const info = stopByLatLon[key];
+            const name = info ? info.name : null;
+
+            const dot = L.circleMarker([p[0], p[1]], {
+                radius:      isCurrent ? 9 : 6,
+                color:       isCurrent ? '#ef4444' : color,
+                fillColor:   '#ffffff',
+                fillOpacity: 1,
+                weight:      isCurrent ? 3 : 2,
+                interactive: true
+            }).addTo(map);
+
+            if (name) dot.bindPopup(`<b style="font-size:13px">${escHtml(name)}</b>`, { closeButton: false, offset: [0, -4] });
+            _busRouteLayers.push(dot);
+        });
+
+        map.fitBounds(line.getBounds(), { padding: [50, 50] });
+
+        // Store for invert-route toggle
+        _slpShapePoints = points;
+        _slpStopList    = stopList;
+        _slpShortName   = shortName;
+        _slpColor       = color;
+        _slpRouteDir    = routeDir;
+
+        // Show stop list panel (full-screen with embedded map)
+        showStopListPanel(shortName, color, stopList, points, routeDir, false);
+
+    } catch(e) {
+        showToast('Could not load route shape', true);
+        clearBusRoute();
+    }
+}
+
+function closeStopListPanel() {
+    const panel = document.getElementById('stopListPanel');
+    if (panel) panel.classList.remove('open');
+    if (_slpMap) { try { _slpMap.remove(); } catch(_) {} _slpMap = null; }
+    // Clear main-map route layers and restore generic stop markers
+    _busRouteLayers.forEach(l => { try { map.removeLayer(l); } catch(_) {} });
+    _busRouteLayers = [];
+    if (window._stopMarkers) window._stopMarkers.forEach(m => { try { m.addTo(map); } catch(_) {} });
+    // Reopen the next-buses sheet if we came from one
+    if (_slpPreviousStopId && _slpPreviousStopName) {
+        showStopArrivals(_slpPreviousStopId, _slpPreviousStopName);
+    }
+    _slpPreviousStopId = _slpPreviousStopName = null;
+}
+
+function clearBusRoute() {
+    if (_slpMap) { try { _slpMap.remove(); } catch(_) {} _slpMap = null; }
+    _busRouteLayers.forEach(l => { try { map.removeLayer(l); } catch(_) {} });
+    _busRouteLayers = [];
+    if (window._stopMarkers) window._stopMarkers.forEach(m => { try { m.addTo(map); } catch(_) {} });
+    const panel = document.getElementById('stopListPanel');
+    if (panel) panel.classList.remove('open');
+    _slpPreviousStopId = _slpPreviousStopName = null;
+}
+
+function showBusRouteBanner(shortName, color) {
+    if (_busRouteBanner) _busRouteBanner.remove();
+    const banner = document.createElement('div');
+    banner.id = 'busRouteBanner';
+    banner.innerHTML =
+        `<span class="brb-dot" style="background:${color}"></span>` +
+        `<span class="brb-label">Route <strong>${escHtml(shortName)}</strong></span>` +
+        `<button class="brb-close" onclick="clearBusRoute()" aria-label="Clear route">✕</button>`;
+    document.getElementById('pane-map').appendChild(banner);
+    _busRouteBanner = banner;
+}
+
+let _slpMap = null;  // the embedded Leaflet map inside the stop list panel
+
+function showStopListPanel(shortName, color, stopList, shapePoints, routeDir, reversed) {
+    const panel = document.getElementById('stopListPanel');
+    const title = document.getElementById('stopListTitle');
+    const body  = document.getElementById('stopListBody');
+    if (!panel) return;
+
+    // Title: badge + direction arrow
+    const dirText = routeDir ? ` → ${routeDir}` : '';
+    title.innerHTML =
+        `<span class="slp-badge" style="background:${color}">${escHtml(shortName)}</span>` +
+        `<span class="slp-dir">${escHtml(dirText)}</span>`;
+
+    // Current stop coordinates (from arrivals context)
+    const currentStopLat = _sheetCurrentStopId ? (STOPS[_sheetCurrentStopId] || {}).lat : null;
+    const currentStopLon = _sheetCurrentStopId ? (STOPS[_sheetCurrentStopId] || {}).lon : null;
+
+    function isCurrentStop(lat, lon) {
+        return currentStopLat != null
+            && Math.abs(lat - currentStopLat) < 0.0003
+            && Math.abs(lon - currentStopLon) < 0.0003;
+    }
+
+    // Build stop list HTML from stopList coords (reliable — no isStop flag needed)
+    body.innerHTML = stopList.map((stop, i) => {
+        const isFirst   = i === 0;
+        const isLast    = i === stopList.length - 1;
+        const isCurrent = isCurrentStop(stop.lat, stop.lon);
+        const linesHtml = (stop.lines || []).map(l =>
+            `<span class="slp-line-badge" style="background:${routeColor(l)}">${escHtml(l)}</span>`
+        ).join('');
+        return `<div class="slp-row${isCurrent ? ' slp-row--current' : ''}">
+            <div class="slp-line-col">
+                <div class="slp-connector${isFirst ? ' slp-connector--hidden' : ''}"></div>
+                <div class="slp-dot${isCurrent ? ' slp-dot--current' : ''}"></div>
+                <div class="slp-connector${isLast  ? ' slp-connector--hidden' : ''}"></div>
+            </div>
+            <div class="slp-info">
+                <div class="slp-stop-name${isCurrent ? ' slp-stop-name--current' : ''}">${escHtml(stop.name)}</div>
+                <div class="slp-lines">${linesHtml}</div>
+            </div>
+        </div>`;
+    }).join('');
+
+    panel.classList.add('open');
+
+    // Scroll current stop into view
+    requestAnimationFrame(() => {
+        const cur = body.querySelector('.slp-row--current');
+        if (cur) cur.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+
+    // Init embedded Leaflet map (destroy previous if any)
+    if (_slpMap) { try { _slpMap.remove(); } catch(_) {} _slpMap = null; }
+
+    requestAnimationFrame(() => {
+        _slpMap = L.map('slpMap', { zoomControl: false, attributionControl: false })
+                   .setView([41.4901, 13.8303], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19, attribution: '© OpenStreetMap'
+        }).addTo(_slpMap);
+
+        // Draw route polyline from shape points
+        if (shapePoints && shapePoints.length) {
+            const line = L.polyline(shapePoints.map(p => [p[0], p[1]]), {
+                color, weight: 4, opacity: 0.88
+            }).addTo(_slpMap);
+            _slpMap.fitBounds(line.getBounds(), { padding: [24, 24] });
+        }
+
+        // Draw stop dots directly from stopList (no brittle isStop-flag lookup)
+        stopList.forEach(stop => {
+            const isCurrent = isCurrentStop(stop.lat, stop.lon);
+            const m = L.circleMarker([stop.lat, stop.lon], {
+                radius:      6,
+                color:       color,
+                fillColor:   isCurrent ? color : '#ffffff',
+                fillOpacity: 1,
+                weight:      2
+            }).addTo(_slpMap)
+             .bindPopup(`<b style="font-size:13px">${escHtml(stop.name)}</b>`,
+                        { closeButton: false, offset: [0, -4] });
+            if (isCurrent) m.openPopup();
+        });
+    });
+}
+
+function invertRoute() {
+    if (!_slpStopList || !_slpShapePoints) return;
+    _slpReversed    = !_slpReversed;
+    const revStops  = [..._slpStopList].reverse();
+    const revShape  = [..._slpShapePoints].reverse();
+    // Swap direction label: first stop name ↔ last stop name as new direction
+    const newDir    = revStops[revStops.length - 1]?.name || _slpRouteDir || '';
+    _slpStopList    = revStops;
+    _slpShapePoints = revShape;
+    _slpRouteDir    = newDir;
+    showStopListPanel(_slpShortName, _slpColor, revStops, revShape, newDir, _slpReversed);
+}
 
 // Ritardo nel popup fermata: real-time (Google on), retrospettivo C1 (off), o niente.
 function delayLine(a) {
@@ -646,13 +892,26 @@ function renderArrivals(list, arrivals) {
             ? `<span class="tmb-crowd" style="${CROWDING_BG[crowding]}">${t('lbl_crowding')} ${getCrowdingLabel(crowding)}</span>`
             : '';
 
-        return `<div class="tmb-route-row">
+        const routeId   = first.route_id || '';
+        const routeDir  = direction || '';
+        return `<div class="tmb-route-row${routeId ? ' tmb-route-tappable' : ''}"
+                     data-route-id="${escHtml(routeId)}"
+                     data-route-short="${escHtml(shortName)}"
+                     data-route-color="${color}"
+                     data-route-dir="${escHtml(routeDir)}"
+                     ${routeId ? 'title="Tap to show route on map"' : ''}>
             <div class="tmb-badge" style="background:${color}">${escHtml(shortName)}</div>
             <div class="tmb-info">
                 <div class="tmb-times">${timesHtml}</div>
                 <div class="tmb-meta">${rtHtml}${delayHtml}${crowdHtml}</div>
                 ${direction ? `<div class="tmb-dir">→ ${direction}</div>` : ''}
             </div>
+            ${routeId ? `<div class="tmb-map-btn" title="Show on map">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
+                    <line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>
+                </svg>
+            </div>` : ''}
         </div>`;
     }).join('');
 }
@@ -1582,7 +1841,41 @@ async function startJourney() {
 // ── Live bus markers ──────────────────────────────────────────────
 
 function makeBusMarkerHtml(color) {
-    return `<div style="background:${color};color:white;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.35);font-size:16px;cursor:pointer">🚌</div>`;
+    return `
+    <div style="position:relative;width:30px;height:30px">
+      <div style="
+        position:absolute;top:50%;left:50%;
+        width:30px;height:30px;border-radius:50%;
+        background:${color};opacity:0.22;
+        animation:busPulse 2s ease-out infinite;pointer-events:none;
+      "></div>
+      <div style="
+        position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+        width:24px;height:24px;border-radius:50%;
+        background:${color};border:2px solid white;
+        box-shadow:0 2px 6px rgba(0,0,0,0.3);
+        display:flex;align-items:center;justify-content:center;cursor:pointer;
+      ">
+        <svg width="14" height="14" viewBox="0 0 32 32" fill="white" xmlns="http://www.w3.org/2000/svg">
+          <!-- roof / destination sign -->
+          <rect x="6" y="2" width="20" height="5" rx="2" fill="white"/>
+          <!-- body -->
+          <rect x="4" y="6" width="24" height="18" rx="3" fill="white"/>
+          <!-- windshield -->
+          <rect x="7" y="8" width="18" height="9" rx="1.5" fill="${color}"/>
+          <!-- windshield divider -->
+          <rect x="15.5" y="8" width="1" height="9" fill="white" opacity="0.5"/>
+          <!-- bumper -->
+          <rect x="6" y="24" width="20" height="3" rx="1" fill="white"/>
+          <!-- headlights -->
+          <rect x="6"  y="19" width="5" height="4" rx="1" fill="${color}"/>
+          <rect x="21" y="19" width="5" height="4" rx="1" fill="${color}"/>
+          <!-- wheels -->
+          <circle cx="10" cy="28" r="3" fill="white" stroke="${color}" stroke-width="1.2"/>
+          <circle cx="22" cy="28" r="3" fill="white" stroke="${color}" stroke-width="1.2"/>
+        </svg>
+      </div>
+    </div>`;
 }
 
 function clearBusMarkers() {
