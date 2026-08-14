@@ -116,4 +116,28 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     ORDER BY ss.arrivalSeconds
     """)
     List<ScheduledStop> findByStopId(@Param("stopId") String stopId);
+
+    /**
+     * Distinct route short-names that serve a given stop — used to show
+     * which lines call at each stop in the route stop-list panel.
+     */
+    @Query("""
+    SELECT DISTINCT t.route.shortName
+    FROM ScheduledStop ss
+    JOIN ss.trip t
+    WHERE ss.stopId = :stopId
+      AND t.route.active = true
+    """)
+    List<String> findRouteShortNamesByStopId(@Param("stopId") String stopId);
+
+    /**
+     * One representative trip for a route — used to get the ordered stop list.
+     */
+    @Query("""
+    SELECT ss FROM ScheduledStop ss
+    JOIN ss.trip t
+    WHERE t.route.id = :routeId
+    ORDER BY ss.stopSequence
+    """)
+    List<ScheduledStop> findStopsForRoute(@Param("routeId") String routeId);
 }

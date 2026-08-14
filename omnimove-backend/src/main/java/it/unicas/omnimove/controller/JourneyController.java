@@ -71,6 +71,8 @@ public class JourneyController {
     private final TripRepository        tripRepository;
     private final ObjectMapper          objectMapper;
     private final WeatherService        weatherService;
+    private final it.unicas.omnimove.repository.RouteShapeRepository    routeShapeRepository;
+    private final it.unicas.omnimove.repository.ScheduledStopRepository scheduledStopRepository;
 
     @GetMapping("/stops")
     @Operation(summary = "List active stops for origin/destination pickers")
@@ -344,5 +346,73 @@ public class JourneyController {
         }
 
         return ResponseEntity.ok(vehicles);
+    }
+
+    /**
+     * GET /api/v1/journeys/routes/{routeId}/stops
+     *
+     * Ordered stop list for a route — used by the vertical stop-list panel.
+     * Returns each stop with its name, coords, and which route short-names serve it.
+     */
+    @GetMapping("/routes/{routeId}/stops")
+    @Operation(summary = "Ordered stop list for a route with serving lines")
+    public ResponseEntity<List<Map<String, Object>>> routeStops(
+            @PathVariable String routeId) {
+
+        if (!STOP_ID_RE.matcher(routeId).matches())
+            return ResponseEntity.badRequest().build();
+
+        // Get the representative ordered stop sequence for this route
+        var allStops = scheduledStopRepository.findStopsForRoute(routeId);
+        if (allStops.isEmpty()) return ResponseEntity.notFound().build();
+
+        // De-duplicate by stopId preserving first-seen order (handles ring routes)
+        java.util.LinkedHashMap<String, it.unicas.omnimove.model.ScheduledStop> seen = new java.util.LinkedHashMap<>();
+        for (var ss : allStops) {
+            seen.putIfAbsent(ss.getStopId(), ss);
+        }
+
+        List<Map<String, Object>> result = seen.values().stream().map(ss -> {
+            String stopId = ss.getStopId();
+            var stop = stopRepository.findById(stopId).orElse(null);
+            List<String> lines = scheduledStopRepository.findRouteShortNamesByStopId(stopId)
+                    .stream().sorted().toList();
+            return Map.<String, Object>of(
+                    "stop_id",  stopId,
+                    "name",     stop != null && stop.getName() != null ? stop.getName() : stopId,
+                    "lat",      stop != null && stop.getLat()  != null ? stop.getLat()  : 0.0,
+                    "lon",      stop != null && stop.getLon()  != null ? stop.getLon()  : 0.0,
+                    "lines",    lines
+            );
+        }).toList();
+
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * GET /api/v1/journeys/routes/{routeId}/shape
+     *
+     * Full road geometry for a route, used to draw it on the map when a user
+     * taps a bus card in the next-buses sheet.
+     *
+     * Each point is [lat, lon, isStop] — isStop=true marks vertices that are
+     * scheduled stops, so the frontend can place dots only there.
+     */
+    @GetMapping("/routes/{routeId}/shape")
+    @Operation(summary = "Full route shape with stop flags")
+    public ResponseEntity<List<List<Object>>> routeShape(
+            @PathVariable String routeId) {
+
+        if (!STOP_ID_RE.matcher(routeId).matches())
+            return ResponseEntity.badRequest().build();
+
+        var points = routeShapeRepository.findByRouteIdOrderBySeqAsc(routeId);
+        if (points.isEmpty()) return ResponseEntity.notFound().build();
+
+        List<List<Object>> result = points.stream()
+                .map(p -> List.<Object>of(p.getLat(), p.getLon(), Boolean.TRUE.equals(p.getIsStop())))
+                .toList();
+
+        return ResponseEntity.ok(result);
     }
 }
