@@ -8,6 +8,23 @@ const roleRoutes = {
     'DRIVER': 'cassitrack-driver.html'
 };
 
+// US-13: the security entry point parks the page the user asked for in ?next=.
+// Accepted only as a bare local page name — anything carrying a scheme, a slash, a
+// backslash or a host is dropped, so ?next=https://evil.tld cannot bounce the user
+// off-site after a successful login (OWASP A01, open redirect).
+function pendingTarget(role) {
+    const next = new URLSearchParams(window.location.search).get('next');
+    if (!next || !/^[A-Za-z0-9._-]+\.html$/.test(next)) return null;
+
+    // Never send someone to another role's console: they would land on a 403 instead of
+    // the one they are entitled to. Shared pages (analytics) are left to the server to gate.
+    const otherConsoles = Object.entries(roleRoutes)
+        .filter(([r]) => r !== role)
+        .map(([, page]) => page);
+
+    return otherConsoles.includes(next) ? null : next;
+}
+
 function showMsg(text, type) {
     const el = document.getElementById('msg');
     el.textContent = text;
@@ -47,8 +64,9 @@ async function handleLogin(e) {
             const userRole = data.role ? data.role.toUpperCase() : 'USER';
             showMsg(`Success! Verified role: ${userRole}.`, 'ok');
 
-            // Find the correct landing page for this role
-            const targetHtmlUrl = roleRoutes[userRole];
+            // Find the correct landing page for this role, unless the user was bounced
+            // here from a page they had asked for (US-13)
+            const targetHtmlUrl = pendingTarget(userRole) || roleRoutes[userRole];
 
             if (targetHtmlUrl) {
                 // Wait 1 second so the user sees the success message, then navigate normally.

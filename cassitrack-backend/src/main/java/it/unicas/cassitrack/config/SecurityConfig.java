@@ -10,6 +10,9 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -24,6 +27,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -49,6 +54,8 @@ import java.util.List;
 @EnableWebSecurity
 @org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 public class SecurityConfig {
+
+    private static final String LOGIN_PAGE = "cassitrack-login.html";
 
     @Value("${cassitrack.cors.allowed-origins}")
     private List<String> corsAllowedOrigins;
@@ -83,8 +90,11 @@ public class SecurityConfig {
                         // unauthenticated visitors too — without this, the page itself was permitAll()
                         // but its stylesheet/script fell under the anyRequest().authenticated() catch-all
                         // below and would 401, leaving an unstyled/non-functional login page.
+                        // US-13: cassitrack-error.css belongs here for the same reason — the error
+                        // page is shown precisely to people who are not authenticated
                         .requestMatchers("/error", "/", "/cassitrack-login.html", "/cassitrack-login.css",
-                                "/cassitrack-login.js", "/api/v1/auth/login").permitAll()
+                                "/cassitrack-login.js", "/cassitrack-error.css",
+                                "/api/v1/auth/login").permitAll()
 
                         // ── 2. Public APIs (Live Tracking, Swagger) ───────────────
                         .requestMatchers(org.springframework.http.HttpMethod.GET, // Public for OMNIMOVE
@@ -140,7 +150,8 @@ public class SecurityConfig {
 
                         // ── 4. Everything else requires authentication ───────
                         .anyRequest().authenticated()
-                );
+                )
+                .exceptionHandling(e -> e.authenticationEntryPoint(unauthenticatedEntryPoint()));
 
         // V-12 FIX (OWASP A05): Add Content-Security-Policy to prevent XSS and clickjacking
         http.headers(headers -> headers
@@ -197,6 +208,53 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return source;
+    }
+
+    /**
+     * US-13: with no formLogin and no httpBasic, Spring falls back to
+     * Http403ForbiddenEntryPoint and answers every *unauthenticated* request with a bare
+     * 403 — a dead end for someone who simply opened a bookmark after their session
+     * expired. Browsers get sent to the login page carrying where they were headed;
+     * API clients get a 401 they can act on.
+     *
+     * A 403 still comes back when an authenticated user lacks the role: that is a real
+     * denial, not a missing login, and it goes through the access-denied handler.
+     */
+    private AuthenticationEntryPoint unauthenticatedEntryPoint() {
+        return (request, response, ex) -> {
+            String path   = request.getRequestURI().substring(request.getContextPath().length());
+            String accept = request.getHeader("Accept");
+            boolean wantsHtml = accept != null && accept.contains(MediaType.TEXT_HTML_VALUE);
+
+            // APIs answer in JSON whatever Accept says: an anonymous caller has no business
+            // learning which endpoints exist
+            if (!wantsHtml || path.startsWith("/api/") || path.startsWith("/actuator/")) {
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                response.getWriter().write("{\"error\":\"unauthorized\",\"message\":\"Authentication required\"}");
+                return;
+            }
+
+            // A page that does not exist is a 404, not an invitation to log in
+            if (!isKnownPage(path)) {
+                response.sendError(HttpServletResponse.SC_NOT_FOUND);
+                return;
+            }
+
+            String loginUrl = request.getContextPath() + "/" + LOGIN_PAGE;
+            String wanted   = path.substring(1);
+            if (!wanted.equals(LOGIN_PAGE)) {
+                loginUrl += "?next=" + URLEncoder.encode(wanted, StandardCharsets.UTF_8);
+            }
+            response.sendRedirect(loginUrl);
+        };
+    }
+
+    /** True when the path maps to a page actually shipped in static/. */
+    private boolean isKnownPage(String path) {
+        // Defensive: never build a classpath lookup out of a path carrying traversal segments
+        if (path.contains("..") || !path.endsWith(".html")) return false;
+        return new ClassPathResource("static" + path).exists();
     }
 
     @Bean

@@ -145,9 +145,25 @@ function showForgotPanel() {
 // REDIRECT — V-11 FIX (OWASP A03): No more document.write()
 // V-04 FIX (OWASP A02): Token stays in httpOnly cookie; not in localStorage.
 // ════════════════════════════════════════════════════════════
+// US-13: the security entry point parks the page the user asked for in ?next=.
+// Returns it only if it is a bare local page name — anything with a scheme, a slash,
+// a backslash or a host is rejected, so ?next=https://evil.tld cannot bounce the user
+// off-site after a successful login (OWASP A01, open redirect).
+function pendingTarget() {
+    const next = new URLSearchParams(window.location.search).get('next');
+    if (!next) return null;
+    return /^[A-Za-z0-9._-]+\.html$/.test(next) ? next : null;
+}
+
 function secureRedirect(role) {
     const cleanRole = (role || 'TRAVELLER').toUpperCase();
-    const targetHtmlUrl = REDIRECT[cleanRole] || 'omnimove-traveller.html';
+    let targetHtmlUrl = REDIRECT[cleanRole] || 'omnimove-traveller.html';
+
+    // Honour the requested page, unless the role cannot open it anyway
+    const wanted = pendingTarget();
+    if (wanted && !(/admin/i.test(wanted) && cleanRole !== 'ADMIN')) {
+        targetHtmlUrl = wanted;
+    }
     // Navigate normally — the httpOnly session cookie is sent automatically.
     // document.write() is removed: it was an XSS vector and breaks CSP.
     setTimeout(() => {

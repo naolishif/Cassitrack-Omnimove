@@ -756,11 +756,6 @@ body {
     cursor: pointer;
 }
 
-@keyframes pulse-blue {
-    0%,100% { box-shadow: 0 0 0 4px rgba(59,130,246,0.35); }
-    50%      { box-shadow: 0 0 0 10px rgba(59,130,246,0.08); }
-}
-
 @keyframes pulse {
     0%,100% { opacity: 1; transform: scale(1); }
     50%      { opacity: 0.4; transform: scale(0.85); }
@@ -1124,11 +1119,8 @@ body {
     .tickets-inner { padding: 16px; }
 }
 
-/* ── Step 4b: slim mobile profile hero + hide logout arrow + tidy search ── */
+/* ── Step 4b: slim mobile profile hero + tidy search ── */
 @media (max-width: 768px) {
-    /* Remove the → quick-logout arrow (Account page still has Log Out) */
-    .sidebar-user > button { display: none; }
-
     /* Thin, compact hero: avatar + name on one row, small stats below */
     .profile-hero-card {
         flex-direction: row;
@@ -1875,3 +1867,123 @@ body {
     background:transparent;color:var(--text-mid);transition:all .18s}
 .lang-pill:hover{border-color:var(--primary);color:var(--primary)}
 .lang-pill-active{background:var(--primary) !important;color:#fff !important;border-color:var(--primary) !important}
+/* ── US-01: quick logout under the sidebar menu list ── */
+.sidebar-logout {
+    padding: 8px 10px 10px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.logout-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: none;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--red);
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+}
+.logout-item:hover { background: #fef2f2; }
+.logout-item .nav-icon { font-size: 15px; width: 20px; text-align: center; }
+
+@media (max-width: 768px) {
+    /* Comfortable touch target inside the drawer */
+    .logout-item { padding: 12px; min-height: 44px; }
+}
+
+/* ── US-01: confirmation modal (light theme, matches the traveller app) ── */
+.confirm-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.confirm-modal.open { display: flex; }
+.confirm-card {
+    background: var(--bg-white);
+    border: 1px solid var(--border-mid);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    padding: 28px 24px;
+    max-width: 360px;
+    width: 100%;
+    text-align: center;
+}
+.confirm-icon { font-size: 32px; margin-bottom: 10px; color: var(--red); }
+.confirm-title { font-size: 17px; font-weight: 800; color: var(--text-dark); margin-bottom: 6px; }
+.confirm-body { font-size: 13px; color: var(--text-mid); line-height: 1.6; margin-bottom: 22px; }
+.confirm-actions { display: flex; gap: 10px; justify-content: center; }
+.confirm-actions button {
+    flex: 1;
+    max-width: 130px;
+    min-height: 44px;
+    padding: 10px 22px;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.confirm-no {
+    background: var(--bg-app);
+    color: var(--text-mid);
+    border: 1px solid var(--border-mid);
+}
+.confirm-no:hover { background: var(--border); }
+.confirm-yes {
+    background: var(--red);
+    color: #fff;
+    border: 1px solid var(--red);
+}
+.confirm-yes:hover { background: #dc2626; }
+
+/* ── US-03: "my location" marker, kept distinct from the green M stop markers ── */
+.me-icon { background: none; border: none; }
+.me-marker { position: relative; width: 26px; height: 26px; }
+
+/* Expanding halo: motion is the cue that reads first, at any zoom */
+.me-halo {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: rgba(37, 99, 235, 0.28);
+    animation: me-pulse 2s ease-out infinite;
+}
+
+.me-dot {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border-radius: 50%;
+    /* Deep blue, far from the stops' #10b981 green — and readable for red/green colour blindness */
+    background: #2563eb;
+    /* White ring carries it over dark tiles, dark outline over pale streets */
+    border: 3px solid #ffffff;
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.55),
+                0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+@keyframes me-pulse {
+    0%   { transform: scale(0.6); opacity: 0.9; }
+    100% { transform: scale(1.7); opacity: 0; }
+}
+
+/* Respect users who ask the system for less motion: keep the halo, drop the animation */
+@media (prefers-reduced-motion: reduce) {
+    .me-halo { animation: none; transform: scale(1.2); opacity: 0.5; }
+}

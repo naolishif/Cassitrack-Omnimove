@@ -10,6 +10,7 @@
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
           crossorigin="anonymous" />
     <link href="omnimove-traveller.css" rel="stylesheet">
+    <script src="omnimove-session.js"></script>
     <script src="omnimove-i18n.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
@@ -31,7 +32,6 @@
             <div class="name" id="sidebarName">—</div>
             <div class="email" id="sidebarEmail">—</div>
         </div>
-        <button onclick="logout()" title="Log out" style="margin-left:auto;flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-soft);font-size:18px;padding:4px;border-radius:8px;transition:color .2s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-soft)'">→</button>
     </div>
 
     <nav class="sidebar-nav">
@@ -61,6 +61,13 @@
             <span class="nav-icon">👤</span> <span data-i18n="nav_account">Account</span>
         </div>
     </nav>
+
+    <!-- Quick logout, directly under the menu list (not a .nav-item: the pane router binds those) -->
+    <div class="sidebar-logout">
+        <button class="logout-item" onclick="confirmLogout()" data-i18n-title="logout_label" title="Log out of OmniMove">
+            <span class="nav-icon">⏻</span> <span data-i18n="logout_btn">Log Out</span>
+        </button>
+    </div>
 
     <div class="sidebar-eco">
         <div class="eco-card">
@@ -470,7 +477,7 @@
                                 <div class="pref-label" data-i18n="logout_label">Log out of OmniMove</div>
                                 <div class="pref-desc" data-i18n="logout_desc">You will need to sign in again to access your account</div>
                             </div>
-                            <button class="action-btn" onclick="logout()" style="width:auto;padding:8px 20px;flex-shrink:0;background:#fef2f2;color:var(--red);border:1px solid #fee2e2" data-i18n="logout_btn">Log Out</button>
+                            <button class="action-btn" onclick="confirmLogout()" style="width:auto;padding:8px 20px;flex-shrink:0;background:#fef2f2;color:var(--red);border:1px solid #fee2e2" data-i18n="logout_btn">Log Out</button>
                         </div>
                     </div>
 
@@ -489,6 +496,19 @@
             </div>
         </div>
 
+    </div>
+</div>
+
+<!-- Log out confirmation modal -->
+<div id="logoutModal" class="confirm-modal" onclick="closeLogoutModal(event)">
+    <div class="confirm-card" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="logoutModalTitle">
+        <div class="confirm-icon">⏻</div>
+        <div class="confirm-title" id="logoutModalTitle" data-i18n="modal_logout_title">Log out</div>
+        <p class="confirm-body" data-i18n="modal_logout_body">Are you sure you want to log out?</p>
+        <div class="confirm-actions">
+            <button class="confirm-no" onclick="closeLogoutModal()" data-i18n="btn_no">No</button>
+            <button class="confirm-yes" id="confirmLogoutBtn" onclick="logout()" data-i18n="btn_yes">Yes</button>
+        </div>
     </div>
 </div>
 

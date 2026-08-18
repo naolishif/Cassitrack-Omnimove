@@ -8,10 +8,14 @@ function escHtml(s) {
 
 //  FRONTEND ROUTE GUARD
 // V-04 FIX: Token is in httpOnly cookie (sent automatically). User data is in sessionStorage.
+const LOGIN_PAGE = 'omnimove-login.html';
 const _user = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
 if (!_user.name && !_user.email) {
-    window.location.href = 'omnimove-login.html';
+    // US-13: come back here once signed in
+    window.location.replace(OmniSession.loginUrlWithReturn(LOGIN_PAGE));
 }
+// US-14: the guard above never re-runs on a bfcache restore — this covers Back
+OmniSession.bindSessionGuard(LOGIN_PAGE);
 
 document.getElementById('sidebarName').textContent  = _user.name || _user.username || 'Utente';
 document.getElementById('sidebarEmail').textContent = _user.email || '';
@@ -421,15 +425,17 @@ function resetTimeToNow() {
 }
 
 async function apiFetch(path, options = {}) {
-    const token = localStorage.getItem('omnimove_token');
-    return fetch(API_BASE + path, {
+    // V-04: auth rides on the httpOnly cookie, no Authorization header to build
+    const res = await fetch(API_BASE + path, {
         ...options,
+        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json',
-            ...(token ? {'Authorization': 'Bearer ' + token} : {}),
             ...(options.headers || {})
         }
     });
+    // US-14: session revoked or expired server-side → stop pretending we are logged in
+    return OmniSession.handleUnauthorized(res, LOGIN_PAGE);
 }
 
 // ── Map init ──────────────────────────────────────────────────────
@@ -440,17 +446,15 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 // ── Icons ─────────────────────────────────────────────────────────
 
-// Pulsing blue dot — used for "you are here" both on the idle map and during journey
+// US-03: "you are here" must never read as one more bus stop. Stops are green circles
+// carrying an M; this is a blue dot with a pulsing halo and no letter — different colour,
+// different shape, different behaviour. Styling lives in .me-* classes so the white ring
+// and dark outline keep it legible on light streets and on dark tiles alike.
 const userIcon = L.divIcon({
-    html: `<div style="
-        width:18px;height:18px;border-radius:50%;
-        background:#3b82f6;border:3px solid white;
-        box-shadow:0 0 0 4px rgba(59,130,246,0.35);
-        animation:pulse-blue 2s infinite;
-    "></div>`,
-    className: '',
-    iconSize: [18, 18],
-    iconAnchor: [9, 9]
+    html: '<div class="me-marker"><span class="me-halo"></span><span class="me-dot"></span></div>',
+    className: 'me-icon',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13]
 });
 
 // Destination pin — SVG teardrop
@@ -695,9 +699,11 @@ let userMarker = null;
 
 function placeUserMarker(lat, lon) {
     if (userMarker) map.removeLayer(userMarker);
-    userMarker = L.marker([lat, lon], { icon: userIcon })
+    // US-03: zIndexOffset keeps the dot on top — a stop sitting on your position used to
+    // hide it completely, which is half the reason it was hard to find
+    userMarker = L.marker([lat, lon], { icon: userIcon, zIndexOffset: 1000 })
         .addTo(map)
-        .bindPopup('📍 You are here');
+        .bindPopup('📍 ' + t('you_are_here'));
 }
 
 function tryGetGPS() {
@@ -1834,17 +1840,22 @@ function closeAI(e) {
     }
 }
 
-async function logout() {
-    const token = localStorage.getItem('omnimove_token');
-    if (token) {
-        await fetch('/omnimove/api/v1/auth/logout', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + token }
-        }).catch(() => {});
+// Every logout entry point (sidebar list, drawer arrow, Profile > Settings) goes through here
+function confirmLogout() {
+    // The drawer stays open on purpose: "No" must put you back exactly where you were
+    document.getElementById('logoutModal').classList.add('open');
+}
+
+function closeLogoutModal(e) {
+    if (!e || e.target === document.getElementById('logoutModal')) {
+        document.getElementById('logoutModal').classList.remove('open');
     }
-    localStorage.removeItem('omnimove_token');
-    localStorage.removeItem('omnimove_user');
-    window.location.href = 'omnimove-login.html';
+}
+
+async function logout() {
+    // US-14: blacklists the token server-side, expires the JWT cookie, then wipes
+    // localStorage + sessionStorage and drops this page from the history stack.
+    await OmniSession.endSession(LOGIN_PAGE);
 }
 
 function confirmDeleteAccount() {
@@ -1858,16 +1869,15 @@ async function deleteAccount() {
     btn.textContent = 'Deleting…';
 
     try {
-        const token = localStorage.getItem('omnimove_token');
-        const r = await fetch('/omnimove/api/v1/auth/account', {
+        const r = await fetch(API_BASE + '/auth/account', {
             method: 'DELETE',
-            headers: { 'Authorization': 'Bearer ' + token }
+            credentials: 'same-origin'
         });
 
         if (r.ok) {
-            localStorage.removeItem('omnimove_token');
-            localStorage.removeItem('omnimove_user');
-            window.location.href = 'omnimove-login.html';
+            // The account is gone: tear the session down exactly like a logout (US-14)
+            OmniSession.clearClientSession();
+            window.location.replace(LOGIN_PAGE);
         } else {
             const data = await r.json().catch(() => ({}));
             alert(data.message || 'Could not delete account. Please try again.');

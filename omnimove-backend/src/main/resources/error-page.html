@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<!--
+  Single error page for every HTTP status, served by ErrorPageController.
+  It lives outside static/ on purpose: it must not be reachable as a URL of its own.
+  __STATUS__ is substituted server-side before the page is sent.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OMNIMOVE — Error</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;800&display=swap" rel="stylesheet">
+    <script src="/omnimove/omnimove-i18n.js"></script>
+    <style>
+        :root{--bg:#07090F;--panel:#0F1623;--border:#1A2744;
+              --accent:#3B82F6;--amber:#F59E0B;--red:#EF4444;--text:#E2E8F0;--dim:#4B5563;
+              --mono:'DM Mono',monospace;--display:'Syne',sans-serif}
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{background:var(--bg);color:var(--text);font-family:var(--display);
+             min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+        .wrap{width:100%;max-width:420px;text-align:center}
+        .logo{font-size:26px;font-weight:800;letter-spacing:1px;margin-bottom:6px}
+        .logo span{color:var(--accent)}
+        .tagline{font-family:var(--mono);font-size:11px;color:var(--dim);margin-bottom:32px}
+        .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:36px 28px}
+        .code{font-size:56px;font-weight:800;line-height:1;margin-bottom:10px;color:var(--accent)}
+        .title{font-size:17px;font-weight:600;margin-bottom:10px}
+        .msg{font-family:var(--mono);font-size:12px;color:var(--dim);line-height:1.7;margin-bottom:26px}
+        .btn{display:inline-block;padding:12px 26px;background:var(--accent);color:#fff;
+             text-decoration:none;border-radius:8px;font-family:var(--mono);font-size:12px}
+        .btn:hover{filter:brightness(1.1)}
+        /* Server errors read as louder than "you took a wrong turn" */
+        body[data-series="5"] .code{color:var(--red)}
+        body[data-series="4"] .code{color:var(--amber)}
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="logo">OMNI<span>MOVE</span></div>
+    <div class="tagline" data-i18n="brand_tagline">Smarter urban mobility</div>
+    <div class="card">
+        <div class="code" id="errCode">__STATUS__</div>
+        <div class="title" id="errTitle">Something went wrong</div>
+        <p class="msg" id="errBody">An unexpected error occurred.</p>
+        <a class="btn" href="/omnimove/omnimove-login.html" data-i18n="err_back_btn">Back to OmniMove</a>
+    </div>
+</div>
+<script>
+    (function () {
+        var status = document.getElementById('errCode').textContent.trim();
+        // Statuses worth their own wording; anything else falls back to the generic pair
+        var known  = { '400': 'err400', '401': 'err401', '403': 'err403', '404': 'err404', '500': 'err500' };
+        var base   = known[status] || 'err_generic';
+
+        document.body.dataset.series = status.charAt(0);
+        document.getElementById('errTitle').dataset.i18n = base + '_title';
+        document.getElementById('errBody').dataset.i18n  = base + '_body';
+        document.addEventListener('DOMContentLoaded', applyTranslations);
+    })();
+</script>
+</body>
+</html>
