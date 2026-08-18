@@ -1,4 +1,4 @@
-// ─── OmniMove session teardown (US-14) ──────────────────────────────────
+// ─── OmniMove session teardown ──────────────────────────────────
 // Single place that ends a session, shared by every authenticated page so the
 // traveller app and the admin console cannot drift apart.
 //
@@ -50,7 +50,7 @@
             });
     }
 
-    // US-13: when a route guard bounces someone to the login page, carry the page they
+    // When a route guard bounces someone to the login page, carry the page they
     // were on in ?next= — same contract the server-side entry point uses.
     function loginUrlWithReturn(loginPage) {
         var page = location.pathname.split('/').pop();

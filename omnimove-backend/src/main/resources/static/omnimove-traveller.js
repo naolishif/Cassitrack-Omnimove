@@ -11,10 +11,10 @@ function escHtml(s) {
 const LOGIN_PAGE = 'omnimove-login.html';
 const _user = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
 if (!_user.name && !_user.email) {
-    // US-13: come back here once signed in
+    // Come back here once signed in
     window.location.replace(OmniSession.loginUrlWithReturn(LOGIN_PAGE));
 }
-// US-14: the guard above never re-runs on a bfcache restore — this covers Back
+// The guard above never re-runs on a bfcache restore — this covers Back
 OmniSession.bindSessionGuard(LOGIN_PAGE);
 
 document.getElementById('sidebarName').textContent  = _user.name || _user.username || 'Utente';
@@ -434,7 +434,7 @@ async function apiFetch(path, options = {}) {
             ...(options.headers || {})
         }
     });
-    // US-14: session revoked or expired server-side → stop pretending we are logged in
+    // Session revoked or expired server-side → stop pretending we are logged in
     return OmniSession.handleUnauthorized(res, LOGIN_PAGE);
 }
 
@@ -446,7 +446,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 // ── Icons ─────────────────────────────────────────────────────────
 
-// US-03: "you are here" must never read as one more bus stop. Stops are green circles
+// "you are here" must never read as one more bus stop. Stops are green circles
 // carrying an M; this is a blue dot with a pulsing halo and no letter — different colour,
 // different shape, different behaviour. Styling lives in .me-* classes so the white ring
 // and dark outline keep it legible on light streets and on dark tiles alike.
@@ -699,7 +699,7 @@ let userMarker = null;
 
 function placeUserMarker(lat, lon) {
     if (userMarker) map.removeLayer(userMarker);
-    // US-03: zIndexOffset keeps the dot on top — a stop sitting on your position used to
+    // zIndexOffset keeps the dot on top — a stop sitting on your position used to
     // hide it completely, which is half the reason it was hard to find
     userMarker = L.marker([lat, lon], { icon: userIcon, zIndexOffset: 1000 })
         .addTo(map)
@@ -1853,7 +1853,7 @@ function closeLogoutModal(e) {
 }
 
 async function logout() {
-    // US-14: blacklists the token server-side, expires the JWT cookie, then wipes
+    // Blacklists the token server-side, expires the JWT cookie, then wipes
     // localStorage + sessionStorage and drops this page from the history stack.
     await OmniSession.endSession(LOGIN_PAGE);
 }
@@ -1875,7 +1875,7 @@ async function deleteAccount() {
         });
 
         if (r.ok) {
-            // The account is gone: tear the session down exactly like a logout (US-14)
+            // The account is gone: tear the session down exactly like a logout
             OmniSession.clearClientSession();
             window.location.replace(LOGIN_PAGE);
         } else {

@@ -8,7 +8,7 @@ const roleRoutes = {
     'DRIVER': 'cassitrack-driver.html'
 };
 
-// US-13: the security entry point parks the page the user asked for in ?next=.
+// The security entry point parks the page the user asked for in ?next=.
 // Accepted only as a bare local page name — anything carrying a scheme, a slash, a
 // backslash or a host is dropped, so ?next=https://evil.tld cannot bounce the user
 // off-site after a successful login (OWASP A01, open redirect).
@@ -65,7 +65,7 @@ async function handleLogin(e) {
             showMsg(`Success! Verified role: ${userRole}.`, 'ok');
 
             // Find the correct landing page for this role, unless the user was bounced
-            // here from a page they had asked for (US-13)
+            // here from a page they had asked for
             const targetHtmlUrl = pendingTarget(userRole) || roleRoutes[userRole];
 
             if (targetHtmlUrl) {

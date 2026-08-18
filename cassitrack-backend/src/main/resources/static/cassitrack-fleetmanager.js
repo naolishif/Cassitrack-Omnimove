@@ -12,7 +12,7 @@
 
 const API          = '/cassitrack/api/v1';              // CASSITRACK — fleet, ETA  (context-path prefix required)
 
-// US-13/US-14: a 401 from any of this page's ~39 fetch calls sends us back to login;
+// A 401 from any of this page's ~39 fetch calls sends us back to login;
 // Back out of a dead session re-checks with the server instead of showing a stale console
 CassiSession.installFetchGuard();
 CassiSession.bindSessionGuard();
@@ -1365,7 +1365,7 @@ async function ttDeleteRun(tripId){
 }
 
 async function logoutUser(){
-    // US-14: token blacklisted server-side, cookie expired, storage wiped, page dropped
+    // Token blacklisted server-side, cookie expired, storage wiped, page dropped
     // from the history stack. (Earlier this was gated behind `if (token)` reading a
     // localStorage key nothing writes since the httpOnly-cookie migration, so the logout
     // call never fired at all — hence the shared module, one implementation for all three

@@ -145,7 +145,7 @@ function showForgotPanel() {
 // REDIRECT — V-11 FIX (OWASP A03): No more document.write()
 // V-04 FIX (OWASP A02): Token stays in httpOnly cookie; not in localStorage.
 // ════════════════════════════════════════════════════════════
-// US-13: the security entry point parks the page the user asked for in ?next=.
+// The security entry point parks the page the user asked for in ?next=.
 // Returns it only if it is a bare local page name — anything with a scheme, a slash,
 // a backslash or a host is rejected, so ?next=https://evil.tld cannot bounce the user
 // off-site after a successful login (OWASP A01, open redirect).

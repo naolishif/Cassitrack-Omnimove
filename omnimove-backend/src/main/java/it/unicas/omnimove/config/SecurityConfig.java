@@ -120,7 +120,7 @@ public class SecurityConfig {
     }
 
     /**
-     * US-14: with no formLogin and no httpBasic, Spring falls back to
+     * With no formLogin and no httpBasic, Spring falls back to
      * Http403ForbiddenEntryPoint and answers every *unauthenticated* request with a bare
      * 403. Two consequences: reopening the app after a logout showed an error page instead
      * of the login, and the front-end could not tell a dead session from a role denial.
@@ -135,7 +135,7 @@ public class SecurityConfig {
             boolean wantsHtml = accept != null && accept.contains(MediaType.TEXT_HTML_VALUE);
 
             // API and actuator answer in JSON whatever the Accept header says: an anonymous
-            // caller has no business learning which endpoints exist (US-13)
+            // caller has no business learning which endpoints exist
             if (!wantsHtml || path.startsWith("/api/") || path.startsWith("/actuator/")) {
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 response.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -143,7 +143,7 @@ public class SecurityConfig {
                 return;
             }
 
-            // US-13: a page that does not exist is a 404, not an invitation to log in.
+            // A page that does not exist is a 404, not an invitation to log in.
             // Without this the login redirect would swallow every typo'd URL.
             if (!isKnownPage(path)) {
                 response.sendError(HttpServletResponse.SC_NOT_FOUND);

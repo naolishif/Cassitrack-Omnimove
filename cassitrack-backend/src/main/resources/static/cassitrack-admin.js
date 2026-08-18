@@ -1,4 +1,4 @@
-// US-13/US-14: a 401 from any call sends us back to login; Back out of a dead session
+// A 401 from any call sends us back to login; Back out of a dead session
 // re-checks with the server instead of showing a stale console
 CassiSession.installFetchGuard();
 CassiSession.bindSessionGuard();
@@ -63,7 +63,7 @@ document
 // ─────────────────────────────
 
 async function logoutUser(){
-    // US-14: token blacklisted server-side, cookie expired, storage wiped, page dropped
+    // Token blacklisted server-side, cookie expired, storage wiped, page dropped
     // from the history stack. (Earlier this was gated behind `if (token)` reading a
     // localStorage key nothing writes since the httpOnly-cookie migration, so the logout
     // call never fired at all — hence the shared module, one implementation for all three

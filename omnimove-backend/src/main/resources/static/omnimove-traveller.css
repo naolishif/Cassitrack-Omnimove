@@ -1867,7 +1867,7 @@ body {
     background:transparent;color:var(--text-mid);transition:all .18s}
 .lang-pill:hover{border-color:var(--primary);color:var(--primary)}
 .lang-pill-active{background:var(--primary) !important;color:#fff !important;border-color:var(--primary) !important}
-/* ── US-01: quick logout under the sidebar menu list ── */
+/* ── quick logout under the sidebar menu list ── */
 .sidebar-logout {
     padding: 8px 10px 10px;
     border-top: 1px solid var(--border);
@@ -1898,7 +1898,7 @@ body {
     .logout-item { padding: 12px; min-height: 44px; }
 }
 
-/* ── US-01: confirmation modal (light theme, matches the traveller app) ── */
+/* ── confirmation modal (light theme, matches the traveller app) ── */
 .confirm-modal {
     display: none;
     position: fixed;
@@ -1949,7 +1949,7 @@ body {
 }
 .confirm-yes:hover { background: #dc2626; }
 
-/* ── US-03: "my location" marker, kept distinct from the green M stop markers ── */
+/* ── "my location" marker, kept distinct from the green M stop markers ── */
 .me-icon { background: none; border: none; }
 .me-marker { position: relative; width: 26px; height: 26px; }
 

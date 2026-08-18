@@ -90,7 +90,7 @@ public class SecurityConfig {
                         // unauthenticated visitors too — without this, the page itself was permitAll()
                         // but its stylesheet/script fell under the anyRequest().authenticated() catch-all
                         // below and would 401, leaving an unstyled/non-functional login page.
-                        // US-13: cassitrack-error.css belongs here for the same reason — the error
+                        // cassitrack-error.css belongs here for the same reason — the error
                         // page is shown precisely to people who are not authenticated
                         .requestMatchers("/error", "/", "/cassitrack-login.html", "/cassitrack-login.css",
                                 "/cassitrack-login.js", "/cassitrack-error.css",
@@ -211,7 +211,7 @@ public class SecurityConfig {
     }
 
     /**
-     * US-13: with no formLogin and no httpBasic, Spring falls back to
+     * With no formLogin and no httpBasic, Spring falls back to
      * Http403ForbiddenEntryPoint and answers every *unauthenticated* request with a bare
      * 403 — a dead end for someone who simply opened a bookmark after their session
      * expired. Browsers get sent to the login page carrying where they were headed;

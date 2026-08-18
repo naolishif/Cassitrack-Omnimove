@@ -3,7 +3,7 @@
 
 const API = '/cassitrack/api/v1';
 
-// US-13/US-14: a 401 from any call sends us back to login; Back out of a dead session
+// A 401 from any call sends us back to login; Back out of a dead session
 // re-checks with the server instead of showing a stale console
 CassiSession.installFetchGuard();
 CassiSession.bindSessionGuard();
@@ -37,7 +37,7 @@ function escHtml(s) {
 // ── LOGOUT ─────────────────────────────────────────────────────────────────
 
 async function logoutUser() {
-    // US-14: token blacklisted server-side, cookie expired, storage wiped,
+    // Token blacklisted server-side, cookie expired, storage wiped,
     // page dropped from the history stack
     await CassiSession.endSession();
 }

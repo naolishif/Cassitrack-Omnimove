@@ -1,4 +1,4 @@
-// ─── CASSITRACK session teardown (US-14) ────────────────────────────────
+// ─── CASSITRACK session teardown ────────────────────────────────
 // Single place that ends a session, shared by every authenticated page so the admin,
 // analytics and fleet-manager consoles cannot drift apart.
 //
@@ -47,7 +47,7 @@
             });
     }
 
-    // US-13: carry the page the user was on, so login can send them back to it
+    // Carry the page the user was on, so login can send them back to it
     function loginUrlWithReturn() {
         var page = location.pathname.split('/').pop();
         if (!page || page === LOGIN_PAGE) return LOGIN_PAGE;

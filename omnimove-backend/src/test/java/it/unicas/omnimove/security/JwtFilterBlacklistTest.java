@@ -21,7 +21,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * US-14: logging out blacklists the JWT, so the API must reject that token
+ * Logging out blacklists the JWT, so the API must reject that token
  * afterwards — whether it arrives in the httpOnly cookie or in an
  * Authorization header (an attacker who copied the token before logout).
  */

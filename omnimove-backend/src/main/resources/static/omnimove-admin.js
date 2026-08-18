@@ -13,7 +13,7 @@ const LOGIN_PAGE = 'omnimove-login.html';
 (function checkAdminAuth() {
     const userRaw = sessionStorage.getItem('omnimove_user');
     if (!userRaw) {
-        // US-13: dopo il login si torna qui
+        // Dopo il login si torna qui
         window.location.replace(OmniSession.loginUrlWithReturn(LOGIN_PAGE));
         return;
     }
@@ -29,7 +29,7 @@ const LOGIN_PAGE = 'omnimove-login.html';
         window.location.replace(LOGIN_PAGE);
     }
 })();
-// US-14: il guard qui sopra non gira su un ripristino da bfcache — questo copre il Back
+// Il guard qui sopra non gira su un ripristino da bfcache — questo copre il Back
 OmniSession.bindSessionGuard(LOGIN_PAGE);
 
 // ── API helper con JWT ─────────────────────────────────────────────────
@@ -46,7 +46,7 @@ async function apiFetch(path, options = {}) {
             ...(options.headers || {})
         }
     });
-    // US-14: session revoked or expired server-side → back to the login page
+    // Session revoked or expired server-side → back to the login page
     return OmniSession.handleUnauthorized(res, LOGIN_PAGE);
 }
 
@@ -178,7 +178,7 @@ async function confirmDeleteUser() {
 
 // log out
 async function logout() {
-    // US-14: token in blacklist, cookie scaduto, storage ripulito, pagina fuori dalla history
+    // Token in blacklist, cookie scaduto, storage ripulito, pagina fuori dalla history
     await OmniSession.endSession(LOGIN_PAGE);
 }
 

@@ -17,7 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * US-13: one error page for every status, replacing Spring's Whitelabel.
+ * One error page for every status, replacing Spring's Whitelabel.
  *
  * Declaring an ErrorController bean makes Boot's own BasicErrorController back off, so this
  * is the single place errors are rendered — a 404 from a typo'd URL, a 403 from a role
