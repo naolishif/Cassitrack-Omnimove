@@ -50,8 +50,13 @@ spring:
 # ── Server ───────────────────────────────────────────────────────
 server:
   port: 8280
-  #servlet:
-  #  context-path: /
+  # The static frontend addresses the API as /cassitrack/api/v1 (see
+  # cassitrack-login.js, -session.js, -admin.js, -fleetmanager.js), so the app
+  # must be mounted under /cassitrack whether it runs in Docker or from the IDE.
+  # docker-compose passes SERVER_SERVLET_CONTEXT_PATH; the default keeps local
+  # runs identical, mirroring omnimove-backend.
+  servlet:
+    context-path: ${SERVER_SERVLET_CONTEXT_PATH:/cassitrack}
 
 # ── InfluxDB ──────────────────────────────────────────────────────
 influx:
