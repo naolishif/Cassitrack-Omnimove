@@ -488,26 +488,15 @@ function renderStopMarkers() {
     window._stopMarkers.forEach(m => map.removeLayer(m));
     window._stopMarkers = [];
     Object.values(STOPS).forEach(stop => {
-        const safeName = escHtml(stop.name);
-        // Use data-attributes on the button so the delegated listener can read them
-        // without needing inline onclick (CSP-safe, no JSON injection risk).
-        const popup =
-            `<b>${safeName}</b><br>` +
-            `<button class="stop-check-btn" ` +
-            `data-stop-id="${escAttr(stop.id)}" data-stop-name="${escAttr(stop.name)}">` +
-            `${t('btn_check_buses')}</button>`;
+        // One click straight to the arrivals sheet. The popup that used to sit in between
+        // only repeated the stop name, which the sheet shows as its own title anyway —
+        // no data passes through the DOM, so there is nothing left to escape here.
         const marker = L.marker([stop.lat, stop.lon], { icon: STOP_ICON })
             .addTo(map)
-            .bindPopup(popup);
+            .on('click', () => showStopArrivals(stop.id, stop.name));
         window._stopMarkers.push(marker);
     });
 }
-
-// Delegated listener for "Check next buses" buttons inside Leaflet popups.
-document.addEventListener('click', e => {
-    const btn = e.target.closest('.stop-check-btn');
-    if (btn) showStopArrivals(btn.dataset.stopId, btn.dataset.stopName);
-});
 
 // ── Stop arrivals bottom sheet ─────────────────────────────────────
 
@@ -663,8 +652,6 @@ function renderArrivals(list, arrivals) {
 
 // ── Load stops from the backend → fill dropdowns + map markers ─────
 async function loadStops() {
-    const originSel = document.getElementById('originSelect');
-    const destSel   = document.getElementById('destSelect');
     try {
         const r = await apiFetch('/journeys/stops');
         if (!r.ok) throw new Error('stops ' + r.status);
@@ -678,9 +665,10 @@ async function loadStops() {
         STOPS = {};
         stops.forEach(s => { STOPS[s.id] = { id: s.id, name: s.name, lat: s.lat, lon: s.lon }; });
 
-        // Typable inputs: set sensible defaults (display name + hidden stop id)
-        setStop(originSel, stops[0].id);
-        setStop(destSel, stops.length > 1 ? stops[1].id : stops[0].id);
+        // Both fields stay empty on purpose, showing their "Origin" / "Destination"
+        // placeholders: pre-filling them with the first two stops of the list put a choice
+        // in the traveller's mouth that they never made, and a distracted tap on Search
+        // would plan a journey between two stops they had never picked.
 
         renderStopMarkers();
 
@@ -799,7 +787,16 @@ async function doSearch() {
     _acHide();   // close the suggestion list on search
     const destId = document.getElementById('destSelect').dataset.id;
     const dest   = STOPS[destId];
-    let origin   = getOrigin();
+
+    // The fields start empty now, so a destination is no longer guaranteed. An empty
+    // origin is fine — getOrigin() reads it as "where I am" and asks for GPS.
+    if (!dest) {
+        showToast(t('pick_dest'), true);
+        document.getElementById('destSelect').focus();
+        return;
+    }
+
+    let origin = getOrigin();
 
     if (!origin) {
         showToast('📡 Getting your location...', false);
@@ -2127,6 +2124,10 @@ function setStop(el, id) {
 
 let _acFor = null;
 
+// Generous cap: the list is scrollable, so the limit is only there to keep the DOM
+// bounded if the network ever grows well beyond today's 20 stops
+const AC_MAX_ITEMS = 50;
+
 function _acItems(inputEl, q) {
     q = (q || '').trim().toLowerCase();
     const out = [];
@@ -2143,14 +2144,18 @@ function _acItems(inputEl, q) {
             if ((s.name || '').toLowerCase().includes(q)) out.push({ id: s.id, name: s.name });
         });
     }
-    return out.slice(0, 8);
+    return out.slice(0, AC_MAX_ITEMS);
 }
 
-function _acShow(inputEl) {
+// showAll ignores what is already in the field. The two inputs come pre-filled with the
+// first two stops, so filtering on their own value would answer a click with a list of
+// exactly one item — the stop you are trying to change. Clicking means "let me pick",
+// so it opens the full list; typing narrows it down from there.
+function _acShow(inputEl, showAll) {
     const acList = document.getElementById('acList');
     if (!acList) return;
     _acFor = inputEl;
-    const items = _acItems(inputEl, inputEl.value);
+    const items = _acItems(inputEl, showAll ? '' : inputEl.value);
     if (!items.length) { acList.style.display = 'none'; return; }
     acList.innerHTML = items.map(it =>
         `<div class="ac-item" data-id="${escAttr(it.id)}">${escHtml(it.name)}</div>`).join('');
@@ -2173,7 +2178,10 @@ function initAutocomplete() {
     ['originSelect', 'destSelect'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.addEventListener('focus', () => { el.select(); _acShow(el); });
+        el.addEventListener('focus', () => { el.select(); _acShow(el, true); });
+        // A click on an already-focused field fires no focus event — without this, closing
+        // the list and clicking again would leave you stuck with no way to reopen it
+        el.addEventListener('click', () => _acShow(el, true));
         el.addEventListener('input', () => _acShow(el));
         el.addEventListener('blur', () => setTimeout(_acHide, 150));
     });

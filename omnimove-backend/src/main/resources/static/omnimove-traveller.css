@@ -916,22 +916,6 @@ body {
     color: var(--text-soft);
     margin-left: auto;
 }
-.stop-check-btn {
-    margin-top: 8px;
-    padding: 7px 14px;
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: var(--radius-sm);
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    width: 100%;
-    transition: background 0.15s;
-}
-.stop-check-btn:hover { background: var(--primary-dark); }
-
 /* ── TMB-style stop arrivals ─────────────────────────────────────── */
 .tmb-route-row {
     display: flex;

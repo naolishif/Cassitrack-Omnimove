@@ -169,7 +169,6 @@ const OMNI_T = {
     no_favs:'No favourites yet. Tap the ☆ on a trip to save its route here.',
     lbl_today:'Today', lbl_yesterday:'Yesterday',
     // Stop arrivals sheet
-    btn_check_buses:'Check next buses',
     loading_buses:'Loading next buses…',
     lbl_line:'line', lbl_lines:'lines',
     lbl_next_departures:'next departures',
@@ -188,6 +187,7 @@ const OMNI_T = {
     btn_start_journey:'Start Journey',
     lbl_stops:'stops', lbl_stop:'stop',
     no_stops_avail:'No stops available',
+    pick_dest:'Pick a destination first',
     // Search flow
     finding_routes:'Finding best routes...',
     err_rate_limited:'Too many searches. Please wait a moment before trying again.',
@@ -375,7 +375,6 @@ const OMNI_T = {
     no_favs:'Nessun preferito ancora. Tocca ☆ su un percorso per salvarlo qui.',
     lbl_today:'Oggi', lbl_yesterday:'Ieri',
     // Stop arrivals sheet
-    btn_check_buses:'Prossimi bus',
     loading_buses:'Caricamento bus…',
     lbl_line:'linea', lbl_lines:'linee',
     lbl_next_departures:'prossime partenze',
@@ -394,6 +393,7 @@ const OMNI_T = {
     btn_start_journey:'Inizia percorso',
     lbl_stops:'fermate', lbl_stop:'fermata',
     no_stops_avail:'Nessuna fermata disponibile',
+    pick_dest:'Scegli prima una destinazione',
     // Search flow
     finding_routes:'Ricerca dei percorsi migliori...',
     err_rate_limited:'Troppe ricerche. Aspetta un momento prima di riprovare.',
