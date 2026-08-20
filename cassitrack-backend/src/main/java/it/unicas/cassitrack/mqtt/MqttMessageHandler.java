@@ -124,6 +124,13 @@ public class MqttMessageHandler implements MessageHandler {
                 entity.setNextStop(next.name());
             }
 
+            // ── Step 6b: how long has it been standing still? ─────
+            // Carried across messages: a single reading cannot tell a stopped
+            // bus from a moving one. GPS never repeats a fix exactly (the
+            // units jitter by a few metres even parked), so "not moving" is a
+            // radius, not an equality.
+            carryStationarySince(entity);
+
             vehicleStateCache.update(pos.getVehicleId(), entity);
 
             // ── Step 7: time series ───────────────────────────────
@@ -222,5 +229,46 @@ public class MqttMessageHandler implements MessageHandler {
                 .scheduleStatus(VehiclePosition.ScheduleStatus.UNKNOWN)
                 .receivedAt(Instant.now())
                 .build();
+    }
+
+    /**
+     * Radius under which a bus counts as not having moved.
+     *
+     * The units jitter by a few metres even standing still (the simulator adds
+     * ±6 m on purpose), so comparing coordinates for equality would never see a
+     * stationary vehicle. 30 m is comfortably above that noise and well below
+     * the distance covered between two messages by a bus that is actually
+     * driving.
+     */
+    private static final double STILL_RADIUS_M = 30.0;
+
+    /**
+     * Keep, or restart, the clock that says how long this bus has been standing
+     * still — by comparing the new fix with the previous one held in Redis.
+     */
+    private void carryStationarySince(VehiclePosition entity) {
+        VehiclePosition prev = vehicleStateCache.get(entity.getVehicleId()).orElse(null);
+        Instant now = entity.getReceivedAt() != null ? entity.getReceivedAt() : Instant.now();
+
+        if (prev == null || prev.getLat() == null || prev.getLon() == null
+                || entity.getLat() == null || entity.getLon() == null) {
+            entity.setStationarySince(now);
+            return;
+        }
+
+        double moved = metres(prev.getLat(), prev.getLon(), entity.getLat(), entity.getLon());
+        entity.setStationarySince(
+                moved > STILL_RADIUS_M || prev.getStationarySince() == null
+                        ? now                              // it moved: clock restarts
+                        : prev.getStationarySince());      // still there: clock carries on
+    }
+
+    private static double metres(double aLat, double aLon, double bLat, double bLon) {
+        double R = 6_371_000;
+        double dLat = Math.toRadians(bLat - aLat), dLon = Math.toRadians(bLon - aLon);
+        double s = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                 + Math.cos(Math.toRadians(aLat)) * Math.cos(Math.toRadians(bLat))
+                 * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
     }
 }

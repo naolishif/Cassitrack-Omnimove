@@ -79,6 +79,27 @@ public class ActiveTripService {
     private final TripCompletionService tripCompletionService;
 
     /**
+     * Beyond this silence we stop claiming to know where a bus is. Past its
+     * scheduled end it closes the trip; during one it raises NO_SIGNAL.
+     */
+    private static final long SILENCE_SECONDS = 5 * 60;
+
+    /**
+     * A bus that has not moved for this long WHILE RUNNING is worth flagging.
+     * Not necessarily a breakdown — traffic, an accident, a driver change —
+     * but something a fleet manager should look at. Standing at a terminus
+     * between runs is not covered: that bus has no trip in progress.
+     */
+    private static final long STALL_SECONDS = 10 * 60;
+
+    /** True when the vehicle has been sitting in the same spot too long. */
+    private static boolean isStalled(VehiclePosition live) {
+        if (live == null || live.getStationarySince() == null) return false;
+        return Duration.between(live.getStationarySince(), Instant.now())
+                       .getSeconds() >= STALL_SECONDS;
+    }
+
+    /**
      * The whole service day, in departure order — what the Trips tab lists.
      *
      * The timetable has no service date, so "the day" is the same set every
@@ -196,15 +217,44 @@ public class ActiveTripService {
             // time from an arrival at some earlier stop would be worse still.
             boolean finished = total > 0 && observedDone >= total;
 
-            // Phase is always knowable; punctuality is not. A trip is over
-            // either because we watched it reach the last stop — possibly ahead
-            // of the clock — or because its window has simply elapsed.
-            String phase = finished || now > endSec ? "FINISHED"
-                         : now < startSec           ? "NOT_STARTED"
-                         : "ACTIVE";
+            // How long since this bus last said anything. Used below to tell a
+            // late bus (still reporting, still out there) from one we simply
+            // lost track of.
+            long silentFor = (onThisTrip && live != null && live.getReceivedAt() != null)
+                    ? Duration.between(live.getReceivedAt(), Instant.now()).getSeconds()
+                    : Long.MAX_VALUE;
+            boolean reporting = silentFor <= SILENCE_SECONDS;
+
+            // A trip ends when we WATCH it reach the last stop — or, past its
+            // scheduled end, when the bus has gone quiet long enough that we
+            // can no longer claim to be following it.
+            //
+            // The elapsed clock alone is not enough: a bus running late is
+            // still running, and calling that "finished" hid exactly the case
+            // worth looking at. It gets its own phase instead.
+            String phase;
+            if (finished)                                    phase = "FINISHED";
+            else if (now < startSec)                         phase = "NOT_STARTED";
+            else if (now <= endSec)                          phase = "ACTIVE";
+            else if (reporting)                              phase = "OVERDUE";
+            else                                             phase = "FINISHED";
+
+            // Vehicle health, deliberately independent of the phase above: a bus
+            // can be OVERDUE *because* it is STALLED, and seeing both tells the
+            // fleet manager what is happening and why.
+            //
+            // Only STALLED lives here. "We hear nothing from this bus" is already
+            // reported by the status column (NO_SIGNAL, below), and duplicating it
+            // would put two identical badges on the same row.
+            String health = "OK";
+            if (!"NOT_STARTED".equals(phase) && !"FINISHED".equals(phase)
+                    && reporting && isStalled(live)) {
+                health = "STALLED";
+            }
 
             out.add(ActiveTripDTO.builder()
                     .phase(phase)
+                    .health(health)
                     .tripId(tripId)
                     .routeId(routeId)
                     .routeName(routeLabel(shortName, longName))
