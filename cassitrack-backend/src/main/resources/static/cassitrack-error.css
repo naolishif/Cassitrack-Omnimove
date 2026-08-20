@@ -1,0 +1,97 @@
+/* Styling for the single error page (see resources/error-page.html).
+   Kept in its own file because the CASSITRACK CSP allows no inline <style>. */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --bg: #07090F;
+    --panel: #0F1623;
+    --border: #1A2744;
+    --accent: #3B82F6;
+    --amber: #F59E0B;
+    --red: #EF4444;
+    --text: #E2E8F0;
+    --dim: #4B5563;
+    --mono: 'DM Mono', monospace;
+    --display: 'Syne', sans-serif;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--display);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.container {
+    width: 100%;
+    max-width: 420px;
+    text-align: center;
+}
+
+.logo {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    margin-bottom: 28px;
+}
+
+.logo span {
+    color: var(--accent);
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 36px 28px;
+}
+
+.err-code {
+    font-size: 56px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 10px;
+    color: var(--accent);
+}
+
+/* A 500 should not read like "you mistyped the address" */
+body[data-series="4"] .err-code { color: var(--amber); }
+body[data-series="5"] .err-code { color: var(--red); }
+
+.err-title {
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.err-msg {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--dim);
+    line-height: 1.7;
+    margin-bottom: 26px;
+}
+
+.err-btn {
+    display: inline-block;
+    padding: 12px 26px;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+.err-btn:hover {
+    filter: brightness(1.1);
+}

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!--
+  Single error page for every HTTP status, served by ErrorPageController.
+  It lives outside static/ on purpose: it must not be reachable as a URL of its own.
+  __CTX__, __STATUS__, __SERIES__, __TITLE__ and __MESSAGE__ are substituted server-side.
+  No inline <style> or <script>: the CASSITRACK CSP has no 'unsafe-inline'.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>CASSITRACK — Error</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <link href="__CTX__/cassitrack-error.css" rel="stylesheet">
+</head>
+<body data-series="__SERIES__">
+<div class="container">
+    <div class="logo">CASSI<span>TRACK</span></div>
+    <div class="card">
+        <div class="err-code">__STATUS__</div>
+        <div class="err-title">__TITLE__</div>
+        <p class="err-msg">__MESSAGE__</p>
+        <a class="err-btn" href="__CTX__/cassitrack-login.html">Back to CASSITRACK</a>
+    </div>
+</div>
+</body>
+</html>

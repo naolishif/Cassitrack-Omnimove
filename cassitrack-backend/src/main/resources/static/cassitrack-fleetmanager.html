@@ -80,6 +80,14 @@
                         </select>
                     </div>
                     <div class="fm-filter-row">
+                        <label class="fm-filter-lbl" for="idleRoutes">Idle lines</label>
+                        <select class="filter-select fm-filter-select" id="idleRoutes"
+                                title="Lines with no bus running on them right now">
+                            <option value="dim">Dimmed</option>
+                            <option value="hide">Hidden</option>
+                        </select>
+                    </div>
+                    <div class="fm-filter-row">
                         <label class="fm-filter-lbl" for="delayFilter">Min delay</label>
                         <input type="range" class="fm-filter-range" id="delayFilter" min="0" max="20" step="1" value="0">
                         <span class="fm-filter-val" id="delayFilterVal">off</span>
@@ -343,12 +351,12 @@
     <!-- the existing .bm-subnav-btn active-state  -->
     <!-- JS both keep working.                     -->
     <!--                                           -->
-    <!-- Timetable and Trips are BOTH kept: they   -->
-    <!-- answer different questions. Timetable is  -->
-    <!-- the editor (create a run, retime it stop  -->
-    <!-- by stop, export). Trips is the operational-->
-    <!-- view (what is running now, phase, delay,  -->
-    <!-- progress, reassign a vehicle).            -->
+    <!-- Timetable and Trips were merged into one  -->
+    <!-- Trips panel: a run and its schedule are   -->
+    <!-- the same object, so editing (create,      -->
+    <!-- retime stop by stop, export) and the      -->
+    <!-- operational view (phase, delay, progress, -->
+    <!-- reassign a vehicle) live side by side.    -->
     <!-- ========================================= -->
     <div id="data-management" class="main-view">
         <div class="dm-wrap">
@@ -358,7 +366,6 @@
                 <button type="button" class="dm-subtab bm-subnav-btn active" id="dmTabBuses">Buses</button>
                 <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabStops">Stops</button>
                 <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabRoutes">Routes</button>
-                <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTimetable">Timetable</button>
                 <button type="button" class="dm-subtab bm-subnav-btn" id="dmTabTrips">Trips</button>
             </div>
 
@@ -546,12 +553,32 @@
                     <div id="rtItinerary">
                         <div class="tt-manual-head">
                             <span class="bm-lbl">First run of this line — stops and times</span>
-                            <button type="button" class="bm-btn-ghost" id="rtAddStopBtn">+ Add stop</button>
+                            <div class="rt-draw-actions">
+                                <button type="button" class="bm-btn-ghost" id="rtDrawToggle">🗺 Draw on map</button>
+                                <button type="button" class="bm-btn-ghost" id="rtAddStopBtn">+ Add stop</button>
+                            </div>
                         </div>
                         <div class="rt-itn-hint">
                             A line exists through its runs, so creating one also creates its first run.
-                            These stops become the line's route; further runs are added from the Timetable tab.
+                            These stops become the line's route; further runs are added from the Trips tab.
                         </div>
+                        <!-- Map editor: draws the road geometry (route_shapes) and
+                             marks which vertices are stops. Hidden until asked for,
+                             so the dropdown form stays the default. -->
+                        <div id="rtDrawWrap" hidden>
+                            <div class="rt-draw-hint">
+                                <b>Left click</b> adds a point along the road ·
+                                <b>Right click</b> marks a stop ·
+                                <b>Click a marker</b> removes it
+                            </div>
+                            <div id="rtMap" class="rt-map"></div>
+                            <div class="rt-draw-bar">
+                                <span class="rt-draw-count" id="rtDrawCount">0 points · 0 stops</span>
+                                <button type="button" class="bm-btn-ghost" id="rtUndoBtn">Undo last</button>
+                                <button type="button" class="bm-btn-ghost" id="rtClearBtn">Clear</button>
+                            </div>
+                        </div>
+
                         <div class="tt-stops" id="rtStops"></div>
                     </div>
 
@@ -579,87 +606,13 @@
                 </div>
             </div><!-- /dm-panel-routes -->
 
-            <!-- ══════════ TIMETABLE PANEL ══════════ -->
-            <!-- The EDITOR half of trip management: define runs and their times.
-                 The Trips panel below is the operational half — what those runs are
-                 actually doing today. -->
-            <div id="dm-panel-timetable" class="dm-panel">
-                <div class="dm-toolbar">
-                    <input type="search" id="ttSearch" class="dm-input dm-search"
-                           placeholder="Search run, line, plate..."
-                           aria-label="Search runs">
-                    <select id="ttFilterRoute" class="dm-input dm-select" aria-label="Filter by line">
-                        <option value="">All lines</option>
-                    </select>
-                    <select id="ttFilterBus" class="dm-input dm-select" aria-label="Filter by bus">
-                        <option value="">All buses</option>
-                    </select>
-                    <button class="dm-btn dm-btn-ghost" id="ttResetBtn">Reset</button>
-                    <button type="button" class="dm-btn dm-btn-ghost" id="ttExportBtn" title="One row per run (summary)">Export runs</button>
-                    <button type="button" class="dm-btn dm-btn-ghost" id="ttExportStopsBtn" title="One row per run and stop, with arrival times">Export stop times</button>
-                    <button type="button" class="dm-btn dm-btn-primary" id="ttAddBtn">+ New run</button>
-                </div>
-
-                <!-- Create a run: line + bus + departure. The stop sequence is
-                     copied from an existing run of the same line. -->
-                <div id="ttForm" class="bm-form" hidden>
-                    <div class="bm-form-title">New run</div>
-
-                    <div class="bm-form-grid">
-                        <div class="bm-field">
-                            <label class="bm-lbl" for="ttRoute">Line</label>
-                            <select class="bm-input" id="ttRoute"></select>
-                        </div>
-                        <div class="bm-field">
-                            <label class="bm-lbl" for="ttBus">Bus</label>
-                            <select class="bm-input" id="ttBus"></select>
-                        </div>
-                        <div class="bm-field" id="ttDepartureField">
-                            <label class="bm-lbl" for="ttDeparture">Departure (HH:mm)</label>
-                            <input type="time" class="bm-input" id="ttDeparture" value="08:00">
-                        </div>
-                    </div>
-
-                    <div class="bm-form-actions">
-                        <span class="bm-msg" id="ttFormMsg">The stops come from the line's itinerary — a run only sets when and with which bus.</span>
-                        <button type="button" class="bm-btn-ghost" id="ttCancelBtn">Cancel</button>
-                        <button type="button" class="apply-btn" id="ttSaveBtn">Create run</button>
-                    </div>
-                </div>
-
-                <!-- Stop-by-stop editor for one run -->
-                <div id="ttDetail" class="bm-form" hidden>
-                    <div class="bm-form-title" id="ttDetailTitle">Run</div>
-                    <div class="tt-stops" id="ttStops"></div>
-                    <div class="bm-form-actions">
-                        <span class="bm-msg" id="ttDetailMsg"></span>
-                        <button type="button" class="bm-btn-ghost" id="ttDetailCloseBtn">Close</button>
-                        <button type="button" class="apply-btn" id="ttTimesSaveBtn">Save times</button>
-                    </div>
-                </div>
-
-                <div class="dm-table-wrap">
-                    <table class="dm-table">
-                        <thead>
-                        <tr>
-                            <th>Run</th>
-                            <th>Line</th>
-                            <th>Bus</th>
-                            <th>Departs</th>
-                            <th>Arrives</th>
-                            <th>Stops</th>
-                            <th class="bm-actions-col">Actions</th>
-                        </tr>
-                        </thead>
-                        <tbody id="ttTableBody"></tbody>
-                    </table>
-                </div>
-            </div><!-- /dm-panel-timetable -->
-
             <!-- ══════════ TRIPS PANEL ══════════ -->
-            <!-- The OPERATIONAL half: the whole service day, with each run's phase
-                 (not started / active / finished), measured punctuality, progress
-                 in stops actually reached, and the vehicle working it. -->
+            <!-- The whole service day in one table: each run's phase (not started /
+                 active / overdue / finished), measured punctuality, progress in stops
+                 actually reached, and the vehicle working it — plus the editing that
+                 used to live in a separate Timetable panel (create a run, retime it
+                 stop by stop, export). A run and its schedule are one object, so they
+                 are managed in one place. -->
             <div id="dm-panel-trips" class="dm-panel">
                 <div class="dm-toolbar">
                     <input type="search" id="tripsSearch" class="dm-input dm-search"
@@ -671,6 +624,7 @@
                         <option value="">All phases</option>
                         <option value="ACTIVE">Active</option>
                         <option value="NOT_STARTED">Not started</option>
+                        <option value="OVERDUE">Overdue</option>
                         <option value="FINISHED">Finished</option>
                     </select>
 
@@ -690,7 +644,19 @@
                         <option value="60">Next hour</option>
                         <option value="180">Next 3 hours</option>
                         <option value="past">Earlier today</option>
+                        <option value="custom">Custom time…</option>
                     </select>
+                    <!-- Absolute time window, shown only for "Custom time".
+                         Leave "to" empty to ask "what is running at this exact
+                         moment"; fill both for an interval. -->
+                    <span id="tripsCustomSpan" class="trips-custom" hidden>
+                        <input type="time" id="tripsFrom" class="dm-input dm-time"
+                               title="From this time" aria-label="From time">
+                        <span class="trips-custom-sep">→</span>
+                        <input type="time" id="tripsTo" class="dm-input dm-time"
+                               title="To this time (leave empty for a single moment)"
+                               aria-label="To time">
+                    </span>
 
                     <select id="tripsRoute" class="dm-input dm-select dm-filter">
                         <option value="">All routes</option>
@@ -702,7 +668,22 @@
 
                     <button class="dm-btn dm-btn-ghost" id="tripsClearBtn">Clear</button>
                     <button class="dm-btn dm-btn-ghost" id="tripsRefreshBtn">Refresh now</button>
+                    <button type="button" class="dm-btn dm-btn-ghost" id="ttExportBtn"
+                            title="One row per trip (summary)">Export trips</button>
+                    <button type="button" class="dm-btn dm-btn-ghost" id="ttExportStopsBtn"
+                            title="One row per trip and stop, with arrival times">Export stop times</button>
                     <button class="dm-btn dm-btn-primary" id="tripsNewBtn">+ New trip</button>
+                </div>
+
+                <!-- Stop-by-stop editor, opened by the "Stops" row action. -->
+                <div id="ttDetail" class="bm-form" hidden>
+                    <div class="bm-form-title" id="ttDetailTitle">Run</div>
+                    <div class="tt-stops" id="ttStops"></div>
+                    <div class="bm-form-actions">
+                        <span class="bm-msg" id="ttDetailMsg"></span>
+                        <button type="button" class="bm-btn-ghost" id="ttDetailCloseBtn">Close</button>
+                        <button type="button" class="apply-btn" id="ttTimesSaveBtn">Save times</button>
+                    </div>
                 </div>
 
                 <div class="dm-toolbar dm-toolbar-sub">
@@ -874,6 +855,7 @@
     </div>
 
 
+    <script src="cassitrack-session.js"></script>
     <script src="cassitrack-fleetmanager.js"></script>
 </body>
 </html>

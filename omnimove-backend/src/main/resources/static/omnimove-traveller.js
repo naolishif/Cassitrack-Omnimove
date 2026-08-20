@@ -8,10 +8,14 @@ function escHtml(s) {
 
 //  FRONTEND ROUTE GUARD
 // V-04 FIX: Token is in httpOnly cookie (sent automatically). User data is in sessionStorage.
+const LOGIN_PAGE = 'omnimove-login.html';
 const _user = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
 if (!_user.name && !_user.email) {
-    window.location.href = 'omnimove-login.html';
+    // Come back here once signed in
+    window.location.replace(OmniSession.loginUrlWithReturn(LOGIN_PAGE));
 }
+// The guard above never re-runs on a bfcache restore — this covers Back
+OmniSession.bindSessionGuard(LOGIN_PAGE);
 
 document.getElementById('sidebarName').textContent  = _user.name || _user.username || 'Utente';
 document.getElementById('sidebarEmail').textContent = _user.email || '';
@@ -421,15 +425,17 @@ function resetTimeToNow() {
 }
 
 async function apiFetch(path, options = {}) {
-    const token = localStorage.getItem('omnimove_token');
-    return fetch(API_BASE + path, {
+    // V-04: auth rides on the httpOnly cookie, no Authorization header to build
+    const res = await fetch(API_BASE + path, {
         ...options,
+        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json',
-            ...(token ? {'Authorization': 'Bearer ' + token} : {}),
             ...(options.headers || {})
         }
     });
+    // Session revoked or expired server-side → stop pretending we are logged in
+    return OmniSession.handleUnauthorized(res, LOGIN_PAGE);
 }
 
 // ── Map init ──────────────────────────────────────────────────────
@@ -440,17 +446,15 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 // ── Icons ─────────────────────────────────────────────────────────
 
-// Pulsing blue dot — used for "you are here" both on the idle map and during journey
+// "you are here" must never read as one more bus stop. Stops are green circles
+// carrying an M; this is a blue dot with a pulsing halo and no letter — different colour,
+// different shape, different behaviour. Styling lives in .me-* classes so the white ring
+// and dark outline keep it legible on light streets and on dark tiles alike.
 const userIcon = L.divIcon({
-    html: `<div style="
-        width:18px;height:18px;border-radius:50%;
-        background:#3b82f6;border:3px solid white;
-        box-shadow:0 0 0 4px rgba(59,130,246,0.35);
-        animation:pulse-blue 2s infinite;
-    "></div>`,
-    className: '',
-    iconSize: [18, 18],
-    iconAnchor: [9, 9]
+    html: '<div class="me-marker"><span class="me-halo"></span><span class="me-dot"></span></div>',
+    className: 'me-icon',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13]
 });
 
 // Destination pin — SVG teardrop
@@ -484,26 +488,15 @@ function renderStopMarkers() {
     window._stopMarkers.forEach(m => map.removeLayer(m));
     window._stopMarkers = [];
     Object.values(STOPS).forEach(stop => {
-        const safeName = escHtml(stop.name);
-        // Use data-attributes on the button so the delegated listener can read them
-        // without needing inline onclick (CSP-safe, no JSON injection risk).
-        const popup =
-            `<b>${safeName}</b><br>` +
-            `<button class="stop-check-btn" ` +
-            `data-stop-id="${escAttr(stop.id)}" data-stop-name="${escAttr(stop.name)}">` +
-            `${t('btn_check_buses')}</button>`;
+        // One click straight to the arrivals sheet. The popup that used to sit in between
+        // only repeated the stop name, which the sheet shows as its own title anyway —
+        // no data passes through the DOM, so there is nothing left to escape here.
         const marker = L.marker([stop.lat, stop.lon], { icon: STOP_ICON })
             .addTo(map)
-            .bindPopup(popup);
+            .on('click', () => showStopArrivals(stop.id, stop.name));
         window._stopMarkers.push(marker);
     });
 }
-
-// Delegated listener for "Check next buses" buttons inside Leaflet popups.
-document.addEventListener('click', e => {
-    const btn = e.target.closest('.stop-check-btn');
-    if (btn) showStopArrivals(btn.dataset.stopId, btn.dataset.stopName);
-});
 
 // ── Stop arrivals bottom sheet ─────────────────────────────────────
 
@@ -918,8 +911,6 @@ function renderArrivals(list, arrivals) {
 
 // ── Load stops from the backend → fill dropdowns + map markers ─────
 async function loadStops() {
-    const originSel = document.getElementById('originSelect');
-    const destSel   = document.getElementById('destSelect');
     try {
         const r = await apiFetch('/journeys/stops');
         if (!r.ok) throw new Error('stops ' + r.status);
@@ -933,9 +924,10 @@ async function loadStops() {
         STOPS = {};
         stops.forEach(s => { STOPS[s.id] = { id: s.id, name: s.name, lat: s.lat, lon: s.lon }; });
 
-        // Typable inputs: set sensible defaults (display name + hidden stop id)
-        setStop(originSel, stops[0].id);
-        setStop(destSel, stops.length > 1 ? stops[1].id : stops[0].id);
+        // Both fields stay empty on purpose, showing their "Origin" / "Destination"
+        // placeholders: pre-filling them with the first two stops of the list put a choice
+        // in the traveller's mouth that they never made, and a distracted tap on Search
+        // would plan a journey between two stops they had never picked.
 
         renderStopMarkers();
 
@@ -954,9 +946,11 @@ let userMarker = null;
 
 function placeUserMarker(lat, lon) {
     if (userMarker) map.removeLayer(userMarker);
-    userMarker = L.marker([lat, lon], { icon: userIcon })
+    // zIndexOffset keeps the dot on top — a stop sitting on your position used to
+    // hide it completely, which is half the reason it was hard to find
+    userMarker = L.marker([lat, lon], { icon: userIcon, zIndexOffset: 1000 })
         .addTo(map)
-        .bindPopup('📍 You are here');
+        .bindPopup('📍 ' + t('you_are_here'));
 }
 
 function tryGetGPS() {
@@ -1052,7 +1046,16 @@ async function doSearch() {
     _acHide();   // close the suggestion list on search
     const destId = document.getElementById('destSelect').dataset.id;
     const dest   = STOPS[destId];
-    let origin   = getOrigin();
+
+    // The fields start empty now, so a destination is no longer guaranteed. An empty
+    // origin is fine — getOrigin() reads it as "where I am" and asks for GPS.
+    if (!dest) {
+        showToast(t('pick_dest'), true);
+        document.getElementById('destSelect').focus();
+        return;
+    }
+
+    let origin = getOrigin();
 
     if (!origin) {
         showToast('📡 Getting your location...', false);
@@ -2127,17 +2130,22 @@ function closeAI(e) {
     }
 }
 
-async function logout() {
-    const token = localStorage.getItem('omnimove_token');
-    if (token) {
-        await fetch('/omnimove/api/v1/auth/logout', {
-            method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + token }
-        }).catch(() => {});
+// Every logout entry point (sidebar list, drawer arrow, Profile > Settings) goes through here
+function confirmLogout() {
+    // The drawer stays open on purpose: "No" must put you back exactly where you were
+    document.getElementById('logoutModal').classList.add('open');
+}
+
+function closeLogoutModal(e) {
+    if (!e || e.target === document.getElementById('logoutModal')) {
+        document.getElementById('logoutModal').classList.remove('open');
     }
-    localStorage.removeItem('omnimove_token');
-    localStorage.removeItem('omnimove_user');
-    window.location.href = 'omnimove-login.html';
+}
+
+async function logout() {
+    // Blacklists the token server-side, expires the JWT cookie, then wipes
+    // localStorage + sessionStorage and drops this page from the history stack.
+    await OmniSession.endSession(LOGIN_PAGE);
 }
 
 function confirmDeleteAccount() {
@@ -2151,16 +2159,15 @@ async function deleteAccount() {
     btn.textContent = 'Deleting…';
 
     try {
-        const token = localStorage.getItem('omnimove_token');
-        const r = await fetch('/omnimove/api/v1/auth/account', {
+        const r = await fetch(API_BASE + '/auth/account', {
             method: 'DELETE',
-            headers: { 'Authorization': 'Bearer ' + token }
+            credentials: 'same-origin'
         });
 
         if (r.ok) {
-            localStorage.removeItem('omnimove_token');
-            localStorage.removeItem('omnimove_user');
-            window.location.href = 'omnimove-login.html';
+            // The account is gone: tear the session down exactly like a logout
+            OmniSession.clearClientSession();
+            window.location.replace(LOGIN_PAGE);
         } else {
             const data = await r.json().catch(() => ({}));
             alert(data.message || 'Could not delete account. Please try again.');
@@ -2410,6 +2417,10 @@ function setStop(el, id) {
 
 let _acFor = null;
 
+// Generous cap: the list is scrollable, so the limit is only there to keep the DOM
+// bounded if the network ever grows well beyond today's 20 stops
+const AC_MAX_ITEMS = 50;
+
 function _acItems(inputEl, q) {
     q = (q || '').trim().toLowerCase();
     const out = [];
@@ -2426,14 +2437,18 @@ function _acItems(inputEl, q) {
             if ((s.name || '').toLowerCase().includes(q)) out.push({ id: s.id, name: s.name });
         });
     }
-    return out.slice(0, 8);
+    return out.slice(0, AC_MAX_ITEMS);
 }
 
-function _acShow(inputEl) {
+// showAll ignores what is already in the field. The two inputs come pre-filled with the
+// first two stops, so filtering on their own value would answer a click with a list of
+// exactly one item — the stop you are trying to change. Clicking means "let me pick",
+// so it opens the full list; typing narrows it down from there.
+function _acShow(inputEl, showAll) {
     const acList = document.getElementById('acList');
     if (!acList) return;
     _acFor = inputEl;
-    const items = _acItems(inputEl, inputEl.value);
+    const items = _acItems(inputEl, showAll ? '' : inputEl.value);
     if (!items.length) { acList.style.display = 'none'; return; }
     acList.innerHTML = items.map(it =>
         `<div class="ac-item" data-id="${escAttr(it.id)}">${escHtml(it.name)}</div>`).join('');
@@ -2456,7 +2471,10 @@ function initAutocomplete() {
     ['originSelect', 'destSelect'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.addEventListener('focus', () => { el.select(); _acShow(el); });
+        el.addEventListener('focus', () => { el.select(); _acShow(el, true); });
+        // A click on an already-focused field fires no focus event — without this, closing
+        // the list and clicking again would leave you stuck with no way to reopen it
+        el.addEventListener('click', () => _acShow(el, true));
         el.addEventListener('input', () => _acShow(el));
         el.addEventListener('blur', () => setTimeout(_acHide, 150));
     });

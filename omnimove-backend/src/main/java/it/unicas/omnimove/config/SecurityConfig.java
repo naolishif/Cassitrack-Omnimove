@@ -10,15 +10,23 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.*;
 import java.util.List;
 import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 @Configuration @EnableWebSecurity @RequiredArgsConstructor
 @org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 public class SecurityConfig {
+    private static final String LOGIN_PAGE = "omnimove-login.html";
+
     private final JwtFilter jwtFilter;
 
     @Value("${omnimove.cors.allowed-origins}")
@@ -85,6 +93,7 @@ public class SecurityConfig {
                         // ── 6. Everything else requires authentication ────────────────────
                         .anyRequest().authenticated()
                 )
+                .exceptionHandling(e -> e.authenticationEntryPoint(unauthenticatedEntryPoint()))
                 .headers(h -> h
                         .frameOptions(f -> f.deny())
                         .xssProtection(xss -> xss.disable())
@@ -108,6 +117,56 @@ public class SecurityConfig {
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    /**
+     * With no formLogin and no httpBasic, Spring falls back to
+     * Http403ForbiddenEntryPoint and answers every *unauthenticated* request with a bare
+     * 403. Two consequences: reopening the app after a logout showed an error page instead
+     * of the login, and the front-end could not tell a dead session from a role denial.
+     *
+     * Anything an authenticated user is simply not allowed to reach still goes through the
+     * access-denied handler and keeps returning 403.
+     */
+    private AuthenticationEntryPoint unauthenticatedEntryPoint() {
+        return (request, response, ex) -> {
+            String path   = request.getRequestURI().substring(request.getContextPath().length());
+            String accept = request.getHeader("Accept");
+            boolean wantsHtml = accept != null && accept.contains(MediaType.TEXT_HTML_VALUE);
+
+            // API and actuator answer in JSON whatever the Accept header says: an anonymous
+            // caller has no business learning which endpoints exist
+            if (!wantsHtml || path.startsWith("/api/") || path.startsWith("/actuator/")) {
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                response.getWriter().write("{\"error\":\"unauthorized\",\"message\":\"Authentication required\"}");
+                return;
+            }
+
+            // A page that does not exist is a 404, not an invitation to log in.
+            // Without this the login redirect would swallow every typo'd URL.
+            if (!isKnownPage(path)) {
+                response.sendError(HttpServletResponse.SC_NOT_FOUND);
+                return;
+            }
+
+            // Known page, just not logged in: park the destination in ?next= so the login
+            // form can send the user back where they were headed
+            String loginUrl = request.getContextPath() + "/" + LOGIN_PAGE;
+            String wanted   = path.substring(1);
+            if (!wanted.equals(LOGIN_PAGE)) {
+                loginUrl += "?next=" + URLEncoder.encode(wanted, StandardCharsets.UTF_8);
+            }
+            response.sendRedirect(loginUrl);
+        };
+    }
+
+    /** True when the path maps to a page actually shipped in static/. */
+    private boolean isKnownPage(String path) {
+        // Defensive: the container normalises the URI, but never build a classpath
+        // lookup out of a path that still carries traversal segments
+        if (path.contains("..") || !path.endsWith(".html")) return false;
+        return new ClassPathResource("static" + path).exists();
     }
 
     @Bean

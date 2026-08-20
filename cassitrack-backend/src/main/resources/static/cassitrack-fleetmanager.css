@@ -95,8 +95,13 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .stat{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:6px;padding:7px 9px}
 .stat-val{font-size:20px;font-weight:700;color:var(--accent);line-height:1}
 .stat-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:3px}
-#vehicle-list{display:flex;flex-direction:column;gap:5px;padding:12px 14px;flex:1;overflow-y:auto}
-.vcard{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:8px;padding:10px;cursor:pointer;transition:border-color .2s,background .2s;position:relative;overflow:hidden}
+#vehicle-list{display:flex;flex-direction:column;gap:5px;padding:12px 14px;flex:1;min-height:0;overflow-y:auto}
+/* flex-shrink:0 is the important bit: #vehicle-list is a flex column, so
+   by default the browser SQUASHES the cards to fit them all in, and
+   overflow:hidden then clips their content (speed value cut in half,
+   crowding and route rows gone). Refusing to shrink keeps every card at
+   its natural height and lets the list scroll instead. */
+.vcard{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:8px;padding:10px;cursor:pointer;transition:border-color .2s,background .2s;position:relative;overflow:hidden;flex-shrink:0}
 .vcard:hover{border-color:rgba(59,130,246,.4);background:rgba(59,130,246,.04)}
 .vcard.selected{border-color:var(--accent);background:rgba(59,130,246,.07)}
 .vcard-stripe{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:8px 0 0 8px}
@@ -825,7 +830,11 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
       data-width-pct attributes in markup, never style="".
 ───────────────────────────────────────────────────────────────── */
 
-.tab-fleet-col{display:flex;flex-direction:column;height:100%}
+/* min-height:0 is what makes the vehicle list scroll: a flex child
+   defaults to min-height:auto, which refuses to shrink below its
+   content, so #vehicle-list overflowed the sidebar (cards cut off at
+   the bottom) instead of showing a scrollbar. */
+.tab-fleet-col{display:flex;flex-direction:column;flex:1;min-height:0}
 .custom-date-range{display:none;align-items:center;gap:5px}
 .range-arrow{font-family:var(--mono);font-size:10px;color:var(--dim)}
 .rdrop-item-empty{color:var(--dim);font-size:9px}
@@ -1070,6 +1079,11 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .trip-pill-done   { color: var(--accent); border-color: rgba(59,130,246,.35); background: rgba(59,130,246,.10); }
 .trip-pill-active { color: var(--green);  border-color: rgba(34,197,94,.35);  background: rgba(34,197,94,.10); }
 .trip-pill-future { color: var(--dim);    border-color: rgba(75,85,99,.45);   background: rgba(75,85,99,.12); }
+/* Late but still running: amber, because it needs attention without being an error. */
+.trip-pill-overdue{ color: var(--amber);  border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.12); }
+/* Vehicle health, shown beside the phase. Red: someone has to look at these. */
+.trip-pill-stalled{ color: var(--red);    border-color: rgba(239,68,68,.45);  background: rgba(239,68,68,.12); }
+.trip-pill-nosignal{color: var(--purple); border-color: rgba(139,92,246,.45); background: rgba(139,92,246,.12); }
 
 
 /* Filter bar: many controls on one row, wrapping on narrow screens. */
@@ -1376,7 +1390,10 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 /* No margin-bottom: the panel's flex gap already spaces the form from the
    table, and the two would otherwise stack. flex-shrink:0 keeps the form at
    its natural height so only the table scrolls. */
-.bm-form{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;flex-shrink:0}
+/* Scrollable on purpose: with the map editor open the form is taller than
+   the panel, and the panel itself is overflow:hidden — without this the
+   bottom (Save/Cancel) was simply clipped and unreachable. */
+.bm-form{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;flex-shrink:1;min-height:0;overflow-y:auto}
 .bm-form-title{font-family:var(--mono);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
 .bm-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
 .bm-field{display:flex;flex-direction:column;gap:5px}
@@ -1420,3 +1437,24 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .rt-itn-hint{font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--dim);margin-bottom:10px}
 .tt-stop-select{flex:1;min-width:0}
 .tt-del-stop{flex-shrink:0;padding:5px 9px;margin-left:0}
+
+/* Route map editor (draws route_shapes) */
+.rt-draw-actions{display:flex;gap:8px;align-items:center}
+.rt-draw-hint{font-family:var(--mono);font-size:10px;line-height:1.6;color:var(--dim);margin-bottom:8px}
+.rt-draw-hint b{color:var(--text)}
+.rt-map{height:380px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.rt-draw-bar{display:flex;align-items:center;gap:8px;margin:8px 0 4px}
+.rt-draw-count{font-family:var(--mono);font-size:10px;color:var(--dim);margin-right:auto}
+
+/* Vehicle list scrollbar — same thin dark treatment as the other panels */
+#vehicle-list::-webkit-scrollbar{width:6px}
+#vehicle-list::-webkit-scrollbar-track{background:transparent}
+#vehicle-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+#vehicle-list::-webkit-scrollbar-thumb:hover{background:var(--grey)}
+#vehicle-list{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+
+/* Trips: absolute time window (shown for "Custom time") */
+.trips-custom{display:inline-flex;align-items:center;gap:6px}
+.trips-custom[hidden]{display:none}
+.trips-custom-sep{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.dm-time{width:104px;cursor:pointer}

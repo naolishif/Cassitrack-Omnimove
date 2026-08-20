@@ -7,11 +7,14 @@ function escHtml(s) {
         .replace(/'/g, '&#39;');
 }
 
+const LOGIN_PAGE = 'omnimove-login.html';
+
 // ── Route guard: solo ADMIN può accedere ──────────────────────────────
 (function checkAdminAuth() {
     const userRaw = sessionStorage.getItem('omnimove_user');
     if (!userRaw) {
-        window.location.href = 'omnimove-login.html';
+        // Dopo il login si torna qui
+        window.location.replace(OmniSession.loginUrlWithReturn(LOGIN_PAGE));
         return;
     }
     try {
@@ -19,13 +22,15 @@ function escHtml(s) {
         const role = (user.role || '').toUpperCase();
         if (role !== 'ADMIN') {
             alert('Accesso negato: solo gli amministratori possono accedere a questa pagina.');
-            window.location.href = 'omnimove-login.html';
+            window.location.replace(LOGIN_PAGE);
         }
     } catch (e) {
         sessionStorage.clear();
-        window.location.href = 'omnimove-login.html';
+        window.location.replace(LOGIN_PAGE);
     }
 })();
+// Il guard qui sopra non gira su un ripristino da bfcache — questo copre il Back
+OmniSession.bindSessionGuard(LOGIN_PAGE);
 
 // ── API helper con JWT ─────────────────────────────────────────────────
 const API_BASE = '/omnimove/api/v1';  // context-path prefix required
@@ -33,13 +38,16 @@ const API_BASE = '/omnimove/api/v1';  // context-path prefix required
 async function apiFetch(path, options = {}) {
     // V-04 FIX: Token is in httpOnly cookie (sent automatically by browser).
     // We don't need to manually add 'Authorization' header here.
-    return fetch(API_BASE + path, {
+    const res = await fetch(API_BASE + path, {
         ...options,
+        credentials: 'same-origin',
         headers: {
             'Content-Type': 'application/json',
             ...(options.headers || {})
         }
     });
+    // Session revoked or expired server-side → back to the login page
+    return OmniSession.handleUnauthorized(res, LOGIN_PAGE);
 }
 
 // ── Clock ──
@@ -170,11 +178,8 @@ async function confirmDeleteUser() {
 
 // log out
 async function logout() {
-    await fetch('/omnimove/api/v1/auth/logout', {
-        method: 'POST'
-    }).catch(() => {});
-    sessionStorage.removeItem('omnimove_user');
-    window.location.href = 'omnimove-login.html';
+    // Token in blacklist, cookie scaduto, storage ripulito, pagina fuori dalla history
+    await OmniSession.endSession(LOGIN_PAGE);
 }
 
 // ── Modal ──

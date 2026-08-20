@@ -281,6 +281,26 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     void deleteByTripId(String tripId);
 
     /**
+     * Coordinates of a trip's LAST call — its terminus.
+     *
+     * TripResolutionService uses it to tell "this bus is late but still running"
+     * from "this bus has arrived": a trip is only released once the vehicle is
+     * physically at its terminus, not merely because the clock passed its
+     * scheduled end.
+     *
+     * Columns: [0] stopId, [1] lat, [2] lon
+     */
+    @Query("""
+        SELECT ss.stopId, s.lat, s.lon
+        FROM ScheduledStop ss, Stop s
+        WHERE ss.stopId = s.id
+          AND ss.trip.id = :tripId
+          AND ss.stopSequence = (SELECT MAX(x.stopSequence) FROM ScheduledStop x
+                                 WHERE x.trip.id = :tripId)
+        """)
+    List<Object[]> findTerminusOf(@Param("tripId") String tripId);
+
+    /**
      * Every call of every trip, joined with route, bus and stop — the exploded
      * timetable (one row per trip+stop), as exported to CSV.
      *

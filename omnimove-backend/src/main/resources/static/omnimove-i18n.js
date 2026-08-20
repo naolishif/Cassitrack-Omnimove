@@ -122,6 +122,9 @@ const OMNI_T = {
     logout_label:'Log out of OmniMove',
     logout_desc:'You will need to sign in again to access your account',
     logout_btn:'Log Out',
+    modal_logout_title:'Log out',
+    modal_logout_body:'Are you sure you want to log out?',
+    btn_yes:'Yes', btn_no:'No',
     section_actions:'Account Actions',
     delete_label:'Delete account', delete_desc:'Permanently removes your account and all data.',
     delete_btn:'Delete',
@@ -130,6 +133,20 @@ const OMNI_T = {
     modal_delete_body:'Are you sure? This will permanently delete your account and all associated data. This action cannot be undone.',
     btn_cancel:'Cancel',
     btn_confirm_delete:'Yes, delete my account',
+    // Error page (one page, wording picked by status)
+    err400_title:'Bad request',
+    err400_body:'The request could not be understood. Try again from the app.',
+    err401_title:'Session expired',
+    err401_body:'You need to sign in again to continue.',
+    err403_title:'Access denied',
+    err403_body:'Your account is not allowed to open this page.',
+    err404_title:'Page not found',
+    err404_body:'The address you opened does not exist. Check the link, or go back to the app.',
+    err500_title:'Something went wrong',
+    err500_body:'An error occurred on our side. Please try again in a moment.',
+    err_generic_title:'Something went wrong',
+    err_generic_body:'An unexpected error occurred. Please try again.',
+    err_back_btn:'Back to OmniMove',
     // AI overlay
     ai_title:'OmniAI Assistant',
     ai_subtitle:'Ask anything about your route or mobility options',
@@ -140,6 +157,7 @@ const OMNI_T = {
     min_left:'min left', end_journey:'End Journey',
     your_destination:'🏁 Your destination',
     live_tracking:'Live tracking active',
+    you_are_here:'You are here',
     live_buses_future:'🕐 Live bus positions not shown for future departures',
     walk:'Walk', bike:'Bike', scooter:'Scooter', wait_lbl:'Wait',
     stops_hide:'▴ Hide stops',
@@ -151,7 +169,6 @@ const OMNI_T = {
     no_favs:'No favourites yet. Tap the ☆ on a trip to save its route here.',
     lbl_today:'Today', lbl_yesterday:'Yesterday',
     // Stop arrivals sheet
-    btn_check_buses:'Check next buses',
     loading_buses:'Loading next buses…',
     lbl_line:'line', lbl_lines:'lines',
     lbl_next_departures:'next departures',
@@ -170,6 +187,7 @@ const OMNI_T = {
     btn_start_journey:'Start Journey',
     lbl_stops:'stops', lbl_stop:'stop',
     no_stops_avail:'No stops available',
+    pick_dest:'Pick a destination first',
     // Search flow
     finding_routes:'Finding best routes...',
     err_rate_limited:'Too many searches. Please wait a moment before trying again.',
@@ -310,6 +328,9 @@ const OMNI_T = {
     logout_label:'Esci da OmniMove',
     logout_desc:'Dovrai accedere di nuovo per usare il tuo account',
     logout_btn:'Esci',
+    modal_logout_title:'Esci',
+    modal_logout_body:'Sei sicuro di voler uscire?',
+    btn_yes:'Sì', btn_no:'No',
     section_actions:'Azioni account',
     delete_label:'Elimina account', delete_desc:'Rimuove definitivamente il tuo account e tutti i dati.',
     delete_btn:'Elimina',
@@ -318,6 +339,20 @@ const OMNI_T = {
     modal_delete_body:'Sei sicuro? Questo eliminerà definitivamente il tuo account e tutti i dati associati. Questa azione non può essere annullata.',
     btn_cancel:'Annulla',
     btn_confirm_delete:'Sì, elimina il mio account',
+    // Error page (una sola pagina, testo scelto in base allo stato)
+    err400_title:'Richiesta non valida',
+    err400_body:'La richiesta non è stata compresa. Riprova dall’app.',
+    err401_title:'Sessione scaduta',
+    err401_body:'Devi accedere di nuovo per continuare.',
+    err403_title:'Accesso negato',
+    err403_body:'Il tuo account non può aprire questa pagina.',
+    err404_title:'Pagina non trovata',
+    err404_body:"L'indirizzo che hai aperto non esiste. Controlla il link, oppure torna all'app.",
+    err500_title:'Qualcosa è andato storto',
+    err500_body:'Si è verificato un errore dalla nostra parte. Riprova tra un momento.',
+    err_generic_title:'Qualcosa è andato storto',
+    err_generic_body:'Si è verificato un errore imprevisto. Riprova.',
+    err_back_btn:'Torna su OmniMove',
     // AI overlay
     ai_title:'Assistente OmniAI',
     ai_subtitle:'Chiedi qualsiasi cosa sul tuo percorso o sulla mobilità',
@@ -328,6 +363,7 @@ const OMNI_T = {
     min_left:'min rimanenti', end_journey:'Termina percorso',
     your_destination:'🏁 La tua destinazione',
     live_tracking:'Tracking in tempo reale',
+    you_are_here:'Sei qui',
     live_buses_future:'🕐 Posizioni in tempo reale non disponibili per partenze future',
     walk:'A piedi', bike:'Bici', scooter:'Monopattino', wait_lbl:'Attesa',
     stops_hide:'▴ Nascondi fermate',
@@ -339,7 +375,6 @@ const OMNI_T = {
     no_favs:'Nessun preferito ancora. Tocca ☆ su un percorso per salvarlo qui.',
     lbl_today:'Oggi', lbl_yesterday:'Ieri',
     // Stop arrivals sheet
-    btn_check_buses:'Prossimi bus',
     loading_buses:'Caricamento bus…',
     lbl_line:'linea', lbl_lines:'linee',
     lbl_next_departures:'prossime partenze',
@@ -358,6 +393,7 @@ const OMNI_T = {
     btn_start_journey:'Inizia percorso',
     lbl_stops:'fermate', lbl_stop:'fermata',
     no_stops_avail:'Nessuna fermata disponibile',
+    pick_dest:'Scegli prima una destinazione',
     // Search flow
     finding_routes:'Ricerca dei percorsi migliori...',
     err_rate_limited:'Troppe ricerche. Aspetta un momento prima di riprovare.',
@@ -395,6 +431,12 @@ function applyTranslations() {
     const key = el.dataset.i18n;
     if (el.tagName === 'INPUT') { el.placeholder = t(key); }
     else { el.textContent = t(key); }
+  });
+  // Tooltips / accessible names for icon-only controls
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const label = t(el.dataset.i18nTitle);
+    el.title = label;
+    el.setAttribute('aria-label', label);
   });
   document.documentElement.lang = lang;
   // Sync all lang-pill toggles on this page

@@ -3,6 +3,11 @@
 
 const API = '/cassitrack/api/v1';
 
+// A 401 from any call sends us back to login; Back out of a dead session
+// re-checks with the server instead of showing a stale console
+CassiSession.installFetchGuard();
+CassiSession.bindSessionGuard();
+
 const STATUS_COL = {
     ON_TIME: '#22C55E',
     SLIGHTLY_LATE: '#F59E0B',
@@ -32,8 +37,9 @@ function escHtml(s) {
 // ── LOGOUT ─────────────────────────────────────────────────────────────────
 
 async function logoutUser() {
-    await fetch('/cassitrack/api/v1/auth/logout', { method: 'POST' }).catch(() => {});
-    window.location.href = 'cassitrack-login.html';
+    // Token blacklisted server-side, cookie expired, storage wiped,
+    // page dropped from the history stack
+    await CassiSession.endSession();
 }
 
 // ── SUMMARY STATS CARD ─────────────────────────────────────────────────────

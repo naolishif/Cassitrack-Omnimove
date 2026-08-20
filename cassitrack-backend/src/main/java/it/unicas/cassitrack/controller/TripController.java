@@ -8,6 +8,7 @@ import it.unicas.cassitrack.model.Trip;
 import it.unicas.cassitrack.repository.BusRepository;
 import it.unicas.cassitrack.repository.TripRepository;
 import it.unicas.cassitrack.service.ActiveTripService;
+import it.unicas.cassitrack.service.TimetableService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +39,8 @@ public class TripController {
     private final ActiveTripService activeTripService;
     private final TripRepository tripRepository;
     private final BusRepository busRepository;
+    /** Timetable side of the same rows: calls, their times, export, deletion. */
+    private final TimetableService timetableService;
 
     @GetMapping(produces = "application/json")
     @Operation(summary = "Every trip in the service day, in departure order",
@@ -169,12 +172,60 @@ public class TripController {
         return ResponseEntity.ok(activeTripService.rescheduleDeparture(tripId, seconds));
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Timetable side of a trip: its calls and their times.
+    //
+    // These used to live under /api/v1/timetable, in a second controller with
+    // its own screen. Trips and timetable were two views of the SAME rows, so
+    // they are merged here: one resource, one URL space. TimetableService is
+    // still where the logic lives — it is also used by RouteController when a
+    // new line is created together with its first run.
+    //
+    // NOTE: /stop-times is declared before /{tripId}/... on purpose, so the
+    // literal path can never be read as a trip id.
+    // ─────────────────────────────────────────────────────────────────────
+
+    @GetMapping(value = "/stop-times", produces = "application/json")
+    @Operation(summary = "Exploded timetable: one row per trip and stop",
+            description = "Same filters as the trip list. Feeds the detailed CSV export.")
+    public List<TimetableService.StopTimeRow> stopTimes(
+            @RequestParam(required = false) String routeId,
+            @RequestParam(required = false) Integer busId,
+            @RequestParam(required = false) String search) {
+        return timetableService.stopTimes(routeId, busId, search);
+    }
+
+    @GetMapping(value = "/{tripId}/stops", produces = "application/json")
+    @Operation(summary = "Stop-by-stop detail of one trip")
+    public TimetableService.TripDetail tripStops(@PathVariable String tripId) {
+        return timetableService.detail(tripId);
+    }
+
+    @PutMapping(value = "/{tripId}/times", consumes = "application/json", produces = "application/json")
+    @Operation(summary = "Update the arrival times of a trip (FLEET_MANAGER only)",
+            description = "Edits individual calls. To shift the whole run instead, "
+                        + "use PUT /{tripId}/departure.")
+    public TimetableService.TripDetail updateTimes(
+            @PathVariable String tripId,
+            @RequestBody TimetableService.UpdateTimesRequest req) {
+        return timetableService.updateTimes(tripId, req);
+    }
+
+    @DeleteMapping("/{tripId}")
+    @Operation(summary = "Delete a trip and its stop times (FLEET_MANAGER only)")
+    public ResponseEntity<Void> deleteTrip(@PathVariable String tripId) {
+        timetableService.delete(tripId);
+        return ResponseEntity.noContent().build();
+    }
+
     /** Readable message instead of a bare 500 — same pattern as BusController. */
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, Object>> handleStatus(ResponseStatusException ex) {
+        String msg = ex.getReason() == null ? "Request failed" : ex.getReason();
+        // Both keys: the merged panel reads `message`, the older CRUD screens `error`.
         return ResponseEntity.status(ex.getStatusCode())
-                .body(Map.of(
-                        "status",  ex.getStatusCode().value(),
-                        "message", ex.getReason() == null ? "Request failed" : ex.getReason()));
+                .body(Map.of("status", ex.getStatusCode().value(),
+                             "message", msg,
+                             "error", msg));
     }
 }
