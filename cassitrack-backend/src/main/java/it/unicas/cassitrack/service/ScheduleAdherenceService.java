@@ -47,6 +47,22 @@ public class ScheduleAdherenceService {
     private static final double RECESSION_MARGIN_METRES = 18.0;
 
     /**
+     * Quanto deve restare fermo un bus perché la sosta valga come prova
+     * d'arrivo, in assenza di ripartenza.
+     *
+     * Più lunga della sosta normale in fermata (il simulatore ne usa una da
+     * ~45 s): sotto questa soglia l'arrivo lo conferma comunque la partenza,
+     * sopra vuol dire che il bus è lì e non riparte — tipicamente il capolinea.
+     */
+    private static final long SETTLED_SECONDS = 90;
+
+    /** Da quanti secondi il mezzo non si sposta davvero (0 se sta viaggiando). */
+    private static long stoppedFor(VehiclePosition pos) {
+        if (pos.getStationarySince() == null) return 0;
+        return java.time.Duration.between(pos.getStationarySince(), Instant.now()).getSeconds();
+    }
+
+    /**
      * Limiti oltre i quali la retta fra due fix non rappresenta più il percorso
      * davvero seguito. 3 minuti coprono con margine l'invio a 60 s dell'OBU
      * reale, anche saltandone uno; 2 km sono più di quanto un bus urbano
@@ -144,10 +160,24 @@ public class ScheduleAdherenceService {
                 return;
             }
 
-            // La distanza cresce, ma non abbastanza da escludere il rumore
-            if (d < pos.getApproachMinDistanceMetres() + RECESSION_MARGIN_METRES) return;
+            // Due prove possibili che l'arrivo è avvenuto.
+            //
+            // 1. ALLONTANAMENTO — il bus riparte: il minimo era la fermata.
+            //    Vale per le fermate intermedie, dove il bus riparte sempre.
+            //
+            // 2. SOSTA PROLUNGATA — il bus si ferma lì e non riparte.
+            //    Al CAPOLINEA la prova 1 non arriva mai: il mezzo resta fermo a
+            //    fine corsa, quindi l'ultima fermata non veniva mai registrata e
+            //    la corsa restava per sempre a N-1 su N (OVERDUE a vita).
+            //    Essersi fermati accanto alla fermata è una prova d'arrivo
+            //    altrettanto buona della ripartenza — purché la sosta superi
+            //    quella normale di servizio, altrimenti registreremmo l'arrivo
+            //    mentre il bus sta ancora facendo salire i passeggeri.
+            boolean movedAway = d >= pos.getApproachMinDistanceMetres() + RECESSION_MARGIN_METRES;
+            boolean settled   = d <= APPROACH_GATE_METRES && stoppedFor(pos) >= SETTLED_SECONDS;
+            if (!movedAway && !settled) return;
 
-            // ── Allontanamento confermato: il minimo ERA l'arrivo ──
+            // ── Arrivo confermato: il minimo ERA la fermata ──
             double  minDist = pos.getApproachMinDistanceMetres();
             Instant minAt   = pos.getApproachMinTimestamp();
 

@@ -55,11 +55,45 @@ public class TripResolutionService {
             String routeName,
             String routeLongName,
             int    startSeconds,
-            int    endSeconds
+            int    endSeconds,
+            /** Terminus coordinates: how we know the bus has actually arrived. */
+            Double terminusLat,
+            Double terminusLon
     ) {
         boolean covers(int nowSeconds) {
             return nowSeconds >= startSeconds && nowSeconds <= endSeconds;
         }
+    }
+
+    /**
+     * A trip is not released when its scheduled end passes — only when the bus
+     * really gets to the terminus. A late bus is still running its trip, and
+     * dropping it there would blank the route on the map and in SIRI exactly
+     * when the delay makes that information most useful.
+     */
+    private static final double TERMINUS_RADIUS_M = 120.0;
+
+    /**
+     * Hard stop for that grace period. Without it a bus that never reaches its
+     * terminus (diverted, broken down and towed, GPS drift) would hold its trip
+     * for the rest of the day.
+     */
+    private static final int MAX_OVERRUN_SECONDS = 45 * 60;
+
+    private static double metresBetween(double aLat, double aLon, double bLat, double bLon) {
+        double R = 6_371_000;
+        double dLat = Math.toRadians(bLat - aLat), dLon = Math.toRadians(bLon - aLon);
+        double s = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                 + Math.cos(Math.toRadians(aLat)) * Math.cos(Math.toRadians(bLat))
+                 * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+    }
+
+    /** True when the vehicle is standing at (or within a block of) the terminus. */
+    private static boolean atTerminus(ActiveTrip trip, Double lat, Double lon) {
+        if (lat == null || lon == null
+                || trip.terminusLat() == null || trip.terminusLon() == null) return false;
+        return metresBetween(lat, lon, trip.terminusLat(), trip.terminusLon()) <= TERMINUS_RADIUS_M;
     }
 
     /**
@@ -80,6 +114,22 @@ public class TripResolutionService {
         ActiveTrip cached = cache.get(vehicleId);
         if (cached != null && cached.covers(now)) return Optional.of(cached);
 
+        // Past the scheduled end, but the bus may simply be late. Hold the trip
+        // until it actually reaches the terminus, so a delayed run keeps its
+        // route on the map, in SIRI and in the adherence figures.
+        if (cached != null && now > cached.endSeconds()) {
+            boolean arrived  = atTerminus(cached, lat, lon);
+            boolean gaveUp   = now > cached.endSeconds() + MAX_OVERRUN_SECONDS;
+            if (!arrived && !gaveUp) {
+                return Optional.of(cached);          // late, still out there
+            }
+            log.info("Vehicle {} released trip {} — {}", vehicleId, cached.tripId(),
+                    arrived ? "arrived at terminus"
+                            : "no arrival " + (MAX_OVERRUN_SECONDS / 60) + " min past its end");
+            cache.remove(vehicleId);
+            cached = null;
+        }
+
         List<Object[]> rows = scheduledStopRepo.findActiveTripsForBus(busId, now);
         if (rows.isEmpty()) {
             if (cached != null) {
@@ -92,13 +142,24 @@ public class TripResolutionService {
 
         Object[] chosen = (rows.size() == 1) ? rows.get(0) : bestByGps(rows, lat, lon);
 
+        // Terminus looked up once per trip assignment, not per message.
+        String tripId = (String) chosen[0];
+        Double tLat = null, tLon = null;
+        List<Object[]> term = scheduledStopRepo.findTerminusOf(tripId);
+        if (!term.isEmpty()) {
+            Object[] t = term.get(0);
+            tLat = t[1] == null ? null : ((Number) t[1]).doubleValue();
+            tLon = t[2] == null ? null : ((Number) t[2]).doubleValue();
+        }
+
         ActiveTrip trip = new ActiveTrip(
-                (String) chosen[0],
+                tripId,
                 (String) chosen[1],
                 (String) chosen[2],
                 (String) chosen[3],
                 ((Number) chosen[4]).intValue(),
-                ((Number) chosen[5]).intValue());
+                ((Number) chosen[5]).intValue(),
+                tLat, tLon);
 
         cache.put(vehicleId, trip);
         log.info("Vehicle {} (bus {}) → trip {} on route {} [{}s..{}s]",

@@ -1,6 +1,7 @@
 package it.unicas.cassitrack.controller;
 
 import it.unicas.cassitrack.model.Route;
+import it.unicas.cassitrack.model.RouteShape;
 import it.unicas.cassitrack.model.Stop;
 import it.unicas.cassitrack.repository.RouteRepository;
 import it.unicas.cassitrack.repository.RouteShapeRepository;
@@ -104,7 +105,19 @@ public class RouteController {
     public record RouteRequest(String id, String shortName, String longName,
                                String color, Boolean active,
                                Integer busId,
-                               List<TimetableService.CreateTripRequest.ManualStop> stops) {}
+                               List<TimetableService.CreateTripRequest.ManualStop> stops,
+                               List<PathVertex> path) {}
+
+    /**
+     * One vertex of a hand-drawn route, as sent by the map editor.
+     *
+     * A vertex is either plain geometry or also a scheduled stop. When it is a
+     * stop it carries either {@code stopId} (an existing stop the editor
+     * snapped to) or {@code stopName} (a new stop to create at these
+     * coordinates), plus the arrival time of the line's first run.
+     */
+    public record PathVertex(Double lat, Double lon, Boolean isStop,
+                             String stopId, String stopName, String arrival) {}
 
     private static ResponseEntity<?> err(HttpStatus status, String msg) {
         return ResponseEntity.status(status).body(Map.of("error", msg));
@@ -127,7 +140,12 @@ public class RouteController {
         if (routeRepository.existsById(id))
             return err(HttpStatus.CONFLICT, "A route with id '" + id + "' already exists.");
 
-        boolean withRun = req.stops() != null && !req.stops().isEmpty();
+        boolean withPath = req.path() != null && req.path().size() >= 2;
+        // The map editor sends its stops inside `path`; the plain form sends
+        // them in `stops`. Either way the line ends up with a first run.
+        List<TimetableService.CreateTripRequest.ManualStop> runStops =
+                withPath ? stopsFromPath(req.path()) : req.stops();
+        boolean withRun = runStops != null && !runStops.isEmpty();
 
         // Validate BEFORE the first write. A `return err(...)` after save()
         // would end the method normally, so the transaction would COMMIT and
@@ -142,13 +160,20 @@ public class RouteController {
         applyRoute(r, req, color);
         routeRepository.save(r);
 
+        // Road geometry drawn on the map. Saved before the run so the stops it
+        // may have created already exist when scheduled_stops references them.
+        if (withPath) {
+            createStopsFromPath(req.path());
+            saveShape(id, req.path());
+        }
+
         // Materialise the itinerary as the line's first run, in this same
         // transaction. create() validates the stops and — importantly here —
         // refuses if the bus is already running another trip in that window;
         // it throws, so the line is rolled back with it.
         if (withRun) {
             timetableService.create(new TimetableService.CreateTripRequest(
-                    id, req.busId(), null, req.stops()));
+                    id, req.busId(), null, runStops));
         }
         return ResponseEntity.status(HttpStatus.CREATED).body(r);
     }
@@ -190,6 +215,164 @@ public class RouteController {
         if (c == null) return null;
         String t = c.trim().replaceFirst("^#", "");
         return t.isEmpty() ? null : t.toUpperCase();
+    }
+
+    // ── Road geometry of an existing line ────────────────────────────────────
+
+    /** One saved vertex, as returned to the map editor. */
+    public record ShapeVertex(double lat, double lon, boolean isStop) {}
+
+    /**
+     * @param path      the saved vertices in drawing order
+     * @param tripCount how many runs exist on this line — the editor warns that
+     *                  re-marking stops will not rewrite them
+     */
+    public record ShapeInfo(List<ShapeVertex> path, long tripCount) {}
+
+    @GetMapping("/{id}/shape")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> getShape(@PathVariable String id) {
+        if (!routeRepository.existsById(id))
+            return err(HttpStatus.NOT_FOUND, "Route not found.");
+        List<ShapeVertex> path = routeShapeRepository.findByRouteIdOrderBySeqAsc(id).stream()
+                .map(s -> new ShapeVertex(s.getLat(), s.getLon(), Boolean.TRUE.equals(s.getIsStop())))
+                .toList();
+        return ResponseEntity.ok(new ShapeInfo(path, tripRepository.countByRouteId(id)));
+    }
+
+    /**
+     * Replace the drawn geometry of an existing line.
+     *
+     * Deliberately limited to route_shapes: it is read only to draw the line on
+     * the maps and to publish it over NeTEx, never by schedule adherence or ETA
+     * (those use scheduled_stops). So redrawing a path cannot disturb timings.
+     *
+     * Stops marked here are NOT propagated to the existing runs: rewriting the
+     * calls of every run would mean inventing their times. New stops drawn on
+     * the map are created, so they can then be used from the Timetable tab.
+     */
+    @PutMapping("/{id}/shape")
+    @Transactional
+    public ResponseEntity<?> updateShape(@PathVariable String id,
+                                         @RequestBody List<PathVertex> path) {
+        if (!routeRepository.existsById(id))
+            return err(HttpStatus.NOT_FOUND, "Route not found.");
+        if (path == null || path.size() < 2)
+            return err(HttpStatus.BAD_REQUEST, "A path needs at least two points.");
+
+        // The stop vertices must stay exactly as they were. route_shapes.is_stop
+        // mirrors the calls in scheduled_stops: letting the path declare a
+        // different set would (a) make the drawing disagree with what the runs
+        // actually serve, and (b) break the scheduled simulator, which binds
+        // each call to a vertex by coordinates and drops the whole run when it
+        // finds none. Stops are changed from the Timetable tab, per run.
+        List<RouteShape> current = routeShapeRepository.findByRouteIdOrderBySeqAsc(id);
+        if (!current.isEmpty()) {
+            Set<String> before = current.stream()
+                    .filter(s -> Boolean.TRUE.equals(s.getIsStop()))
+                    .map(s -> coordKey(s.getLat(), s.getLon()))
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            Set<String> after = path.stream()
+                    .filter(v -> Boolean.TRUE.equals(v.isStop()))
+                    .map(v -> coordKey(v.lat(), v.lon()))
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            if (!before.equals(after))
+                return err(HttpStatus.CONFLICT,
+                        "The stops of this line cannot be changed here: they must keep matching "
+                                + "the calls of its runs. Reshape the road path freely, and edit "
+                                + "stops from the Timetable tab.");
+        }
+
+        createStopsFromPath(path);   // no-op unless the line had no shape yet
+        saveShape(id, path);
+        return ResponseEntity.ok(Map.of("saved", path.size()));
+    }
+
+    /**
+     * Coordinate key at ~1 m, the same tolerance the scheduled simulator uses to
+     * bind a call to its vertex. Comparing rounded strings avoids treating a
+     * float round-trip through JSON as a moved stop.
+     */
+    private static String coordKey(Double lat, Double lon) {
+        if (lat == null || lon == null) return "?";
+        return String.format(java.util.Locale.ROOT, "%.5f,%.5f", lat, lon);
+    }
+
+    // ── Map editor support ───────────────────────────────────────────────────
+
+    /** Vertices flagged as stops, in drawing order → the first run's calls. */
+    private static List<TimetableService.CreateTripRequest.ManualStop>
+    stopsFromPath(List<PathVertex> path) {
+        List<TimetableService.CreateTripRequest.ManualStop> out = new ArrayList<>();
+        for (PathVertex v : path) {
+            if (!Boolean.TRUE.equals(v.isStop())) continue;
+            String stopId = v.stopId() != null && !v.stopId().isBlank()
+                    ? v.stopId().trim()
+                    : generatedStopId(v.stopName());
+            out.add(new TimetableService.CreateTripRequest.ManualStop(stopId, v.arrival()));
+        }
+        return out;
+    }
+
+    /**
+     * Create the stops the editor invented (a vertex marked as a stop with a
+     * name but no existing id). Stops it snapped to are left untouched.
+     */
+    private void createStopsFromPath(List<PathVertex> path) {
+        for (PathVertex v : path) {
+            if (!Boolean.TRUE.equals(v.isStop())) continue;
+            if (v.stopId() != null && !v.stopId().isBlank()) continue;   // snapped to an existing stop
+            if (v.stopName() == null || v.stopName().isBlank())
+                throw new org.springframework.web.server.ResponseStatusException(
+                        HttpStatus.BAD_REQUEST, "A stop drawn on the map needs a name.");
+
+            String newId = generatedStopId(v.stopName());
+            if (stopRepository.existsById(newId)) continue;              // same name drawn twice
+            Stop s = new Stop();
+            s.setId(newId);
+            s.setName(v.stopName().trim());
+            s.setLat(v.lat());
+            s.setLon(v.lon());
+            s.setActive(true);
+            s.setCreatedAt(java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Rome")));
+            stopRepository.save(s);
+        }
+    }
+
+    /** Replace this route's geometry with the drawn vertices. */
+    private void saveShape(String routeId, List<PathVertex> path) {
+        routeShapeRepository.deleteAll(routeShapeRepository.findByRouteIdOrderBySeqAsc(routeId));
+        List<RouteShape> shape = new ArrayList<>();
+        int seq = 0;
+        for (PathVertex v : path) {
+            if (v.lat() == null || v.lon() == null) continue;
+            RouteShape rs = new RouteShape();
+            rs.setRouteId(routeId);
+            rs.setSeq(seq++);
+            rs.setLat(v.lat());
+            rs.setLon(v.lon());
+            rs.setIsStop(Boolean.TRUE.equals(v.isStop()));
+            shape.add(rs);
+        }
+        routeShapeRepository.saveAll(shape);
+    }
+
+    /**
+     * Stop id derived from the name: uppercase, non-alphanumerics collapsed to
+     * underscore, capped to the column length. Deterministic, so drawing the
+     * same stop name twice reuses the same row instead of duplicating it.
+     */
+    private static String generatedStopId(String name) {
+        if (name == null || name.isBlank())
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "A stop drawn on the map needs a name.");
+        String id = java.text.Normalizer.normalize(name.trim(), java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")            // drop accents: "Università" → "Universita"
+                .toUpperCase()
+                .replaceAll("[^A-Z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        if (id.isEmpty()) id = "STOP";
+        return id.length() > 50 ? id.substring(0, 50) : id;
     }
 
     /**

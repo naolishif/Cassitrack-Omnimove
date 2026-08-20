@@ -101,6 +101,18 @@ public class ActiveTripDTO {
      * A trip is FINISHED either because it was observed reaching its final
      * stop (possibly early) or because its scheduled window has elapsed.
      */
+    /**
+     * Vehicle health while the trip runs, independent of {@link #phase}:
+     *   OK        — reporting and moving
+     *   STALLED   — reporting but hasn't moved for 10 minutes
+     *   NO_SIGNAL — nothing received for 5 minutes
+     *
+     * Kept apart from the phase because a trip can be OVERDUE *because* the bus
+     * is STALLED: showing both says what is happening and why.
+     */
+    @JsonProperty("health")
+    private String health;
+
     @JsonProperty("phase")
     private String phase;
 

@@ -110,7 +110,13 @@ TRAFFIC_MIN      = 5.0
 TRAFFIC_MAX      = 25.0
 OCC_MAX_DELTA    = 4       # max passenger change at a stop
 BREAKDOWN_MTBF   = 86400.0 # mean time between breakdowns (s) ≈ 24 h
-BREAKDOWN_DUR    = 600.0   # a breakdown silences the unit for 10 min
+BREAKDOWN_DUR    = 600.0   # how long a breakdown keeps the bus stopped (s)
+#
+# NOTE: a breakdown no longer silences the unit. Mechanical trouble does not
+# switch off the on-board radio, and conflating the two made a stopped bus
+# indistinguishable from an unreachable one. The bus keeps reporting from
+# where it stands, at 0 km/h: the backend then reads that as STALLED
+# (stationary while on a trip), not NO_SIGNAL (nothing received at all).
 
 R_EARTH = 6371000.0
 COORD_TOL = 1e-5           # ~1 m: shape vertices are authored from stop coords
@@ -462,11 +468,12 @@ def run_bus(bus, client, args, clock):
         since += SIM_STEP * args.speed
         if since >= target:
             since, target = 0.0, SEND_INTERVAL * (1 + random.uniform(-SEND_JITTER, SEND_JITTER))
-            if bus.state != "broken":
-                client.publish(bus.topic, json.dumps(bus.payload()))
-                trip = bus.trip
-                print(f"[{bus.id:>6}] {bus.state:<7} {bus.spd:5.1f} km/h "
-                      f"occ={bus.occ:<3} trip={trip['trip_id'] if trip else '—'}")
+            # Always publish, breakdowns included: the unit keeps reporting
+            # its position even when the bus cannot move.
+            client.publish(bus.topic, json.dumps(bus.payload()))
+            trip = bus.trip
+            print(f"[{bus.id:>6}] {bus.state:<7} {bus.spd:5.1f} km/h "
+                  f"occ={bus.occ:<3} trip={trip['trip_id'] if trip else '—'}")
         _stop.wait(SIM_STEP)
 
 

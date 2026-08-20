@@ -89,6 +89,19 @@ public class VehiclePosition {
     private ScheduleStatus scheduleStatus;
     private Instant receivedAt;
 
+    /**
+     * Since when this bus has not really moved.
+     *
+     * Reset every time it travels more than a few metres, so "now minus this"
+     * is how long it has been standing still. Kept here, where positions
+     * arrive, because a single reading cannot tell a stopped bus from a moving
+     * one — only the comparison with the previous one can.
+     *
+     * A stationary bus is not by itself a problem (stops, lights, traffic); it
+     * becomes one when it lasts, and only while a trip is running.
+     */
+    private Instant stationarySince;
+
     //Pending: no more alarm table (SHOULD do later on)
     public enum ScheduleStatus {
         ON_TIME,

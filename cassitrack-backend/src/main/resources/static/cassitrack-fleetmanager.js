@@ -215,6 +215,10 @@ let fleetSize = 4;
 let routeFilter    = null;   // route id, or null = all routes
 let serviceFilter  = 'all';  // 'all' | 'in' (has trip) | 'out' (no trip)
 let delayThreshold = 0;      // minutes; 0 = off, else keep only delay >= N
+// How to draw a line nobody is running right now: 'dim' keeps it faint on
+// the map (the road exists even outside service hours), 'hide' removes it
+// with its stops, for an uncluttered view of what is actually moving.
+let idleRoutesMode = 'dim';
 // A bus is shown only if it passes EVERY active filter (logical AND).
 function busPassesFilter(v){
     if(!v) return true;
@@ -230,7 +234,13 @@ function busPassesFilter(v){
 function applyBusVisibility(id){
     const m = markers[id];
     if(!m) return;
-    const visible = !isBusHidden(id) && busPassesFilter(vehicleData[id]);
+    const v = vehicleData[id];
+    // A bus that has reached its terminus keeps reporting from the depot
+    // or the layover: it is parked, not in service. Showing it would
+    // clutter the map with vehicles that are not going anywhere — it
+    // reappears by itself as soon as its next run is assigned.
+    const onDuty  = !!(v && v.trip_id);
+    const visible = onDuty && !isBusHidden(id) && busPassesFilter(v);
     if(visible){ if(!map.hasLayer(m)) m.addTo(map); }
     else if(map.hasLayer(m)) map.removeLayer(m);
 }
@@ -328,6 +338,25 @@ async function fetchVehicles(){
 
 function updateMap(vehicles){
     lastVehicles = vehicles;
+
+    // Drop the vehicles the backend no longer reports.
+    //
+    // /vehicles only returns buses seen within the last 5 minutes. Markers
+    // were created but never removed, so a bus that went quiet — or that
+    // finished its duty — stayed frozen on the map at its last known
+    // position, indefinitely. Anything missing from this payload is gone:
+    // clear its marker and its cached state.
+    const stillHere = new Set(vehicles.map(v => v.vehicle_id));
+    Object.keys(markers).forEach(id => {
+        if(stillHere.has(id)) return;
+        if(map.hasLayer(markers[id])) map.removeLayer(markers[id]);
+        delete markers[id];
+        delete vehicleData[id];
+        // Was this the bus being followed? Release the focus, or the map
+        // would keep panning to a vehicle that no longer exists.
+        if(selectedVeh === id) selectedVeh = null;
+    });
+
     vehicles.forEach(v=>{
         vehicleData[v.vehicle_id]=v;
         const st=!v.trip_id?'NO_TRIP':(v.schedule_status||'UNKNOWN'),pos=[v.lat,v.lon];
@@ -488,8 +517,13 @@ function buildBusDetail(v){
                 <div class="vitem"><div class="vitem-lbl">Crowding</div><div class="vitem-val">${escHtml(v.crowding_level)||'—'}</div></div>
                 <div class="vitem"><div class="vitem-lbl">ETA next stop</div><div class="vitem-val">${eta}</div></div>
                 <div class="vitem"><div class="vitem-lbl">Seats</div><div class="vitem-val">${v.numero_posti||'—'}</div></div>
-                <div class="vitem bd-span2"><div class="vitem-lbl">Last stop</div><div class="vitem-val">${escHtml(v.next_stop_name)||'—'}</div></div>
-                <div class="vitem bd-span2"><div class="vitem-lbl">Next stop</div><div class="vitem-val">${escHtml(v.upcoming_stop_name)||'—'}</div></div>
+                <!-- Field names as the DTO publishes them today: last_stop_name is
+                     the stop just called at, next_stop_name the one ahead. This card
+                     still used the pre-merge names (upcoming_stop_name no longer
+                     exists), which is why it showed the next stop under "Last stop"
+                     and a dash under "Next stop" while the map popup was right. -->
+                <div class="vitem bd-span2"><div class="vitem-lbl">Last stop</div><div class="vitem-val">${escHtml(v.last_stop_name)||'—'}</div></div>
+                <div class="vitem bd-span2"><div class="vitem-lbl">Next stop</div><div class="vitem-val">${escHtml(v.next_stop_name)||'—'}</div></div>
                 <div class="vitem"><div class="vitem-lbl">Wheelchair</div><div class="vitem-val">${v.wheelchair_accessible?'♿ Yes':'—'}</div></div>
                 <div class="vitem"><div class="vitem-lbl">Position</div><div class="vitem-val">${v.lat!=null?v.lat.toFixed(4):'—'}, ${v.lon!=null?v.lon.toFixed(4):'—'}</div></div>
             </div>
@@ -565,7 +599,7 @@ function updateRouteVisibility(){
         const hit    = routeHitAreas[rid];
         // The invisible click target follows its line exactly — otherwise a
         // hidden route would still be clickable.
-        if(explicit && !active){
+        if((explicit || idleRoutesMode === 'hide') && !active){
             if(map.hasLayer(pl)) map.removeLayer(pl);
             if(hit && map.hasLayer(hit)) map.removeLayer(hit);
             return;
@@ -586,7 +620,7 @@ function updateRouteVisibility(){
     // dimmed lines, so the network is always legible.
     Object.values(stopMap).forEach(st=>{
         if(!st.marker) return;
-        const show = !explicit
+        const show = (!explicit && idleRoutesMode !== 'hide')
             || (st.routeIds && [...st.routeIds].some(rid=>showSet.has(rid)));
         if(show){
             if(!map.hasLayer(st.marker)) st.marker.addTo(map);
@@ -703,7 +737,6 @@ function switchDmPanel(panelId, btn){
 
     if(panelId === 'dm-panel-stops') loadStops();
     else if(panelId === 'dm-panel-routes') loadRoutesAdmin();
-    else if(panelId === 'dm-panel-timetable'){ ttLoadOptions(); loadTimetable(); }
     // Both panels exist: Timetable edits the runs, Trips watches them.
     else if(panelId === 'dm-panel-trips'){
         tripsLoad();               // route names come with the trip rows
@@ -905,6 +938,188 @@ function renderRoutesAdmin(){
 }
 
 /** Bus dropdown for the line's first journey (trips.bus_id is NOT NULL). */
+
+    // -- Route map editor -------------------------------------------------------
+    // Draws the road geometry stored in route_shapes. Same interaction as the
+    // standalone tools/crea_path.html that produced the current shapes:
+    // left click = plain vertex, right click = vertex that is also a stop.
+    // A stop snaps to the nearest existing stop within SNAP_M, so drawing over a
+    // known stop reuses it instead of creating a duplicate.
+    let rtMap = null;          // Leaflet instance of the editor
+    let rtDrawPts = [];        // [{lat, lon, isStop, stopId, stopName, marker}]
+    let rtDrawLine = null;     // preview polyline
+    let rtAllStops = [];       // existing stops, used for snapping
+    const SNAP_M = 80;         // metres: within this, reuse the existing stop
+
+    function metresBetween(aLat, aLon, bLat, bLon){
+        const R = 6371000, toRad = d => d * Math.PI / 180;
+        const dLat = toRad(bLat - aLat), dLon = toRad(bLon - aLon);
+        const s = Math.sin(dLat/2)**2 +
+                  Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+    }
+
+    function nearestStop(lat, lon){
+        let best = null, bestD = Infinity;
+        rtAllStops.forEach(s => {
+            if(s.lat == null || s.lon == null) return;
+            const d = metresBetween(lat, lon, s.lat, s.lon);
+            if(d < bestD){ bestD = d; best = s; }
+        });
+        return bestD <= SNAP_M ? best : null;
+    }
+
+    async function rtOpenMapEditor(){
+        const wrap = document.getElementById('rtDrawWrap');
+        if(!wrap) return;
+        wrap.hidden = false;
+
+        if(!rtAllStops.length){
+            try{
+                const r = await fetch(`${API}/stops`, {headers:{'Accept':'application/json'}});
+                if(r.ok) rtAllStops = await r.json();
+            }catch(e){ /* snapping just won't find anything */ }
+        }
+
+        if(!rtMap){
+            // Wheel zoom is enabled only while the pointer is over the map:
+            // hovering it you zoom as usual, moving off it the wheel scrolls
+            // the form again (the map lives inside a scrollable form, and a
+            // map that always grabs the wheel would trap the page).
+            rtMap = L.map('rtMap', {center:[41.4901, 13.8265], zoom:15,
+                                    doubleClickZoom:false, scrollWheelZoom:false});
+            rtMap.on('mouseover', () => rtMap.scrollWheelZoom.enable());
+            rtMap.on('mouseout',  () => rtMap.scrollWheelZoom.disable());
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                        {attribution:'(c) OpenStreetMap (c) CARTO', maxZoom:19}).addTo(rtMap);
+
+            // Existing stops shown faintly, as a drawing reference.
+            rtAllStops.forEach(s => {
+                if(s.lat == null || s.lon == null) return;
+                L.circleMarker([s.lat, s.lon],
+                    {radius:4, color:'#4B5563', weight:1, fillOpacity:.5})
+                 .bindTooltip(s.name || s.id).addTo(rtMap);
+            });
+
+            rtMap.on('click',       e => rtAddVertex(e.latlng, false));
+            rtMap.on('contextmenu', e => {
+                if(e.originalEvent) L.DomEvent.preventDefault(e.originalEvent);
+                rtAddVertex(e.latlng, true);
+            });
+        }
+        // Re-measure once the container is actually laid out. A single fixed
+        // timeout is fragile (fonts, images and the parent form settling can
+        // push layout past it), so retry briefly until the map reports a real
+        // width — this is what stops the map rendering as a corner sliver.
+        let tries = 0;
+        const settle = () => {
+            rtMap.invalidateSize();
+            const w = rtMap.getContainer().clientWidth;
+            if(w < 50 && ++tries < 10){ setTimeout(settle, 80); return; }
+            wrap.scrollIntoView({behavior:'smooth', block:'nearest'});
+        };
+        requestAnimationFrame(() => setTimeout(settle, 30));
+    }
+
+    /** Draw a vertex and wire its click-to-delete. */
+    function rtAttachMarker(pt){
+        pt.marker = L.circleMarker([pt.lat, pt.lon], pt.isStop
+                ? {radius:7, color:'#F59E0B', weight:2, fillColor:'#F59E0B', fillOpacity:.9}
+                : {radius:4, color:'#3B82F6', weight:1, fillColor:'#3B82F6', fillOpacity:.9})
+            .addTo(rtMap);
+        if(pt.stopName) pt.marker.bindTooltip(pt.stopName);
+        pt.marker.on('click', ev => {
+            L.DomEvent.stopPropagation(ev);
+            const i = rtDrawPts.indexOf(pt);
+            if(i >= 0) rtRemoveVertex(i);
+        });
+    }
+
+    function rtAddVertex(latlng, isStop){
+        const lat = +latlng.lat.toFixed(6), lon = +latlng.lng.toFixed(6);
+        const pt = {lat, lon, isStop, stopId:null, stopName:null};
+
+        if(isStop){
+            const near = nearestStop(lat, lon);
+            if(near){
+                pt.stopId = near.id;
+                pt.stopName = near.name || near.id;
+                // Snap to the stop's EXACT coordinates, not to where the click
+                // landed. The scheduled simulator binds each scheduled stop to a
+                // shape vertex by comparing coordinates within ~1 m (COORD_TOL),
+                // and drops the whole trip when no vertex matches — a click even
+                // a few metres off would silently stop that bus from running.
+                pt.lat = near.lat;
+                pt.lon = near.lon;
+            }else{
+                const name = window.prompt('Name of the new stop at this point:');
+                if(!name || !name.trim()) return;      // cancelled -> no vertex added
+                pt.stopName = name.trim();
+            }
+        }
+
+        rtAttachMarker(pt);
+
+        rtDrawPts.push(pt);
+        rtRedraw();
+    }
+
+    function rtRemoveVertex(i){
+        const [pt] = rtDrawPts.splice(i, 1);
+        if(pt && pt.marker) rtMap.removeLayer(pt.marker);
+        rtRedraw();
+    }
+
+    function rtClearDrawing(){
+        rtDrawPts.forEach(p => { if(p.marker) rtMap.removeLayer(p.marker); });
+        rtDrawPts = [];
+        rtRedraw();
+    }
+
+    /** Refresh the preview line, the counter and the stop rows below the map. */
+    function rtRedraw(){
+        if(rtDrawLine){ rtMap.removeLayer(rtDrawLine); rtDrawLine = null; }
+        if(rtDrawPts.length >= 2){
+            // interactive:false + bringToBack: the preview line is redrawn
+            // after the markers, so by default it sits on top of them and
+            // swallows the clicks meant to delete a vertex.
+            rtDrawLine = L.polyline(rtDrawPts.map(p=>[p.lat,p.lon]),
+                                    {color:'#3B82F6', weight:4, opacity:.85,
+                                     interactive:false}).addTo(rtMap);
+            rtDrawLine.bringToBack();
+        }
+        const stops = rtDrawPts.filter(p=>p.isStop);
+        const c = document.getElementById('rtDrawCount');
+        if(c) c.textContent = rtDrawPts.length + ' point' + (rtDrawPts.length===1?'':'s')
+                            + ' · ' + stops.length + ' stop' + (stops.length===1?'':'s');
+        rtSyncStopRows(stops);
+    }
+
+    /**
+     * Mirror the stops drawn on the map into the rows below, keeping any time
+     * already typed. Those rows stay the only place where times are entered.
+     */
+    function rtSyncStopRows(stops){
+        const list = document.getElementById('rtStops');
+        if(!list) return;
+        const times = Array.from(list.querySelectorAll('.tt-manual-row .tt-time')).map(i=>i.value);
+        list.innerHTML = '';
+        stops.forEach((s, i) => {
+            const row = document.createElement('div');
+            row.className = 'tt-stop-row tt-manual-row';
+            row.dataset.fromMap  = '1';
+            row.dataset.stopId   = s.stopId || '';
+            row.dataset.stopName = s.stopName || '';
+            row.dataset.lat      = s.lat;
+            row.dataset.lon      = s.lon;
+            const t = times[i] || (i === 0 ? '08:00' : '');
+            row.innerHTML = '<span class="tt-seq">' + (i+1) + '</span>'
+                + '<span class="tt-stop-name">' + escHtml(s.stopName || s.stopId) + '</span>'
+                + '<input type="time" class="bm-input tt-time" value="' + escHtml(t) + '">';
+            list.appendChild(row);
+        });
+    }
+
 async function rtLoadBusOptions(){
     const sel = document.getElementById('rtBus');
     if(!sel || sel.options.length) return;
@@ -929,17 +1144,23 @@ async function openRouteForm(route){
     document.getElementById('rtFormTitle').textContent =
         route ? `Edit route ${route.id}` : 'New route + its first run';
 
-    // The itinerary is defined only when creating: editing it later would
-    // rewrite the schedule of every run already on this line.
-    const itn = document.getElementById('rtItinerary');
-    const busField = document.getElementById('rtBusField');
-    if(itn) itn.hidden = !!route;
+    // The itinerary (map + stop/time rows) belongs to creation only: it defines
+    // the line's path and its first run. Editing changes the line's own fields;
+    // the path and the stops are not touched from here.
+    const itn       = document.getElementById('rtItinerary');
+    const busField  = document.getElementById('rtBusField');
+    const stopsList = document.getElementById('rtStops');
+    if(itn)      itn.hidden      = !!route;
     if(busField) busField.hidden = !!route;
+
     if(!route){
         await ttLoadStopOptions();
         await rtLoadBusOptions();
-        const list = document.getElementById('rtStops');
-        if(list){ list.innerHTML = ''; itnAddStop('rtStops'); itnAddStop('rtStops'); }
+        // Start from a blank drawing every time the form is opened.
+        if(rtMap) rtClearDrawing(); else rtDrawPts = [];
+        const drawWrap = document.getElementById('rtDrawWrap');
+        if(drawWrap) drawWrap.hidden = true;
+        if(stopsList){ stopsList.hidden = false; stopsList.innerHTML = ''; itnAddStop('rtStops'); itnAddStop('rtStops'); }
     }
 
     const idEl = document.getElementById('rtId');
@@ -976,11 +1197,29 @@ async function saveRoute(){
     // Creating: attach the itinerary + the bus of the first journey. The
     // backend stores the path as that journey's scheduled stops.
     if(!editing){
-        payload.stops = itnCollect('rtStops');
         payload.busId = parseInt(document.getElementById('rtBus').value, 10) || null;
-        if(payload.stops.length < 2){ setRtMsg('An itinerary needs at least two stops.'); return; }
-        if(payload.stops.some(s=>!s.stopId || !s.arrival)){
-            setRtMsg('Every stop needs both a stop and a time.'); return;
+
+        // Drawn on the map: send the full geometry. Every vertex goes to
+        // route_shapes; the ones flagged as stops also become the calls of
+        // the line's first run, with the times typed in the rows below.
+        if(rtDrawPts.length >= 2){
+            const rows = Array.from(document.querySelectorAll('#rtStops .tt-manual-row'));
+            const timeByIdx = rows.map(r => r.querySelector('.tt-time').value);
+            let stopIdx = 0;
+            payload.path = rtDrawPts.map(pt => ({
+                lat: pt.lat, lon: pt.lon, isStop: !!pt.isStop,
+                stopId: pt.stopId, stopName: pt.stopName,
+                arrival: pt.isStop ? (timeByIdx[stopIdx++] || '') : null
+            }));
+            const drawnStops = payload.path.filter(p => p.isStop);
+            if(drawnStops.length < 2){ setRtMsg('Mark at least two stops on the map (right click).'); return; }
+            if(drawnStops.some(s => !s.arrival)){ setRtMsg('Every stop needs a time.'); return; }
+        }else{
+            payload.stops = itnCollect('rtStops');
+            if(payload.stops.length < 2){ setRtMsg('An itinerary needs at least two stops.'); return; }
+            if(payload.stops.some(s=>!s.stopId || !s.arrival)){
+                setRtMsg('Every stop needs both a stop and a time.'); return;
+            }
         }
         if(!payload.busId){ setRtMsg('Pick the bus for the first journey.'); return; }
     }
@@ -1020,71 +1259,9 @@ async function deleteRoute(id){
 // A run is one journey of a line at a given departure. Creating one copies
 // the line's stop sequence and shifts every time — the same thing the V5
 // migration did by hand, done from the UI instead.
-let ttTrips = [];
 let ttOpenTripId = null;   // run whose stop times are being edited
 
-async function loadTimetable(){
-    const body = document.getElementById('ttTableBody');
-    if(body) body.innerHTML = `<tr><td colspan="7" class="bm-empty">Loading…</td></tr>`;
-    const params = new URLSearchParams();
-    const s = document.getElementById('ttSearch');
-    const fr = document.getElementById('ttFilterRoute');
-    const fb = document.getElementById('ttFilterBus');
-    if(s && s.value.trim()) params.set('search', s.value.trim());
-    if(fr && fr.value) params.set('routeId', fr.value);
-    if(fb && fb.value) params.set('busId', fb.value);
-    try{
-        const r = await fetch(`${API}/timetable?${params.toString()}`, {headers:{'Accept':'application/json'}});
-        if(!r.ok) throw new Error(r.status);
-        ttTrips = await r.json();
-        renderTimetable();
-    }catch(e){
-        if(body) body.innerHTML = `<tr><td colspan="7" class="bm-empty">Failed to load the timetable.</td></tr>`;
-    }
-}
-
-function renderTimetable(){
-    const body = document.getElementById('ttTableBody');
-    if(!body) return;
-    if(!ttTrips.length){ body.innerHTML = `<tr><td colspan="7" class="bm-empty">No runs match — or none exist yet.</td></tr>`; return; }
-    body.innerHTML = ttTrips.map(t => `
-            <tr>
-                <td class="bm-mono">${escHtml(t.tripId)}</td>
-                <td>${escHtml(t.routeLabel)||'—'}</td>
-                <td class="bm-mono">${escHtml(t.targa)||'—'}</td>
-                <td class="bm-mono">${escHtml(t.departure)}</td>
-                <td class="bm-mono">${escHtml(t.arrival)}</td>
-                <td>${t.stopCount}</td>
-                <td class="bm-actions-col">
-                    <button type="button" class="bm-row-btn" data-act="times" data-id="${escHtml(t.tripId)}">Times</button>
-                    <button type="button" class="bm-row-btn danger" data-act="del" data-id="${escHtml(t.tripId)}">Delete</button>
-                </td>
-            </tr>`).join('');
-}
-
 /** Fill the line/bus dropdowns (filters + create form) from existing data. */
-async function ttLoadOptions(){
-    try{
-        const [routesRes, busesRes] = await Promise.all([
-            fetch(`${API}/buses/route-options`, {headers:{'Accept':'application/json'}}),
-            fetch(`${API}/buses`, {headers:{'Accept':'application/json'}})
-        ]);
-        const routes = routesRes.ok ? await routesRes.json() : [];
-        const buses  = busesRes.ok  ? await busesRes.json()  : [];
-
-        const routeOpts = routes.map(rt=>`<option value="${escHtml(rt.id)}">${escHtml(rt.label)}</option>`).join('');
-        const busOpts   = buses.map(b=>`<option value="${escHtml(b.busId)}">${escHtml(b.targa)}</option>`).join('');
-
-        const fr = document.getElementById('ttFilterRoute');
-        const fb = document.getElementById('ttFilterBus');
-        const cr = document.getElementById('ttRoute');
-        const cb = document.getElementById('ttBus');
-        if(fr) fr.innerHTML = '<option value="">All lines</option>' + routeOpts;
-        if(fb) fb.innerHTML = '<option value="">All buses</option>' + busOpts;
-        if(cr) cr.innerHTML = routeOpts;
-        if(cb) cb.innerHTML = busOpts;
-    }catch(e){ /* dropdowns stay empty; the table still works */ }
-}
 
 function ttSetMsg(id, txt, ok){
     const el = document.getElementById(id);
@@ -1169,14 +1346,22 @@ function exportRoutesCsv(){
 }
 
 function exportTimetableCsv(){
-    downloadCsv(`timetable-${csvStamp()}.csv`, [
-        {header:'Run ID',   get:t=>t.tripId},
-        {header:'Line',     get:t=>t.routeLabel},
-        {header:'Bus',      get:t=>t.targa},
-        {header:'Departs',  get:t=>t.departure},
-        {header:'Arrives',  get:t=>t.arrival},
-        {header:'Stops',    get:t=>t.stopCount}
-    ], ttTrips);
+    // Exports what the Trips table currently shows, live columns included.
+    downloadCsv(`trips-${csvStamp()}.csv`, [
+        {header:'Trip ID',       get:t=>t.trip_id},
+        {header:'Route',         get:t=>t.route_name},
+        {header:'Plate',         get:t=>t.plate},
+        {header:'Antenna',       get:t=>t.vehicle_id},
+        {header:'Start',         get:t=>t.start_time},
+        {header:'End (sched.)',  get:t=>t.end_time},
+        {header:'End (real)',    get:t=>t.actual_end_time},
+        {header:'Stops done',    get:t=>t.stops_done},
+        {header:'Stops total',   get:t=>t.stops_total},
+        {header:'Progress %',    get:t=>t.progress_pct},
+        {header:'Phase',         get:t=>t.phase},
+        {header:'Status',        get:t=>t.status},
+        {header:'Delay (min)',   get:t=>t.delay_minutes}
+    ], tripsLast.filter(tripsMatches));   // stesse righe che la tabella mostra
 }
 
 /**
@@ -1185,15 +1370,16 @@ function exportTimetableCsv(){
  * are fetched with the filters currently applied.
  */
 async function exportStopTimesCsv(){
+    // Filters come from the merged Trips panel, so the file matches the table.
     const params = new URLSearchParams();
-    const s  = document.getElementById('ttSearch');
-    const fr = document.getElementById('ttFilterRoute');
-    const fb = document.getElementById('ttFilterBus');
+    const s  = document.getElementById('tripsSearch');
+    const fr = document.getElementById('tripsRoute');
+    const fb = document.getElementById('tripsBus');
     if(s && s.value.trim()) params.set('search', s.value.trim());
     if(fr && fr.value) params.set('routeId', fr.value);
     if(fb && fb.value) params.set('busId', fb.value);
     try{
-        const r = await fetch(`${API}/timetable/stop-times?${params.toString()}`,
+        const r = await fetch(`${API}/trips/stop-times?${params.toString()}`,
             {headers:{'Accept':'application/json'}});
         if(!r.ok) throw new Error(r.status);
         const rows = await r.json();
@@ -1267,45 +1453,19 @@ function itnCollect(listId){
     }));
 }
 
-async function ttCreateRun(){
-    const payload = {
-        routeId:   document.getElementById('ttRoute').value,
-        busId:     parseInt(document.getElementById('ttBus').value, 10),
-        departure: document.getElementById('ttDeparture').value
-    };
-    if(!payload.routeId){ ttSetMsg('ttFormMsg', 'Pick a line.'); return; }
-    if(!(payload.busId > 0)){ ttSetMsg('ttFormMsg', 'Pick a bus.'); return; }
-    if(!payload.departure){ ttSetMsg('ttFormMsg', 'Pick a departure time.'); return; }
-    ttSetMsg('ttFormMsg', 'Creating…', true);
-    try{
-        const r = await fetch(`${API}/timetable`, {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify(payload)
-        });
-        if(r.ok){
-            document.getElementById('ttForm').hidden = true;
-            await loadTimetable();
-        }else{
-            let msg = 'Could not create the run.';
-            try{ const j = await r.json(); if(j && (j.error||j.message)) msg = j.error||j.message; }catch(_){}
-            ttSetMsg('ttFormMsg', msg);
-        }
-    }catch(e){ ttSetMsg('ttFormMsg', 'Network error while creating the run.'); }
-}
-
 /** Open the stop-by-stop time editor for one run. */
 async function ttOpenTimes(tripId){
     const box = document.getElementById('ttDetail');
     const list = document.getElementById('ttStops');
     if(!box || !list) return;
     ttOpenTripId = tripId;
-    document.getElementById('ttForm').hidden = true;
     box.hidden = false;
+    // scroll it into view: the panel is tall and the editor sits above the table
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
     ttSetMsg('ttDetailMsg', '');
     list.innerHTML = '<div class="bm-msg">Loading…</div>';
     try{
-        const r = await fetch(`${API}/timetable/${encodeURIComponent(tripId)}`, {headers:{'Accept':'application/json'}});
+        const r = await fetch(`${API}/trips/${encodeURIComponent(tripId)}/stops`, {headers:{'Accept':'application/json'}});
         if(!r.ok) throw new Error(r.status);
         const d = await r.json();
         document.getElementById('ttDetailTitle').textContent =
@@ -1333,14 +1493,14 @@ async function ttSaveTimes(){
     if(stops.some(s=>!s.arrival)){ ttSetMsg('ttDetailMsg', 'Every stop needs a time.'); return; }
     ttSetMsg('ttDetailMsg', 'Saving…', true);
     try{
-        const r = await fetch(`${API}/timetable/${encodeURIComponent(ttOpenTripId)}/times`, {
+        const r = await fetch(`${API}/trips/${encodeURIComponent(ttOpenTripId)}/times`, {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({stops})
         });
         if(r.ok){
             ttSetMsg('ttDetailMsg', 'Saved.', true);
-            await loadTimetable();
+            await tripsLoad();
         }else{
             let msg = 'Could not save the times.';
             try{ const j = await r.json(); if(j && (j.error||j.message)) msg = j.error||j.message; }catch(_){}
@@ -1352,10 +1512,10 @@ async function ttSaveTimes(){
 async function ttDeleteRun(tripId){
     if(!window.confirm(`Delete run ${tripId}? Its stop times will be removed too.`)) return;
     try{
-        const r = await fetch(`${API}/timetable/${encodeURIComponent(tripId)}`, {method:'DELETE'});
+        const r = await fetch(`${API}/trips/${encodeURIComponent(tripId)}`, {method:'DELETE'});
         if(r.ok){
             if(ttOpenTripId === tripId){ document.getElementById('ttDetail').hidden = true; ttOpenTripId = null; }
-            await loadTimetable();
+            await tripsLoad();
         }else{
             let msg = 'Delete failed.';
             try{ const j = await r.json(); if(j && (j.error||j.message)) msg = j.error||j.message; }catch(_){}
@@ -1930,8 +2090,6 @@ const dmTabStops = document.getElementById('dmTabStops');
 if(dmTabStops) dmTabStops.addEventListener('click', e => switchDmPanel('dm-panel-stops', e.currentTarget));
 const dmTabRoutes = document.getElementById('dmTabRoutes');
 if(dmTabRoutes) dmTabRoutes.addEventListener('click', e => switchDmPanel('dm-panel-routes', e.currentTarget));
-const dmTabTimetable = document.getElementById('dmTabTimetable');
-if(dmTabTimetable) dmTabTimetable.addEventListener('click', e => switchDmPanel('dm-panel-timetable', e.currentTarget));
 const dmTabTrips = document.getElementById('dmTabTrips');
 if(dmTabTrips) dmTabTrips.addEventListener('click', e => switchDmPanel('dm-panel-trips', e.currentTarget));
 
@@ -1944,8 +2102,12 @@ if(tripsRefreshBtn) tripsRefreshBtn.addEventListener('click', () => {
 });
 const tripsTableBody = document.getElementById('tripsTableBody');
 if(tripsTableBody) tripsTableBody.addEventListener('click', e => {
-    const btn = e.target.closest('[data-trip-edit]');
-    if(btn) tripOpenEdit(btn.dataset.tripEdit);
+    const edit  = e.target.closest('[data-trip-edit]');
+    if(edit){ tripOpenEdit(edit.dataset.tripEdit); return; }
+    const stops = e.target.closest('[data-trip-stops]');
+    if(stops){ ttOpenTimes(stops.dataset.tripStops); return; }
+    const del   = e.target.closest('[data-trip-del]');
+    if(del) ttDeleteRun(del.dataset.tripDel);
 });
 
 // Trips filters. All client-side over the day's rows already in memory, so
@@ -1956,8 +2118,32 @@ const tripsFilterInputs = [
     ['tripsStatus', 'status', 'change'],
     ['tripsSpan',   'span',   'change'],
     ['tripsRoute',  'route',  'change'],
-    ['tripsBus',    'bus',    'change']
+    ['tripsBus',    'bus',    'change'],
+    // Absolute window: only meaningful while span === 'custom'.
+    ['tripsFrom',   'from',   'input'],
+    ['tripsTo',     'to',     'input']
 ];
+// Show the two time inputs only for "Custom time", and seed them with the
+// current hour so the first pick is one click away instead of a blank field.
+const tripsSpanEl   = document.getElementById('tripsSpan');
+const tripsCustomEl = document.getElementById('tripsCustomSpan');
+if(tripsSpanEl && tripsCustomEl){
+    tripsSpanEl.addEventListener('change', e => {
+        const custom = e.target.value === 'custom';
+        tripsCustomEl.hidden = !custom;
+        if(custom){
+            const from = document.getElementById('tripsFrom');
+            if(from && !from.value){
+                const d = new Date();
+                from.value = String(d.getHours()).padStart(2,'0') + ':'
+                           + String(d.getMinutes()).padStart(2,'0');
+                tripsFilter.from = from.value;
+            }
+        }
+        // Il listener generico su tripsSpan applica gia' il filtro subito dopo.
+    });
+}
+
 tripsFilterInputs.forEach(([id, key, evt]) => {
     const el = document.getElementById(id);
     if(!el) return;
@@ -1974,6 +2160,8 @@ if(tripsClearBtn) tripsClearBtn.addEventListener('click', () => {
         const el = document.getElementById(id);
         if(el) el.value = '';
     });
+    const cs = document.getElementById('tripsCustomSpan');
+    if(cs) cs.hidden = true;          // il custom si chiude col Clear
     tripsApplyFilter();
 });
 
@@ -2034,37 +2222,6 @@ if(rtResetBtn) rtResetBtn.addEventListener('click', () => {
     renderRoutesAdmin();
 });
 
-// Data Management > timetable
-const ttSearchEl = document.getElementById('ttSearch');
-let ttSearchTimer = null;
-if(ttSearchEl) ttSearchEl.addEventListener('input', () => {
-    clearTimeout(ttSearchTimer);                 // debounce: filtering is server-side
-    ttSearchTimer = setTimeout(loadTimetable, 250);
-});
-const ttFilterRouteEl = document.getElementById('ttFilterRoute');
-if(ttFilterRouteEl) ttFilterRouteEl.addEventListener('change', loadTimetable);
-const ttFilterBusEl = document.getElementById('ttFilterBus');
-if(ttFilterBusEl) ttFilterBusEl.addEventListener('change', loadTimetable);
-const ttResetBtn = document.getElementById('ttResetBtn');
-if(ttResetBtn) ttResetBtn.addEventListener('click', () => {
-    if(ttSearchEl) ttSearchEl.value = '';
-    if(ttFilterRouteEl) ttFilterRouteEl.value = '';
-    if(ttFilterBusEl) ttFilterBusEl.value = '';
-    loadTimetable();
-});
-const ttAddBtn = document.getElementById('ttAddBtn');
-if(ttAddBtn) ttAddBtn.addEventListener('click', () => {
-    document.getElementById('ttDetail').hidden = true;
-    document.getElementById('ttForm').hidden = false;
-    ttSetMsg('ttFormMsg',
-        "The stops come from the line's itinerary — a run only sets when and with which bus.", true);
-});
-const ttCancelBtn = document.getElementById('ttCancelBtn');
-if(ttCancelBtn) ttCancelBtn.addEventListener('click', () => {
-    document.getElementById('ttForm').hidden = true;
-});
-const ttSaveBtn = document.getElementById('ttSaveBtn');
-if(ttSaveBtn) ttSaveBtn.addEventListener('click', ttCreateRun);
 // CSV export — one button per panel, exporting the rows currently shown
 const dmExportBtn = document.getElementById('dmExportBtn');
 if(dmExportBtn) dmExportBtn.addEventListener('click', exportBusesCsv);
@@ -2076,6 +2233,20 @@ const ttExportBtn = document.getElementById('ttExportBtn');
 if(ttExportBtn) ttExportBtn.addEventListener('click', exportTimetableCsv);
 const ttExportStopsBtn = document.getElementById('ttExportStopsBtn');
 if(ttExportStopsBtn) ttExportStopsBtn.addEventListener('click', exportStopTimesCsv);
+
+// Routes > map editor for the road geometry
+const rtDrawToggle = document.getElementById('rtDrawToggle');
+if(rtDrawToggle) rtDrawToggle.addEventListener('click', () => {
+    const wrap = document.getElementById('rtDrawWrap');
+    if(wrap && !wrap.hidden){ wrap.hidden = true; return; }   // toggle off
+    rtOpenMapEditor();
+});
+const rtUndoBtn = document.getElementById('rtUndoBtn');
+if(rtUndoBtn) rtUndoBtn.addEventListener('click', () => {
+    if(rtDrawPts.length) rtRemoveVertex(rtDrawPts.length - 1);
+});
+const rtClearBtn = document.getElementById('rtClearBtn');
+if(rtClearBtn) rtClearBtn.addEventListener('click', rtClearDrawing);
 
 // Routes > itinerary editor (defines the line's path on create)
 const rtAddStopBtn = document.getElementById('rtAddStopBtn');
@@ -2094,15 +2265,6 @@ if(ttDetailCloseBtn) ttDetailCloseBtn.addEventListener('click', () => {
 });
 const ttTimesSaveBtn = document.getElementById('ttTimesSaveBtn');
 if(ttTimesSaveBtn) ttTimesSaveBtn.addEventListener('click', ttSaveTimes);
-const ttTableBody = document.getElementById('ttTableBody');
-if(ttTableBody) ttTableBody.addEventListener('click', e => {
-    const btn = e.target.closest('button[data-act]');
-    if(!btn) return;
-    const id = btn.dataset.id;
-    if(btn.dataset.act === 'times') ttOpenTimes(id);
-    else if(btn.dataset.act === 'del') ttDeleteRun(id);
-});
-
 // Data Management > routes CRUD
 const rtAddBtn = document.getElementById('rtAddBtn');
 if(rtAddBtn) rtAddBtn.addEventListener('click', () => openRouteForm(null));
@@ -2125,6 +2287,12 @@ if(routeFilterEl) routeFilterEl.addEventListener('change', e => setRouteFilter(e
 
 const serviceFilterEl = document.getElementById('serviceFilter');
 if(serviceFilterEl) serviceFilterEl.addEventListener('change', e => setServiceFilter(e.target.value));
+
+const idleRoutesEl = document.getElementById('idleRoutes');
+if(idleRoutesEl) idleRoutesEl.addEventListener('change', e => {
+    idleRoutesMode = e.target.value;
+    updateRouteVisibility();    // pure redraw: no data is refetched
+});
 
 const delayFilterEl = document.getElementById('delayFilter');
 if(delayFilterEl) delayFilterEl.addEventListener('input', e => {
@@ -2264,7 +2432,8 @@ function tripsStopAutoRefresh() {
 // trip's details without refetching.
 let tripsLast = [];
 
-const tripsFilter = { search: '', phase: '', status: '', span: '', route: '', bus: '' };
+const tripsFilter = { search: '', phase: '', status: '', span: '', route: '', bus: '',
+                      from: '', to: '' };
 
 async function tripsLoad() {
     const body = document.getElementById('tripsTableBody');
@@ -2326,11 +2495,25 @@ function tripsMatches(t) {
     if (f.span) {
         const start = tripsMinutesBetween('00:00', t.start_time);
         if (start === null) return false;
-        const now = tripsNowMinutes();
-        if (f.span === 'past') {
-            if (start >= now) return false;
-        } else if (start < now || start > now + parseInt(f.span, 10)) {
-            return false;
+
+        if (f.span === 'custom') {
+            // Absolute window, unlike the presets below which are relative to now.
+            // A trip counts as inside it when the two OVERLAP: asking "what runs
+            // between 14:00 and 15:00" must also return the run that left at 13:50
+            // and is still going, not only those departing inside the hour.
+            const end = tripsMinutesBetween('00:00', t.end_time);
+            const from = tripsMinutesBetween('00:00', f.from);
+            const to   = f.to ? tripsMinutesBetween('00:00', f.to) : from;
+            if (from === null) return true;                 // nothing chosen yet
+            const tripEnd = (end === null || end < start) ? start : end;
+            if (tripEnd < from || start > to) return false;  // no overlap
+        } else {
+            const now = tripsNowMinutes();
+            if (f.span === 'past') {
+                if (start >= now) return false;
+            } else if (start < now || start > now + parseInt(f.span, 10)) {
+                return false;
+            }
         }
     }
 
@@ -2381,6 +2564,10 @@ function tripsRender(trips) {
             <td>${tripsStatusPill(t) || '<span class="dm-muted">—</span>'}</td>
             <td class="dm-right">
                 <button class="dm-row-btn" data-trip-edit="${escHtml(t.trip_id)}">Edit</button>
+                <button class="dm-row-btn" data-trip-stops="${escHtml(t.trip_id)}"
+                        title="Stop-by-stop times of this trip">Stops</button>
+                <button class="dm-row-btn dm-row-del" data-trip-del="${escHtml(t.trip_id)}"
+                        title="Delete this trip">Delete</button>
             </td>
         </tr>`).join('');
 
@@ -2465,10 +2652,26 @@ function tripsPhasePill(t) {
     const map = {
         ACTIVE:      ['trip-pill-active', 'ACTIVE'],
         NOT_STARTED: ['trip-pill-future', 'NOT STARTED'],
+        // Past its scheduled end but the bus is still reporting and has
+        // not reached the terminus: late, not done.
+        OVERDUE:     ['trip-pill-overdue','OVERDUE'],
         FINISHED:    ['trip-pill-done',   'FINISHED']
     };
     const [cls, label] = map[t.phase] || ['dm-pill-inactive', '—'];
-    return `<span class="dm-pill ${cls}">${label}</span>`;
+    const pill = `<span class="dm-pill ${cls}">${label}</span>`;
+    return pill + tripsHealthPill(t);
+}
+
+/**
+ * Vehicle health, shown next to the phase. Only STALLED: "no signal" is
+ * already covered by the status column, and would otherwise appear twice.
+ * a trip can be OVERDUE *because* the bus is STALLED, and the pair says
+ * both what is happening and why. Nothing is drawn when all is well.
+ */
+function tripsHealthPill(t) {
+    if (t.health === 'STALLED')
+        return ' <span class="dm-pill trip-pill-stalled" title="Reporting, but has not moved for 10 minutes">STALLED</span>';
+    return '';
 }
 
 function tripsStatusPill(t) {
