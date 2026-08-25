@@ -59,6 +59,9 @@
         <div class="nav-item" data-pane="profile" data-tab="account">
             <span class="nav-icon">👤</span> <span data-i18n="nav_account">Account</span>
         </div>
+        <div class="nav-item" data-pane="profile" data-tab="about">
+            <span class="nav-icon">ℹ️</span> <span data-i18n="nav_about">About us</span>
+        </div>
     </nav>
 
     <!-- Quick logout, directly under the menu list (not a .nav-item: the pane router binds those) -->
@@ -323,6 +326,7 @@
                     <div class="profile-tab" data-ptab="payment" onclick="switchProfileTab('payment')" data-i18n="ptab_payment">Payment</div>
                     <div class="profile-tab" data-ptab="settings" onclick="switchProfileTab('settings')" data-i18n="ptab_settings">Preferences</div>
                 <div class="profile-tab" data-ptab="account" onclick="switchProfileTab('account')" data-i18n="ptab_account">Account</div>
+                    <div class="profile-tab" data-ptab="about" onclick="switchProfileTab('about')" data-i18n="ptab_about">About us</div>
                 </div>
 
                 <div class="ptab-pane active" id="ptab-history">
@@ -483,6 +487,57 @@
                             </div>
                             <button class="action-btn" onclick="confirmDeleteAccount()" style="width:auto;padding:8px 20px;flex-shrink:0;background:none;color:var(--red);border:1px solid #fecaca" data-i18n="delete_btn">Delete</button>
                         </div>
+                    </div>
+                </div>
+                <div class="ptab-pane" id="ptab-about">
+                    <p class="about-lead" data-i18n="about_lead">about_lead</p>
+                    <p class="about-lead" data-i18n="about_challenge">about_challenge</p>
+
+                    <span class="section-label" data-i18n="about_supervision">Scientific direction</span>
+                    <div class="about-people">
+                        <div class="about-person">
+                            <div class="about-person-name">Prof. Mario Molinara</div>
+                            <div class="about-person-role" data-i18n="about_molinara">about_molinara</div>
+                        </div>
+                        <div class="about-person">
+                            <div class="about-person-name">Prof. Mauro D&apos;Apuzzo</div>
+                            <div class="about-person-role" data-i18n="about_dapuzzo">about_dapuzzo</div>
+                        </div>
+                        <div class="about-person">
+                            <div class="about-person-name">Prof. Luigi Ferrigno</div>
+                            <div class="about-person-role" data-i18n="about_ferrigno">about_ferrigno</div>
+                        </div>
+                        <div class="about-person">
+                            <div class="about-person-name">Prof. Francesco Iacoviello</div>
+                            <div class="about-person-role" data-i18n="about_iacoviello">about_iacoviello</div>
+                        </div>
+                    </div>
+
+                    <span class="section-label" data-i18n="about_partners">Commissioning body and partners</span>
+                    <div class="about-people">
+                        <div class="about-person">
+                            <div class="about-person-name" data-i18n="about_comune_name">Municipality of Cassino</div>
+                            <div class="about-person-role" data-i18n="about_comune">about_comune</div>
+                        </div>
+                        <div class="about-person">
+                            <div class="about-person-name">Elerent</div>
+                            <div class="about-person-role" data-i18n="about_elerent">about_elerent</div>
+                        </div>
+                    </div>
+
+                    <span class="section-label" data-i18n="about_team">Development team</span>
+                    <div class="about-team">
+                        <span class="about-team-name">Massimiliano Carello</span>
+                        <span class="about-team-name">Giacomo Alberto Napolitano</span>
+                        <span class="about-team-name">Naoli Shiferaw Biru</span>
+                        <span class="about-team-name">Ferran Montero</span>
+                        <span class="about-team-name">Mar Gonz&aacute;lez Montesinos</span>
+                    </div>
+
+                    <div class="about-logos">
+                        <img src="loghi/unicas_emblem.svg" alt="Universit&agrave; degli Studi di Cassino e del Lazio Meridionale">
+                        <img src="loghi/comune_cassino.png" alt="Comune di Cassino">
+                        <img src="loghi/elerent.png" alt="Elerent">
                     </div>
                 </div>
 

@@ -2120,6 +2120,7 @@ window.addEventListener('load', () => {
 // ─────────────────────────────────────────────────────────────────
 document.getElementById('topBtnFleetMonitor').addEventListener('click', e => switchTopView('fleet-monitor', e.currentTarget));
 document.getElementById('topBtnAnalytics').addEventListener('click', e => switchTopView('analytics-view', e.currentTarget));
+document.getElementById('topBtnAbout').addEventListener('click', e => switchTopView('about-us', e.currentTarget));
 // NOTE: the second Data Management button (topBtnDataManagement -> the old
 // #data-management-view) was removed when the two rival panels were merged
 // into a single #data-management view. Its listener lives further down,
