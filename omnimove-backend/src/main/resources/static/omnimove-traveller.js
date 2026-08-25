@@ -460,9 +460,9 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 // ── Icons ─────────────────────────────────────────────────────────
 
 // "you are here" must never read as one more bus stop. Stops are green circles
-// carrying an M; this is a blue dot with a pulsing halo and no letter — different colour,
-// different shape, different behaviour. Styling lives in .me-* classes so the white ring
-// and dark outline keep it legible on light streets and on dark tiles alike.
+// carrying a bus pictogram; this is a blue dot with a pulsing halo and no glyph —
+// different colour, different shape, different behaviour. Styling lives in .me-* classes
+// so the white ring and dark outline keep it legible on light streets and on dark tiles alike.
 const userIcon = L.divIcon({
     html: '<div class="me-marker"><span class="me-halo"></span><span class="me-dot"></span></div>',
     className: 'me-icon',
@@ -492,9 +492,28 @@ let STOPS = {};  // popolato dinamicamente da loadStops()
 
 window._stopMarkers = [];
 
+// The circle used to carry an "M" — the initial of the company that ran the
+// network. It told a traveller nothing, and it named an operator that will never
+// use this app. A bus pictogram says "stop" instead, in no language at all.
+// Drawn with plain shapes and strokes, like the rest of the icons here, so it
+// stays crisp at 16px; styling lives in .stop-marker for the same reason the
+// "you are here" dot keeps its own class.
+const BUS_GLYPH =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"' +
+    ' stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+      '<rect x="4" y="3" width="16" height="13.5" rx="3"/>' +
+      '<path d="M4 10h16"/>' +
+      // Zero-length strokes with a round cap: two wheels, no extra geometry.
+      // They sit against the body rather than below it — a gap made the glyph
+      // read as a screen with two dots under it instead of a bus.
+      '<path d="M7.8 18h.01M16.2 18h.01" stroke-width="3.6" stroke-linecap="round"/>' +
+    '</svg>';
+
 const STOP_ICON = L.divIcon({
-    html: '<div style="background:#10b981;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-size:11px;font-weight:800">M</div>',
-    className: '', iconSize: [28, 28]
+    html: '<div class="stop-marker">' + BUS_GLYPH + '</div>',
+    // Not left to Leaflet: its default DivIcon class paints a white box behind
+    // the marker. iconAnchor stays unset so it keeps centring on the stop.
+    className: 'stop-icon', iconSize: [28, 28]
 });
 
 function renderStopMarkers() {
@@ -2028,12 +2047,8 @@ async function startJourney() {
         const { mode, label, greenIndex, distanceKm } = selectedJourney;
         const color = LINE_COLORS[mode] || '#0f172a';
 
-        // 5) Marker origine
-        const stopIcon = L.divIcon({
-            html: '<div style="background:#10b981;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.2);font-size:11px;font-weight:800">M</div>',
-            className: '', iconSize: [28, 28]
-        });
-        window._journeyOriginMarker = L.marker([origin.lat, origin.lon], { icon: stopIcon })
+        // 5) Marker origine — same icon as any other stop, defined once above
+        window._journeyOriginMarker = L.marker([origin.lat, origin.lon], { icon: STOP_ICON })
             .addTo(map)
             .bindPopup('<b>' + escHtml(origin.name) + '</b><br>' + t('lbl_starting_point'));
 

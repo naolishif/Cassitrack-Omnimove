@@ -2434,3 +2434,20 @@ body {
     .network-legend { max-width: 152px; padding: 7px 8px 8px; gap: 4px; }
     .nl-chip { font-size: 10px; padding: 3px 8px 3px 5px; }
 }
+
+/* ── Bus-stop marker ──
+   Styling lives here rather than inline on the divIcon, matching the "you are
+   here" dot next to it: the ring and the shadow are what keep a green circle
+   legible over both pale streets and the line colours drawn underneath. */
+.stop-marker {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--primary, #10b981);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #fff;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.28);
+}
+.stop-marker svg { display: block; }

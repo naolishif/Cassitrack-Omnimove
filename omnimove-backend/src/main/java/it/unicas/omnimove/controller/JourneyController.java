@@ -471,6 +471,37 @@ public class JourneyController {
             result.add(entry);
         });
 
+        // Route ids sort as text, so the shapes arrived in the order LINEA_08,
+        // LINEA_1, LINEA_10, LINEA_11I… and the map legend listed 08, 18, 10,
+        // 12, 11. Sorting here rather than in the client keeps every consumer
+        // of this endpoint in the same, obvious order.
+        result.sort((a, b) -> compareLineLabel((String) a.get("short_name"),
+                                               (String) b.get("short_name")));
+
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Orders line labels the way a timetable does: numbers first and in
+     * numeric order, so 9 comes before 10 and "09" sits with "9"; anything
+     * non-numeric (a lettered code such as "AGR") after them, alphabetically.
+     *
+     * Length-then-text rather than parsing an int: short_name is VARCHAR(20),
+     * and twenty digits overflow every integer type Java has.
+     */
+    private static int compareLineLabel(String a, String b) {
+        String x = a == null ? "" : a.trim();
+        String y = b == null ? "" : b.trim();
+        boolean nx = !x.isEmpty() && x.chars().allMatch(Character::isDigit);
+        boolean ny = !y.isEmpty() && y.chars().allMatch(Character::isDigit);
+        if (nx != ny) return nx ? -1 : 1;
+        if (nx) {
+            String sx = x.replaceFirst("^0+(?=.)", "");
+            String sy = y.replaceFirst("^0+(?=.)", "");
+            if (sx.length() != sy.length()) return Integer.compare(sx.length(), sy.length());
+            int c = sx.compareTo(sy);
+            if (c != 0) return c;
+        }
+        return x.compareToIgnoreCase(y);
     }
 }
