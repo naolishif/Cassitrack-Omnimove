@@ -32,9 +32,14 @@ function syncSearchBtn() {
 }
 syncSearchBtn();
 
-const _name = _user.name || _user.username || 'there';
-document.getElementById('aiGreeting').textContent =
-    `👋 Hi ${_name}! I'm OmniAI. I can help you find the best route, check real-time delays, or suggest eco-friendly alternatives. What do you need?`;
+// Named and anonymous are separate strings: "Ciao there" is what you get from dropping a
+// placeholder name into a sentence only ever written for English.
+function renderAiGreeting() {
+    const name = _user.name || _user.username;
+    document.getElementById('aiGreeting').textContent =
+        name ? tf('ai_greeting', { name }) : t('ai_greeting_anon');
+}
+renderAiGreeting();
 
 const API_BASE = '/omnimove/api/v1';
 
@@ -45,7 +50,7 @@ async function loadEcoStats() {
         const s = await r.json();
 
         document.getElementById('sidebarEcoPoints').textContent = s.ecoPoints.toLocaleString() + ' pts';
-        document.getElementById('sidebarEcoSub').textContent = `🌱 ${s.co2SavedKg} kg CO₂ saved this month`;
+        document.getElementById('sidebarEcoSub').textContent = tf('eco_saved_month', { kg: s.co2SavedKg });
 
         document.getElementById('statEcoPoints').textContent = s.ecoPoints.toLocaleString();
         document.getElementById('statCo2Saved').textContent  = s.co2SavedKg + ' kg';
@@ -126,10 +131,10 @@ async function savePreferences() {
         });
         activeSort = sortVal;
 
-        showToast('✅ Preferences saved!');
+        showToast(t('toast_prefs_saved'));
     } catch (e) {
         console.warn('Could not save preferences:', e);
-        showToast('Errore nel salvataggio preferenze', true);
+        showToast(t('toast_prefs_error'), true);
     }
 }
 
@@ -163,7 +168,7 @@ function renderHistory(items) {
         const [iconClass, emoji] = MODE_ICON[j.mode] || ['ri-bus', '🚌'];
         const { date, sub } = timeAgoLabel(j.createdAt);
         const cost = (j.costEuros ?? 0).toFixed(2);
-        const origin = j.originName || 'My Location';
+        const origin = j.originName || t('my_location');
         const dest = j.destName || '—';
 
         return `
@@ -236,6 +241,14 @@ loadPreferences();
 
 // Re-render dynamic content when language switches
 window._onLangChange = () => {
+    renderAiGreeting();
+    // "My Location" is a label, not the value — dataset.id is what identifies the field,
+    // so the text has to be re-rendered in the new language
+    ['originSelect', 'destSelect'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.dataset.id === 'GPS') el.value = t('my_location');
+    });
+    loadEcoStats();
     loadHistory();
     loadFavorites();
     updateWeatherPill();
@@ -611,12 +624,12 @@ async function drawBusRoute(routeId, shortName, color, routeDir = '') {
             apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/shape'),
             apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/stops')
         ]);
-        if (!shapeRes.ok) { showToast('Route shape not available', true); clearBusRoute(); return; }
+        if (!shapeRes.ok) { showToast(t('toast_shape_unavailable'), true); clearBusRoute(); return; }
 
         const points   = await shapeRes.json();   // [[lat, lon, isStop], ...]
         const stopList = stopsRes.ok ? await stopsRes.json() : [];
 
-        if (!points.length) { showToast('No shape data for this route', true); clearBusRoute(); return; }
+        if (!points.length) { showToast(t('toast_shape_empty'), true); clearBusRoute(); return; }
 
         // Draw polyline
         const line = L.polyline(points.map(p => [p[0], p[1]]), { color, weight: 4, opacity: 0.88 }).addTo(map);
@@ -666,7 +679,7 @@ async function drawBusRoute(routeId, shortName, color, routeDir = '') {
         showStopListPanel(shortName, color, stopList, points, routeDir, false);
 
     } catch(e) {
-        showToast('Could not load route shape', true);
+        showToast(t('toast_shape_error'), true);
         clearBusRoute();
     }
 }
@@ -814,14 +827,14 @@ function delayLine(a) {
     if (!a.departed) return '';                       // non partito: solo orario
     const m = a.delay_minutes;
     if (a.real_time) {
-        if (m == null)  return `<span class="delay-chip d-live d-unknown">Live</span>`;
-        if (m <= 0)     return `<span class="delay-chip d-live d-ontime">On time (live)</span>`;
-        return `<span class="delay-chip d-live d-late">${m} min late (live)</span>`;
+        if (m == null)  return `<span class="delay-chip d-live d-unknown">${t('delay_live')}</span>`;
+        if (m <= 0)     return `<span class="delay-chip d-live d-ontime">${t('delay_ontime_live')}</span>`;
+        return `<span class="delay-chip d-live d-late">${tf('delay_late_live', { m })}</span>`;
     }
     if (m == null) return '';                          // partito ma nessun arrivo misurato
-    const at = a.delay_stop_name ? ` at ${escHtml(a.delay_stop_name)}` : '';
-    if (m <= 0)   return `<span class="delay-chip d-hist d-ontime">Was on time${at}</span>`;
-    return `<span class="delay-chip d-hist d-late">Was ${m} min late${at}</span>`;
+    const at = a.delay_stop_name ? tf('delay_at_stop', { stop: escHtml(a.delay_stop_name) }) : '';
+    if (m <= 0)   return `<span class="delay-chip d-hist d-ontime">${t('delay_was_ontime')}${at}</span>`;
+    return `<span class="delay-chip d-hist d-late">${tf('delay_was_late', { m })}${at}</span>`;
 }
 
 // Deterministic color per route short-name (consistent across renders)
@@ -876,7 +889,7 @@ function renderArrivals(list, arrivals) {
         // Delay note on first arrival only (if live and delayed)
         let delayHtml = '';
         if (isLive && first.delay_minutes != null && first.delay_minutes > 0) {
-            delayHtml = `<span class="tmb-delay">${first.delay_minutes} min late</span>`;
+            delayHtml = `<span class="tmb-delay">${tf('delay_late', { m: first.delay_minutes })}</span>`;
         }
 
         // Crowding on first arrival
@@ -935,7 +948,7 @@ async function loadStops() {
         if (bounds.length) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 });
     } catch (e) {
         console.error('loadStops failed:', e);
-        showToast('Impossibile caricare le fermate dal backend', true);
+        showToast(t('toast_stops_error'), true);
     }
 }
 
@@ -961,13 +974,13 @@ function tryGetGPS() {
                 userLat = pos.coords.latitude;
                 userLon = pos.coords.longitude;
                 placeUserMarker(userLat, userLon);
-                resolve({ name: 'My Location', lat: userLat, lon: userLon, isGPS: true });
+                resolve({ name: t('my_location'), lat: userLat, lon: userLon, isGPS: true });
             },
             err => {
                 // Friendly fallback so the demo still works
                 userLat = 41.5020; userLon = 13.8200;
                 placeUserMarker(userLat, userLon);
-                resolve({ name: 'Via Folcara (approx)', lat: userLat, lon: userLon, isGPS: true });
+                resolve({ name: t('approx_location'), lat: userLat, lon: userLon, isGPS: true });
             },
             { timeout: 8000, maximumAge: 60000 }
         );
@@ -980,9 +993,9 @@ function tryGetGPS() {
 function swapStops() {
     const o = document.getElementById('originSelect');
     const d = document.getElementById('destSelect');
-    const ov = o.value, oid = o.dataset.id;
-    o.value = d.value; o.dataset.id = d.dataset.id;
-    d.value = ov;      d.dataset.id = oid;
+    const ov = o.value, oid = o.dataset.id || '';
+    o.value = d.value; _acSetId(o, d.dataset.id || '');
+    d.value = ov;      _acSetId(d, oid);
 }
 
 function getOrigin() {
@@ -992,7 +1005,20 @@ function getOrigin() {
     if (!el.value.trim() || !val || val === 'GPS') {
         setStop(el, 'GPS');          // show "My Location" in the field, don't leave it empty
         if (!userLat) return null;   // null → doSearch will request GPS
-        return { name: 'My Location', lat: userLat, lon: userLon, isGPS: true };
+        return { name: t('my_location'), lat: userLat, lon: userLon, isGPS: true };
+    }
+    return { ...STOPS[val], isGPS: false };
+}
+
+// Mirrors getOrigin(), minus the "empty means where I am" default: an unset destination is
+// an error, not a shortcut. GPS is a valid destination now — riding to the stop nearest to
+// where you are is an ordinary trip, and doSearch fills in the position when it is missing.
+function getDest() {
+    const el  = document.getElementById('destSelect');
+    const val = el.dataset.id;
+    if (val === 'GPS') {
+        if (!userLat) return null;   // null → doSearch will request GPS
+        return { name: t('my_location'), lat: userLat, lon: userLon, isGPS: true };
     }
     return { ...STOPS[val], isGPS: false };
 }
@@ -1044,28 +1070,56 @@ function sortOptions(options) {
 // ── Search ────────────────────────────────────────────────────────
 async function doSearch() {
     _acHide();   // close the suggestion list on search
-    const destId = document.getElementById('destSelect').dataset.id;
-    const dest   = STOPS[destId];
+    const originEl = document.getElementById('originSelect');
+    const destEl   = document.getElementById('destSelect');
+    const destId   = destEl.dataset.id;
 
     // The fields start empty now, so a destination is no longer guaranteed. An empty
     // origin is fine — getOrigin() reads it as "where I am" and asks for GPS.
-    if (!dest) {
+    if (!destId || (destId !== 'GPS' && !STOPS[destId])) {
         showToast(t('pick_dest'), true);
-        document.getElementById('destSelect').focus();
+        destEl.focus();
+        return;
+    }
+    // Travelling *to* your own position needs a real starting point: the "empty origin
+    // means where I am" default would otherwise plan a trip from here to here.
+    if (destId === 'GPS' && !originEl.dataset.id) {
+        showToast(t('pick_origin'), true);
+        originEl.focus();
+        return;
+    }
+    // Caught before the position is requested: asking the traveller for a GPS fix only to
+    // tell them the two ends are the same place is a permission prompt for nothing.
+    if (destId === 'GPS' && originEl.dataset.id === 'GPS') {
+        showToast(t('toast_same_stops'), true);
         return;
     }
 
     let origin = getOrigin();
+    let dest   = getDest();
 
-    if (!origin) {
-        showToast('📡 Getting your location...', false);
-        try { origin = await tryGetGPS(); }
-        catch (e) { showToast('GPS unavailable — select a stop as origin', true); return; }
+    // Either end can be "my location" now, and one position fix serves both.
+    if (!origin || !dest) {
+        showToast(t('toast_locating'), false);
+        let pos;
+        try { pos = await tryGetGPS(); }
+        catch (e) {
+            showToast(!dest ? t('toast_gps_dest_fail') : t('toast_gps_origin_fail'), true);
+            return;
+        }
+        if (!origin) origin = pos;
+        if (!dest)   dest   = pos;
     }
 
     if (origin.name === dest.name) {
-        showToast('Origin and destination cannot be the same', true); return;
+        showToast(t('toast_same_stops'), true); return;
     }
+
+    // A search is a fresh start. A detail sheet left open — or a journey still running
+    // because End Journey was never tapped — belongs to the previous origin/destination
+    // pair: the sheet is an opaque overlay on the sidebar, so the new results rendered
+    // underneath stayed invisible and Search looked dead. Tear it down exactly like ✕ does.
+    clearJourneySelection();
 
     // Switch to map pane
     document.querySelectorAll('.sidebar-nav .nav-item').forEach(n => n.classList.remove('active'));
@@ -1083,8 +1137,10 @@ async function doSearch() {
     try {
         const payload = {
             origin_lat: origin.lat, origin_lon: origin.lon, origin_name: origin.name, origin_is_gps: origin.isGPS === true,
-            dest_lat:   dest.lat,   dest_lon:   dest.lon,   dest_name:   dest.name,
-            user_id: _user.id, dest_stop_id: dest.id, origin_stop_id: origin.isGPS ? null : origin.id,
+            dest_lat:   dest.lat,   dest_lon:   dest.lon,   dest_name:   dest.name, dest_is_gps: dest.isGPS === true,
+            user_id: _user.id,
+            dest_stop_id:   dest.isGPS   ? null : dest.id,
+            origin_stop_id: origin.isGPS ? null : origin.id,
             lang: getLang()
         };
         // Only constrain modes when the traveler picked specific ones via the chips.
@@ -1291,7 +1347,7 @@ function showRoutePreview(mode, legs) {
             fetchAndRenderBusMarkers();
             window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
         } else {
-            showStaleNotice(t('live_buses_future') || '🕐 Live positions not shown for future trips');
+            showStaleNotice(t('live_buses_future'));
         }
     } else {
         window._previewLayers.push(
@@ -1374,22 +1430,48 @@ function _openRouteDetail(mode, label, greenIndex, distanceMetres, costEuros) {
     document.getElementById('routeDetailSheet').classList.add('open');
 }
 
-function closeRouteDetail() {
-    document.getElementById('routeDetailSheet').classList.remove('open');
+// Everything that belongs to "a route is currently picked": the detail sheet, the card
+// highlight, the map layers, and the timers of a journey already under way. Closing the
+// sheet with ✕, ending a journey and starting a new search all need exactly this, so the
+// teardown lives in one place instead of being copied — and drifting — in three.
+function clearJourneySelection() {
+    const sheet = document.getElementById('routeDetailSheet');
+    if (sheet) sheet.classList.remove('open');
+
     // De-select all route cards
     document.querySelectorAll('.route-card').forEach(c => {
         c.style.border = '1px solid var(--border-mid)';
         c.style.opacity = '1';
     });
-    // Stop live bus polling and clear real-time bus markers
-    clearInterval(window._busPollInterval);
-    window._busPollInterval = null;
-    clearBusMarkers();
-    // Clear map preview and restore bus stop markers
-    (window._previewLayers || []).forEach(l => map.removeLayer(l));
-    window._previewLayers = [];
+
+    // The button stays disabled while a start is in flight; re-arm it for the next pick
+    const rdBtn = document.getElementById('rdStartBtn');
+    if (rdBtn) { rdBtn.disabled = false; rdBtn.textContent = t('btn_start_journey'); }
+
+    // Live ETA countdown, bus polling, bus markers and the dashed preview
+    clearInterval(window._etaInterval);
+    window._etaInterval = null;
+    clearRoutePreview();
+
+    // Solid journey layers drawn by startJourney
+    ['_routeLine','_routeLineGps','_journeyDestMarker','_journeyOriginMarker','_journeyGpsMarker']
+        .forEach(k => { if (window[k]) { map.removeLayer(window[k]); window[k] = null; } });
+    if (window._busRouteLines) {
+        window._busRouteLines.forEach(l => map.removeLayer(l));
+        window._busRouteLines = [];
+    }
+
+    // Restore bus-stop markers
     if (window._stopMarkers) window._stopMarkers.forEach(m => m.addTo(map));
+
     selectedJourney = null;
+    // Left true by a successful start: without this reset, Start Journey on the next pick
+    // returned immediately and nothing happened.
+    window._journeyStarting = false;
+}
+
+function closeRouteDetail() {
+    clearJourneySelection();
 }
 
 function startJourneyFromDetail() {
@@ -1403,7 +1485,7 @@ function fmtD(m) { return m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(1) 
 
 // ── Route label: "3 → Dest" or "3 → Dest + 1 → Dest2" → circles ──
 function fmtRouteLabel(instruction, circleStyle) {
-    if (!instruction) return 'Bus';
+    if (!instruction) return t('lbl_bus');
     // Transfer labels contain " + " separating each leg label — stack vertically
     if (instruction.includes(' + ')) {
         return instruction.split(' + ')
@@ -1448,7 +1530,7 @@ function buildTimeline(legs, totalMin, greenIdx) {
         const isLast = i === legs.length - 1;
         const col = C[leg.mode] || '#94a3b8';
         const names = leg.stop_names || [];
-        const isTransfer = leg.mode === 'WAIT' && leg.instruction && leg.instruction.toLowerCase().includes('change at');
+        const isTransfer = leg.mode === 'WAIT' && leg.transfer === true;
 
         if (leg.mode === 'WALK') {
             // ── WALK row ──────────────────────────────────────────────
@@ -1461,7 +1543,7 @@ function buildTimeline(legs, totalMin, greenIdx) {
                 ${!isLast ? `<div class="tl-line" style="background:${col}33"></div>` : ''}
               </div>
               <div class="tl-body">
-                ${_stopRow(leg.from || 'Start', walkDepMs)}
+                ${_stopRow(leg.from || t('lbl_start'), walkDepMs)}
                 <div class="tl-meta">
                   <span class="tl-badge" style="background:${col}18;color:${col}">🚶 ${t('walk')} · ${leg.duration_minutes || 0} min</span>
                   ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
@@ -1483,7 +1565,7 @@ function buildTimeline(legs, totalMin, greenIdx) {
                 <div class="tl-transfer-badge">
                   <span style="font-size:14px">🔄</span>
                   <div style="flex:1">
-                    <div style="font-size:12px;font-weight:700;color:#ef4444">${leg.instruction || 'Change bus'}</div>
+                    <div style="font-size:12px;font-weight:700;color:#ef4444">${_transferLabel(leg)}</div>
                     <div style="font-size:11px;color:#64748b">${leg.duration_minutes || 0} ${t('min_wait')} · ${t('next_bus')} ${_fmtTime(_runMs)}</div>
                   </div>
                 </div>
@@ -1562,6 +1644,16 @@ function buildTimeline(legs, totalMin, greenIdx) {
     return html;
 }
 
+// The change-of-bus sentence: the stop and the line come from the server as data, the
+// wording from the traveller's language.
+function _transferLabel(leg) {
+    const line = leg.transfer_line;
+    const stop = leg.from;
+    if (!line || !stop) return t('transfer_generic');
+    // The template is ours; only the stop and line, which come from the database, are escaped
+    return tf('transfer_change_at', { stop: escHtml(stop), line: escHtml(line) });
+}
+
 // ── non-BUS modes: single-leg vertical timeline (Option A) ──────────
 function buildSingleLegTimeline(mode, legs, distKm, co2g) {
     const COLORS = { WALK:'#6366f1', BIKE:'#3b82f6', SCOOTER:'#7c3aed' };
@@ -1574,8 +1666,8 @@ function buildSingleLegTimeline(mode, legs, distKm, co2g) {
 
     // Prefer leg from/to if available, fall back to selectedJourney label
     const leg    = (legs && legs.length > 0) ? legs[0] : null;
-    const from   = leg?.from || 'Start';
-    const to     = leg?.to   || 'Destination';
+    const from   = leg?.from || t('lbl_start');
+    const to     = leg?.to   || t('lbl_destination');
     const dist   = leg?.distance_metres ? fmtD(leg.distance_metres) : `${distKm.toFixed(1)} km`;
     const co2    = co2g > 0 ? `${Math.round(co2g)} g CO₂` : '0 g CO₂';
     const durMin = leg?.duration_minutes;
@@ -1688,7 +1780,7 @@ async function startJourney() {
         });
         window._journeyOriginMarker = L.marker([origin.lat, origin.lon], { icon: stopIcon })
             .addTo(map)
-            .bindPopup('<b>' + origin.name + '</b><br>Starting point');
+            .bindPopup('<b>' + escHtml(origin.name) + '</b><br>' + t('lbl_starting_point'));
 
         // 6) Linea GPS→fermata solo se origine = My Location
         if (gpsPos && origin.isGPS) {
@@ -1809,11 +1901,11 @@ async function startJourney() {
                 if (el) el.textContent = remaining + ' min';
             } else {
                 clearInterval(window._etaInterval);
-                showToast('🎉 You have arrived!');
+                showToast(t('toast_arrived'));
             }
         }, 60000);
 
-        showToast(`Journey started! ${durationMin} min to destination`);
+        showToast(tf('toast_journey_started', { min: durationMin }));
 
         // 11) Live bus markers — polling already started in showRoutePreview.
         //     Restart here only if somehow not running (e.g. Start Journey without preview).
@@ -1835,7 +1927,7 @@ async function startJourney() {
 
     } catch (err) {
         console.error('startJourney failed:', err);
-        showToast('⚠️ Impossibile avviare il percorso', true);
+        showToast(t('toast_journey_start_fail'), true);
         window._journeyStarting = false;
         if (_startBtn) { _startBtn.disabled = false; _startBtn.textContent = 'Start Journey'; }
     }
@@ -1922,11 +2014,11 @@ function renderBusMarkers(vehicles) {
 
         const delayTxt = best.delay_minutes == null
             ? t('delay_unknown')
-            : best.delay_minutes <= 0 ? t('on_time') : `${best.delay_minutes} min late`;
-        const popup = `<b>🚌 ${best.vehicle_id || '—'}</b><br>`
-            + `Route: ${best.route_name || best.route_id || '—'}<br>`
-            + `${delayTxt}<br>`
-            + `${t('next_stop')}: ${best.next_stop_name || '—'}`;
+            : best.delay_minutes <= 0 ? t('on_time') : tf('delay_late', { m: best.delay_minutes });
+        const popup = `<b>🚌 ${escHtml(best.vehicle_id || '—')}</b><br>`
+            + `${t('lbl_route')}: ${escHtml(best.route_name || best.route_id || '—')}<br>`
+            + `${escHtml(delayTxt)}<br>`
+            + `${t('next_stop')}: ${escHtml(best.next_stop_name || '—')}`;
 
         const icon = L.divIcon({
             html: makeBusMarkerHtml(leg.color),
@@ -1946,7 +2038,7 @@ function showStaleNotice(msg) {
         'padding:8px 14px;font-size:12px;font-weight:600;z-index:1000',
         'display:flex;align-items:center;gap:8px;white-space:nowrap;pointer-events:auto'
     ].join(';');
-    const text = msg || '⚠️ Live bus data unavailable — positions may be outdated';
+    const text = msg || t('stale_bus_data');
     el.innerHTML = text + ' <span onclick="this.parentElement.remove()" style="cursor:pointer;opacity:0.7;margin-left:4px">✕</span>';
     const mapEl = document.getElementById('map');
     if (mapEl) mapEl.appendChild(el);
@@ -1986,30 +2078,10 @@ async function fetchAndRenderBusMarkers() {
 }
 
 function endJourney() {
-    clearInterval(window._etaInterval);
-    clearInterval(window._busPollInterval);
-    window._busPollInterval = null;
-    clearBusMarkers();
-    clearRoutePreview();
-    window._activeBusRouteIds = [];
-    selectedJourney = null;
-    window._journeyStarting = false;
-    const _rdBtn = document.getElementById('rdStartBtn');
-    if (_rdBtn) { _rdBtn.disabled = false; _rdBtn.textContent = t('btn_start_journey'); }
+    clearJourneySelection();
 
-    // Remove all journey map layers
-    ['_routeLine','_routeLineGps','_journeyDestMarker','_journeyOriginMarker','_journeyGpsMarker']
-        .forEach(k => { if (window[k]) { map.removeLayer(window[k]); window[k] = null; } });
-
-    if (window._busRouteLines) {
-        window._busRouteLines.forEach(l => map.removeLayer(l));
-        window._busRouteLines = [];
-    }
     // Keep the live GPS dot if we have a real position
     if (userLat) placeUserMarker(userLat, userLon);
-
-    // Restore bus-stop markers
-    if (window._stopMarkers) window._stopMarkers.forEach(m => m.addTo(map));
 
     map.setView([41.4901, 13.8303], 15);
 
@@ -2026,7 +2098,7 @@ function endJourney() {
             + '</div>';
     }
 
-    if (!window.matchMedia('(max-width: 768px)').matches) showToast('🏁 Journey ended — great trip!');
+    if (!window.matchMedia('(max-width: 768px)').matches) showToast(t('toast_journey_ended'));
     loadEcoStats();
 }
 
@@ -2115,7 +2187,7 @@ async function toggleFav(star, mode, originName, destName) {
         }
     } catch (e) {
         console.warn('Could not toggle favourite:', e);
-        showToast('Errore nel salvare il preferito', true);
+        showToast(t('toast_fav_error'), true);
     }
 }
 
@@ -2129,6 +2201,26 @@ function closeAI(e) {
         document.getElementById('aiOverlay').classList.remove('open');
     }
 }
+
+// ── Eco Score explainer ────────────────────────────────────────────
+// Opened by the small "i" on the eco card; explains the GreenIndexService formula.
+function openEcoInfo() {
+    const modal = document.getElementById('ecoInfoModal');
+    modal.classList.add('open');
+    modal.querySelector('.eco-modal-body').scrollTop = 0;
+    modal.querySelector('.eco-modal-ok').focus();
+}
+
+function closeEcoInfo(e) {
+    // Backdrop clicks close, clicks inside the card do not
+    if (!e || e.target === document.getElementById('ecoInfoModal')) {
+        document.getElementById('ecoInfoModal').classList.remove('open');
+    }
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeEcoInfo();
+});
 
 // Every logout entry point (sidebar list, drawer arrow, Profile > Settings) goes through here
 function confirmLogout() {
@@ -2217,12 +2309,12 @@ async function sendAI(presetText) {
             method: 'POST',
             body: JSON.stringify({
                 message: text,
-                language: 'it',
+                language: getLang(),
                 history: aiHistory.slice(-AI_HISTORY_LIMIT)
             })
         });
         const data = await r.json();
-        const answer = data.answer || 'Risposta non disponibile.';
+        const answer = data.answer || t('ai_no_answer');
         waitMsg.textContent = answer;
 
         // Save exchange to memory
@@ -2234,7 +2326,7 @@ async function sendAI(presetText) {
             renderSuggestions(data.suggestions);
         }
     } catch (e) {
-        waitMsg.textContent = 'Errore di connessione al backend. Verifica che OMNIMOVE sia avviato.';
+        waitMsg.textContent = t('ai_conn_error');
     } finally {
         aiThinking = false;
         msgs.scrollTop = msgs.scrollHeight;
@@ -2410,40 +2502,73 @@ if (window.matchMedia('(max-width: 768px)').matches) {
 // ── Step 24: typable search with autocomplete suggestions ──────────
 function setStop(el, id) {
     if (!el) return;
-    if (id === 'GPS') { el.value = 'My Location'; el.dataset.id = 'GPS'; return; }
+    if (id === 'GPS') { el.value = t('my_location'); _acSetId(el, 'GPS'); return; }
     const s = STOPS[id];
     if (s) { el.value = s.name; el.dataset.id = id; }
 }
 
 let _acFor = null;
+let _acIndex = -1;   // keyboard-highlighted row, -1 = none
+
+function _acSetId(el, id) {
+    if (id) el.dataset.id = id; else delete el.dataset.id;
+}
+
+// The field's real value is dataset.id — the text is just a label. Typing therefore has to
+// invalidate whatever was picked before: without this, editing "Cassino Stazione" down to
+// "zzz" left the old id in place and Search quietly planned the journey to the stop the
+// traveller had just deleted. A name typed in full still counts as a choice.
+function _acSyncId(inputEl) {
+    const v = (inputEl.value || '').trim().toLowerCase();
+    if (!v) { _acSetId(inputEl, ''); return; }
+    if (v === t('my_location').toLowerCase()) { _acSetId(inputEl, 'GPS'); return; }
+    const hit = Object.values(STOPS).find(s => (s.name || '').toLowerCase() === v);
+    _acSetId(inputEl, hit ? hit.id : '');
+}
 
 // Generous cap: the list is scrollable, so the limit is only there to keep the DOM
 // bounded if the network ever grows well beyond today's 20 stops
 const AC_MAX_ITEMS = 50;
 
+// One rule for every keystroke: a stop matches when its name contains the query, and
+// prefix matches are listed first. The old "contains" fallback only ran when nothing at
+// all started with the query, so a stop you could see a moment ago disappeared as soon as
+// an unrelated one happened to start with the same letters.
 function _acItems(inputEl, q) {
     q = (q || '').trim().toLowerCase();
-    const out = [];
-    if (inputEl.id === 'originSelect') {
-        if (!q || 'my location'.indexOf(q) === 0) out.push({ id: 'GPS', name: 'My Location' });
-    }
-    Object.values(STOPS).forEach(s => {
-        const n = (s.name || '').toLowerCase();
-        if (!q || n.startsWith(q)) out.push({ id: s.id, name: s.name });
-    });
-    // fall back to "contains" if nothing starts with the query
-    if (q && out.length === 0) {
-        Object.values(STOPS).forEach(s => {
-            if ((s.name || '').toLowerCase().includes(q)) out.push({ id: s.id, name: s.name });
-        });
-    }
-    return out.slice(0, AC_MAX_ITEMS);
+    const starts = [], contains = [];
+    const consider = (id, name) => {
+        const n = (name || '').toLowerCase();
+        if (!q || n.startsWith(q)) starts.push({ id, name });
+        else if (n.includes(q)) contains.push({ id, name });
+    };
+    consider('GPS', t('my_location'));   // offered on both ends: you can travel to where you are too
+    Object.values(STOPS).forEach(s => consider(s.id, s.name));
+    return starts.concat(contains).slice(0, AC_MAX_ITEMS);
 }
 
-// showAll ignores what is already in the field. The two inputs come pre-filled with the
-// first two stops, so filtering on their own value would answer a click with a list of
-// exactly one item — the stop you are trying to change. Clicking means "let me pick",
-// so it opens the full list; typing narrows it down from there.
+// Opening the list on the whole catalogue only makes sense in two cases: an empty field,
+// and a field still showing the stop picked last time — there, filtering on its own value
+// would answer a click with a list of exactly one item, the very stop you want to change.
+// Any other content is something the traveller typed, and it has to keep filtering.
+function _acShowAllFor(inputEl) {
+    const v = (inputEl.value || '').trim();
+    if (!v) return true;
+    const id = inputEl.dataset.id;
+    if (!id) return false;
+    const picked = id === 'GPS' ? t('my_location') : (STOPS[id] || {}).name;
+    return !!picked && picked.toLowerCase() === v.toLowerCase();
+}
+
+function _acPosition(inputEl) {
+    const acList = document.getElementById('acList');
+    if (!acList || !inputEl) return;
+    const r = inputEl.getBoundingClientRect();
+    acList.style.left = r.left + 'px';
+    acList.style.top = (r.bottom + 4) + 'px';
+    acList.style.width = r.width + 'px';
+}
+
 function _acShow(inputEl, showAll) {
     const acList = document.getElementById('acList');
     if (!acList) return;
@@ -2452,10 +2577,8 @@ function _acShow(inputEl, showAll) {
     if (!items.length) { acList.style.display = 'none'; return; }
     acList.innerHTML = items.map(it =>
         `<div class="ac-item" data-id="${escAttr(it.id)}">${escHtml(it.name)}</div>`).join('');
-    const r = inputEl.getBoundingClientRect();
-    acList.style.left = r.left + 'px';
-    acList.style.top = (r.bottom + 4) + 'px';
-    acList.style.width = r.width + 'px';
+    _acIndex = -1;              // the rows were just rebuilt, nothing is highlighted
+    _acPosition(inputEl);
     acList.style.display = 'block';
 }
 
@@ -2463,6 +2586,37 @@ function _acHide() {
     const acList = document.getElementById('acList');
     if (acList) acList.style.display = 'none';
     _acFor = null;
+    _acIndex = -1;
+}
+
+function _acIsOpen() {
+    const acList = document.getElementById('acList');
+    return !!acList && acList.style.display === 'block';
+}
+
+// Wraps around, so ArrowUp on a freshly opened list lands on the last stop
+function _acHighlight(i) {
+    const acList = document.getElementById('acList');
+    if (!acList) return;
+    const items = acList.querySelectorAll('.ac-item');
+    if (!items.length) return;
+    _acIndex = (i % items.length + items.length) % items.length;
+    items.forEach((el, n) => el.classList.toggle('ac-active', n === _acIndex));
+    items[_acIndex].scrollIntoView({ block: 'nearest' });
+}
+
+// Committing a choice is the same job whether it came from a tap or from Enter, so both
+// go through here — the mouse path used to be the only way to ever set dataset.id.
+function _acPick(target, id) {
+    if (id === 'GPS') {
+        setStop(target, 'GPS');
+        showToast(t('toast_locating'));
+        tryGetGPS().then(pos => { showToast(t('toast_located')); map.setView([pos.lat, pos.lon], 16); })
+                   .catch(() => showToast(t('toast_gps_pick_stop'), true));
+    } else {
+        setStop(target, id);
+    }
+    _acHide();
 }
 
 function initAutocomplete() {
@@ -2471,31 +2625,67 @@ function initAutocomplete() {
     ['originSelect', 'destSelect'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.addEventListener('focus', () => { el.select(); _acShow(el, true); });
+        el.addEventListener('focus', () => {
+            const showAll = _acShowAllFor(el);
+            // Select the text only when it is a stop already chosen, where typing means
+            // "replace this". Selecting a half-typed query would let the next keystroke
+            // wipe the filter the traveller was in the middle of writing.
+            if (showAll) el.select();
+            _acShow(el, showAll);
+        });
         // A click on an already-focused field fires no focus event — without this, closing
-        // the list and clicking again would leave you stuck with no way to reopen it
-        el.addEventListener('click', () => _acShow(el, true));
-        el.addEventListener('input', () => _acShow(el));
+        // the list and clicking again would leave you stuck with no way to reopen it. It
+        // reopens on whatever the field holds right now, so clicking to fix a typo or move
+        // the caret no longer throws away the filter you had just typed.
+        el.addEventListener('click', () => _acShow(el, _acShowAllFor(el)));
+        el.addEventListener('input', () => { _acSyncId(el); _acShow(el); });
         el.addEventListener('blur', () => setTimeout(_acHide, 150));
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();                       // don't jump the caret around
+                const step = e.key === 'ArrowDown' ? 1 : -1;
+                if (!_acIsOpen()) _acShow(el, _acShowAllFor(el));
+                // Starting from "nothing highlighted", Down opens on the first row and Up
+                // wraps to the last one
+                _acHighlight(_acIndex < 0 ? (step === 1 ? 0 : -1) : _acIndex + step);
+                return;
+            }
+            if (e.key === 'Escape') {
+                if (_acIsOpen()) { e.preventDefault(); _acHide(); }
+                return;
+            }
+            if (e.key === 'Enter') {
+                if (!_acIsOpen()) return;                 // nothing to commit, let Search run
+                const items = acList.querySelectorAll('.ac-item');
+                // With nothing highlighted, Enter still commits when the query left exactly
+                // one candidate — typing a name in full and pressing Enter is the common case.
+                const item = _acIndex >= 0 ? items[_acIndex] : (items.length === 1 ? items[0] : null);
+                if (!item) return;
+                e.preventDefault();
+                _acPick(el, item.dataset.id);
+            }
+        });
     });
     acList.addEventListener('mousedown', (e) => {
         const item = e.target.closest('.ac-item');
         if (!item || !_acFor) return;
         e.preventDefault();
-        const id = item.dataset.id;
-        const target = _acFor;
-        if (id === 'GPS') {
-            setStop(target, 'GPS');
-            showToast('📡 Getting your location...');
-            tryGetGPS().then(pos => { showToast('📍 Location detected!'); map.setView([pos.lat, pos.lon], 16); })
-                       .catch(() => showToast('GPS unavailable — pick a stop', true));
-        } else {
-            setStop(target, id);
-        }
-        _acHide();
+        _acPick(_acFor, item.dataset.id);
     });
-    window.addEventListener('scroll', _acHide, true);
-    window.addEventListener('resize', _acHide);
+    // Capture fires for scrolls on any element, the list included — and the list is
+    // scrollable (max-height 250px against ~20 stops), so hiding indiscriminately made
+    // every stop past the seventh unreachable except by typing.
+    window.addEventListener('scroll', (e) => {
+        if (e.target && acList.contains(e.target)) return;
+        _acHide();
+    }, true);
+    // Reposition rather than hide: on mobile the on-screen keyboard resizes the viewport
+    // right after the tap that opened the list, which used to close it on the spot.
+    const acFollowViewport = () => {
+        if (_acFor && acList.style.display === 'block') _acPosition(_acFor);
+    };
+    window.addEventListener('resize', acFollowViewport);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', acFollowViewport);
 }
 initAutocomplete();
 

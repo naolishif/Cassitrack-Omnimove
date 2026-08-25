@@ -71,7 +71,12 @@
 
     <div class="sidebar-eco">
         <div class="eco-card">
-            <div class="eco-label" data-i18n="eco_score">Your Eco Score</div>
+            <div class="eco-card-head">
+                <div class="eco-label" data-i18n="eco_score">Your Eco Score</div>
+                <button type="button" class="eco-info-btn" onclick="openEcoInfo()"
+                        data-i18n-title="eco_info_btn" aria-haspopup="dialog"
+                        aria-controls="ecoInfoModal">i</button>
+            </div>
             <div class="eco-points" id="sidebarEcoPoints">—</div>
             <div class="eco-sub" id="sidebarEcoSub">—</div>
         </div>
@@ -508,6 +513,91 @@
         <div class="confirm-actions">
             <button class="confirm-no" onclick="closeLogoutModal()" data-i18n="btn_no">No</button>
             <button class="confirm-yes" id="confirmLogoutBtn" onclick="logout()" data-i18n="btn_yes">Yes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Eco Score explainer — mirrors GreenIndexService (EEA emission factors) -->
+<div id="ecoInfoModal" class="eco-modal" onclick="closeEcoInfo(event)">
+    <div class="eco-modal-card" role="dialog" aria-modal="true"
+         aria-labelledby="ecoInfoTitle" onclick="event.stopPropagation()">
+
+        <button type="button" class="eco-modal-x" onclick="closeEcoInfo()"
+                data-i18n-title="btn_close">✕</button>
+
+        <div class="eco-modal-head">
+            <div class="eco-modal-icon">🌱</div>
+            <div>
+                <div class="eco-modal-title" id="ecoInfoTitle" data-i18n="eco_info_title">How your Eco Score works</div>
+                <div class="eco-modal-sub" data-i18n="eco_info_sub">Every greener trip you take turns into points.</div>
+            </div>
+        </div>
+
+        <div class="eco-modal-body">
+
+            <div class="eco-sec">
+                <div class="eco-sec-t"><span class="eco-step">1</span><span data-i18n="eco_info_s1_t">The Green Index of a single trip</span></div>
+                <p class="eco-sec-p" data-i18n="eco_info_s1_p">
+                    For every route we estimate the CO₂ of the option you choose and compare it with the same
+                    trip made by car. The greener the option, the higher the index — from 0 to 100.
+                </p>
+                <div class="eco-formula">
+                    <div class="eco-formula-line">CO₂ = <em data-i18n="eco_f_factor">emission factor</em> × <em data-i18n="eco_f_dist">distance (km)</em></div>
+                    <div class="eco-formula-line">Green Index = 100 − (CO₂ ÷ CO₂ <em data-i18n="eco_f_car">by car</em>) × 100</div>
+                </div>
+            </div>
+
+            <div class="eco-sec">
+                <div class="eco-sec-t"><span class="eco-step">2</span><span data-i18n="eco_info_s2_t">CO₂ per transport mode</span></div>
+                <div class="eco-modes">
+                    <div class="eco-mode-row eco-mode-head">
+                        <span data-i18n="eco_col_mode">Mode</span>
+                        <span data-i18n="eco_col_co2">CO₂ / km</span>
+                        <span data-i18n="eco_col_idx">Index</span>
+                    </div>
+                    <div class="eco-mode-row">
+                        <span>🚶 <span data-i18n="eco_mode_walk">Walking</span></span><span>0 g</span><span class="emr-idx emr-best">100</span>
+                    </div>
+                    <div class="eco-mode-row">
+                        <span>🚲 <span data-i18n="eco_mode_bike">Cycling</span></span><span>0 g</span><span class="emr-idx emr-best">100</span>
+                    </div>
+                    <div class="eco-mode-row">
+                        <span>🛴 <span data-i18n="eco_mode_scooter">E-scooter</span></span><span>0 g</span><span class="emr-idx emr-best">100</span>
+                    </div>
+                    <div class="eco-mode-row">
+                        <span>🚌 <span data-i18n="eco_mode_bus">Urban bus</span></span><span>68 g</span><span class="emr-idx emr-mid">60</span>
+                    </div>
+                    <div class="eco-mode-row">
+                        <span>🚗 <span data-i18n="eco_mode_car">Private car</span></span><span>170 g</span><span class="emr-idx emr-low">0</span>
+                    </div>
+                </div>
+                <p class="eco-note" data-i18n="eco_info_s2_note">
+                    Emission factors from the European Environment Agency; the bus value is per passenger-km.
+                </p>
+            </div>
+
+            <div class="eco-sec">
+                <div class="eco-sec-t"><span class="eco-step">3</span><span data-i18n="eco_info_s3_t">How your points add up</span></div>
+                <p class="eco-sec-p" data-i18n="eco_info_s3_p">
+                    Every journey you complete adds its Green Index to your total: a trip on foot, by bike or by
+                    e-scooter is worth 100 points, a bus ride 60. The CO₂ saved is what that same trip would have
+                    emitted by car, minus what you actually emitted.
+                </p>
+            </div>
+
+            <div class="eco-sec eco-sec-tips">
+                <div class="eco-sec-t"><span class="eco-step">⭐</span><span data-i18n="eco_info_tips_t">Collect more points</span></div>
+                <ul class="eco-tips">
+                    <li data-i18n="eco_tip_1">Walk, cycle or take an e-scooter on short hops — those trips score the full 100.</li>
+                    <li data-i18n="eco_tip_2">Take the bus instead of the car: 60 points per trip and 102 g of CO₂ saved every kilometre.</li>
+                    <li data-i18n="eco_tip_3">Sort the routes with the 🌱 Eco chip before you leave — the greenest option comes first.</li>
+                    <li data-i18n="eco_tip_4">The longer a green trip, the more CO₂ you save: the points depend on the mode, the savings on the distance.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="eco-modal-foot">
+            <button type="button" class="eco-modal-ok" onclick="closeEcoInfo()" data-i18n="btn_got_it">Got it</button>
         </div>
     </div>
 </div>

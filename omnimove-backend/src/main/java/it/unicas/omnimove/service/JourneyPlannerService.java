@@ -121,12 +121,16 @@ public class JourneyPlannerService {
                 };
                 if (opt != null) options.add(opt);
                 else if ("BUS".equals(mode.toUpperCase())) {
-                    msgs.add("🚌 Nessuna linea bus disponibile o dati insufficienti per questo percorso.");
+                    msgs.add(req.isItalian()
+                            ? "🚌 Nessuna linea bus disponibile o dati insufficienti per questo percorso."
+                            : "🚌 No bus line available, or not enough data for this route.");
                 }
             } catch (Exception e) {
                 log.warn("Failed {} option: {}", mode, e.getMessage());
                 if ("BUS".equals(mode.toUpperCase())) {
-                    msgs.add("🚌 Errore nel calcolo del percorso bus.");
+                    msgs.add(req.isItalian()
+                            ? "🚌 Errore nel calcolo del percorso bus."
+                            : "🚌 Something went wrong while working out the bus route.");
                 }
             }
         }
@@ -261,7 +265,7 @@ public class JourneyPlannerService {
 
         // Punto 3: base oraria del viaggio e stato del flag google.search.
         boolean isNow = (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
-        java.time.Instant departureBase = resolveDepartureBase(req.getDepartureTime(), msgs);
+        java.time.Instant departureBase = resolveDepartureBase(req.getDepartureTime(), msgs, req.isItalian());
 
         // "Arrive by" mode: shift search window back by 45 min so found routes arrive near target time
         if (req.isArriveBy() && !isNow) {
@@ -291,9 +295,11 @@ public class JourneyPlannerService {
                 walkMetres = walkResult.get().distanceMetres();
                 walkMin    = (int) Math.ceil(walkResult.get().durationSeconds() / 60.0);
             } else {
-                msgs.add("🚶 Non riesco a calcolare il percorso a piedi fino alla fermata "
-                        + fmtStop(nearestStop)
-                        + ". Recati alla fermata per prendere il bus.");
+                msgs.add(req.isItalian()
+                        ? "🚶 Non riesco a calcolare il percorso a piedi fino alla fermata "
+                            + fmtStop(nearestStop) + ". Recati alla fermata per prendere il bus."
+                        : "🚶 Could not work out the walk to stop " + fmtStop(nearestStop)
+                            + ". Make your own way there to catch the bus.");
             }
         }
         // --- Step 2+3: la linea e la sua attesa si calcolano insieme ---
@@ -380,10 +386,12 @@ public class JourneyPlannerService {
                         .busStopCoords(slice1.busStopCoords())
                         .routeId(t.l1RouteId())
                         .build());
+                // The change is described by structured fields; the client writes the
+                // sentence in the traveller's own language from `from` and transfer_line.
                 busLegs.add(JourneyLeg.builder().mode("WAIT")
                         .from(fmtStop(t.stop())).to(fmtStop(t.stop()))
                         .durationMinutes(changeWait).distanceMetres(0.0)
-                        .instruction("Change at " + fmtStop(t.stop()) + " · take " + t.l2Label()).build());
+                        .transfer(true).transferLine(t.l2Label()).build());
                 busLegs.add(JourneyLeg.builder().mode("BUS")
                         .from(fmtStop(t.stop())).to(req.getDestName())
                         .durationMinutes(l2Min).distanceMetres(m2)
@@ -399,10 +407,34 @@ public class JourneyPlannerService {
             }
         }
         if (!useGoogle) {
-            msgs.add("ℹ️ Live traffic is off — bus times are from the timetable, not real-time.");
+            msgs.add(req.isItalian()
+                    ? "ℹ️ Traffico in tempo reale disattivato — gli orari dei bus vengono dalla tabella, non dal live."
+                    : "ℹ️ Live traffic is off — bus times are from the timetable, not real-time.");
         }
 
-        int total = walkMin + waitMin + busMin;
+        // Mirror of the walk that opens a GPS-origin trip: when the destination is the
+        // traveller's own position the bus can only reach the nearest stop, so the last
+        // stretch is on foot and has to count towards the total.
+        double destWalkMetres = 0;
+        int destWalkMin = 0;
+        if (req.isDestGps()) {
+            var destWalk = googleMapsService.getTravelTime(
+                    getStopLat(destStop), getStopLon(destStop),
+                    req.getDestLat(), req.getDestLon(),
+                    "walking");
+            if (destWalk.isPresent()) {
+                destWalkMetres = destWalk.get().distanceMetres();
+                destWalkMin    = (int) Math.ceil(destWalk.get().durationSeconds() / 60.0);
+            } else {
+                msgs.add(req.isItalian()
+                        ? "🚶 Non riesco a calcolare il percorso a piedi dalla fermata "
+                            + fmtStop(destStop) + " fino alla tua posizione."
+                        : "🚶 Could not work out the walk from stop " + fmtStop(destStop)
+                            + " to your position.");
+            }
+        }
+
+        int total = walkMin + waitMin + busMin + destWalkMin;
         List<JourneyLeg> legs = new ArrayList<>();
         if (walkMin > 0) legs.add(JourneyLeg.builder().mode("WALK")
                 .from(req.getOriginName()).to(fmtStop(nearestStop))
@@ -413,6 +445,10 @@ public class JourneyPlannerService {
                 .durationMinutes(waitMin).distanceMetres(0.0)
                 .instruction("Wait " + waitMin + " min for " + lineLabel).build());
         legs.addAll(busLegs);
+        if (destWalkMin > 0) legs.add(JourneyLeg.builder().mode("WALK")
+                .from(fmtStop(destStop)).to(req.getDestName())
+                .durationMinutes(destWalkMin).distanceMetres(destWalkMetres)
+                .instruction("Walk to your destination").build());
 
         String occupancyWarning = null;
         if (req.getUserId() != null) {
@@ -542,7 +578,7 @@ public class JourneyPlannerService {
      *  - "HH:mm"     -> quell'ora oggi (Europe/Rome); se gia' passata, domani
      * Se sposta a domani, lo annuncia in msgs.
      */
-    private java.time.Instant resolveDepartureBase(String hhmm, List<String> msgs) {
+    private java.time.Instant resolveDepartureBase(String hhmm, List<String> msgs, boolean italian) {
         if (hhmm == null || hhmm.isBlank()) return java.time.Instant.now();
         try {
             java.time.ZoneId tz = java.time.ZoneId.of("Europe/Rome");
@@ -552,8 +588,11 @@ public class JourneyPlannerService {
             if (cand.isBefore(now)) {
                 cand = cand.plusDays(1);
                 if (msgs != null) {
-                    msgs.add("\u23F0 " + hhmm.trim()
-                            + " has already passed today \u2014 showing results for tomorrow.");
+                    msgs.add(italian
+                            ? "\u23F0 Le " + hhmm.trim()
+                                + " sono gi\u00e0 passate oggi \u2014 mostro i risultati per domani."
+                            : "\u23F0 " + hhmm.trim()
+                                + " has already passed today \u2014 showing results for tomorrow.");
                 }
             }
             return cand.toInstant();

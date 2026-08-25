@@ -13,6 +13,8 @@ public class JourneyRequest {
     @JsonProperty("dest_lon") private Double destLon;
     @JsonProperty("dest_name") private String destName;
     @JsonProperty("origin_is_gps") private Boolean originIsGps;
+    /** True when the destination is the traveller's own position rather than a stop. */
+    @JsonProperty("dest_is_gps") private Boolean destIsGps;
     @JsonProperty("user_id") private Long userId;
     @JsonProperty("origin_stop_id") private String originStopId;
     @JsonProperty("dest_stop_id")   private String destStopId;
@@ -32,5 +34,6 @@ public class JourneyRequest {
     private List<String> modes;
 
     public boolean isItalian() { return "it".equalsIgnoreCase(lang); }
+    public boolean isDestGps() { return Boolean.TRUE.equals(destIsGps); }
     public boolean isArriveBy() { return Boolean.TRUE.equals(arriveBy); }
 }

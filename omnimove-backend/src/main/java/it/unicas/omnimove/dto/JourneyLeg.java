@@ -18,4 +18,12 @@ public class JourneyLeg {
     @JsonProperty("bus_stop_coords")  private List<double[]> busStopCoords;
     private String instruction;
     @JsonProperty("route_id") private String routeId;
+    /**
+     * WAIT legs only: true when the wait is a change of bus rather than the initial wait.
+     * The client used to infer this by looking for "Change at" inside the instruction,
+     * which quietly stopped working the moment that sentence was translated.
+     */
+    @JsonProperty("transfer") private Boolean transfer;
+    /** WAIT legs only: label of the line to board after the change, e.g. "01 → Casilina Nord". */
+    @JsonProperty("transfer_line") private String transferLine;
 }
