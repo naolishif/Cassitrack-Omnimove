@@ -34,6 +34,10 @@ mosquitto/log/
 # Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+ENV/
+*.egg-info/
 
 # OS files
 .DS_Store

@@ -1,0 +1,5 @@
+# Dipendenze Python per gli script in tools/ e per i simulatori GPS/SIRI.
+# Setup:  python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+paho-mqtt==2.1.0
+psycopg2-binary==2.9.12
+tzdata==2026.3
