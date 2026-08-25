@@ -471,10 +471,23 @@ public class JourneyPlannerService {
             }
         }
 
+        // One fare per bus boarded: a journey with a change costs two tickets, not
+        // one. This charged a flat COST_BUS however many buses the itinerary
+        // used, so a two-leg trip was quoted at the price of a single ride and
+        // came out cheaper than it is — which also skewed the Budget ranking
+        // against direct routes.
+        //
+        // Counted from the legs that were actually built, not from a transfer
+        // flag, so it stays correct if an itinerary ever needs two changes. The
+        // floor of one guards the ranking: a zero-cost bus option would win
+        // Budget outright.
+        long busRides = busLegs.stream().filter(l -> "BUS".equals(l.getMode())).count();
+        double busCost = COST_BUS * Math.max(1L, busRides);
+
         return JourneyOption.builder()
                 .mode("BUS").modeLabel(lineLabel)
                 .durationMinutes(total).distanceMetres(busMetres)
-                .costEuros(COST_BUS)
+                .costEuros(busCost)
                 .greenIndex(greenIndex.computeGreenIndex("BUS", busMetres / 1000.0))
                 .co2Grams(greenIndex.computeCo2Grams("BUS", busMetres / 1000.0))
                 .etaMinutes(total)

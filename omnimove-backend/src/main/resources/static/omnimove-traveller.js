@@ -172,7 +172,9 @@ function renderHistory(items) {
         const dest = j.destName || '—';
 
         return `
-        <div class="route-hist-card">
+        <div class="route-hist-card route-hist-card--reusable"
+             data-origin="${escAttr(origin)}" data-dest="${escAttr(dest)}"
+             title="${escAttr(t('reuse_trip_hint'))}">
             <div class="route-hist-icon ${iconClass}">${emoji}</div>
             <div class="route-hist-info">
                 <div class="route-hist-name">${origin} → ${dest}</div>
@@ -210,7 +212,9 @@ function renderFavorites(items) {
     container.innerHTML = items.map(f => {
         const [iconClass, emoji] = MODE_ICON[f.mode] || ['ri-bus', '🚌'];
         return `
-        <div class="route-hist-card">
+        <div class="route-hist-card route-hist-card--reusable"
+             data-origin="${escAttr(f.originName)}" data-dest="${escAttr(f.destName)}"
+             title="${escAttr(t('reuse_trip_hint'))}">
             <div class="route-hist-icon ${iconClass}">${emoji}</div>
             <div class="route-hist-info">
                 <div class="route-hist-name">${f.originName} → ${f.destName}</div>
@@ -223,6 +227,114 @@ function renderFavorites(items) {
         </div>`;
     }).join('');
 }
+
+// ── Favourite stops ───────────────────────────────────────────────
+// A starred stop is one end of a journey the traveller keeps making, so the
+// point of the list is to drop it straight into origin or destination. Kept
+// apart from favourite routes: starring a stop must not require having already
+// travelled between two of them.
+let FAVORITE_STOPS = [];   // [{id, stop_id, name, lat, lon}]
+
+async function loadFavoriteStops() {
+    try {
+        const r = await apiFetch('/traveller/favorite-stops');
+        if (!r.ok) throw new Error('favorite-stops ' + r.status);
+        FAVORITE_STOPS = await r.json();
+    } catch (e) {
+        console.warn('Could not load favourite stops:', e);
+        FAVORITE_STOPS = [];
+    }
+    renderFavoriteStops();
+    populateFavStopPicker();
+}
+
+function renderFavoriteStops() {
+    const box = document.getElementById('favStops');
+    if (!box) return;
+    if (!FAVORITE_STOPS.length) {
+        box.innerHTML = `<div class="empty-state">${escHtml(t('no_fav_stops'))}</div>`;
+        return;
+    }
+    // Every value travels in a data attribute and the handlers are delegated:
+    // stop names carry apostrophes ("Capo d'Acqua"), and an inline onclick
+    // built around one closes its own string literal.
+    box.innerHTML = FAVORITE_STOPS.map(f => `
+        <div class="fav-stop-row" data-stop-id="${escAttr(f.stop_id)}">
+            <span class="fav-stop-pin">📍</span>
+            <span class="fav-stop-name">${escHtml(f.name)}</span>
+            <button type="button" class="fav-stop-use" data-use="origin">${escHtml(t('btn_use_origin'))}</button>
+            <button type="button" class="fav-stop-use" data-use="dest">${escHtml(t('btn_use_dest'))}</button>
+            <button type="button" class="fav-stop-del" title="${escAttr(t('btn_remove'))}"
+                    aria-label="${escAttr(t('btn_remove'))}">✕</button>
+        </div>`).join('');
+}
+
+// Only stops that are not starred yet: offering one already in the list would
+// make Add look broken, since starring twice is deliberately a no-op.
+function populateFavStopPicker() {
+    const sel = document.getElementById('favStopPicker');
+    if (!sel) return;
+    const taken = new Set(FAVORITE_STOPS.map(f => f.stop_id));
+    const free  = Object.values(STOPS)
+        .filter(st => !taken.has(st.id))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    sel.innerHTML = `<option value="">${escHtml(t('ph_pick_stop'))}</option>`
+        + free.map(st => `<option value="${escAttr(st.id)}">${escHtml(st.name)}</option>`).join('');
+    sel.disabled = free.length === 0;
+}
+
+async function addFavoriteStop() {
+    const sel = document.getElementById('favStopPicker');
+    const stopId = sel && sel.value;
+    if (!stopId) { showToast(t('ph_pick_stop'), true); return; }
+    try {
+        const r = await apiFetch('/traveller/favorite-stops', {
+            method: 'POST', body: JSON.stringify({ stop_id: stopId })
+        });
+        if (!r.ok) throw new Error('add ' + r.status);
+        await loadFavoriteStops();
+        showToast(t('toast_fav_stop_added'));
+    } catch (e) {
+        showToast(t('toast_fav_error'), true);
+    }
+}
+
+async function removeFavoriteStop(stopId) {
+    try {
+        const r = await apiFetch('/traveller/favorite-stops/' + encodeURIComponent(stopId),
+                                 { method: 'DELETE' });
+        if (!r.ok) throw new Error('remove ' + r.status);
+        await loadFavoriteStops();
+        showToast(t('toast_fav_stop_removed'));
+    } catch (e) {
+        showToast(t('toast_fav_error'), true);
+    }
+}
+
+// Drops the stop into one of the two search fields. The id comes from the
+// registry rather than from matching the name back, so this cannot pick the
+// wrong stop when two share a label.
+function useFavoriteStop(stopId, which) {
+    const stop = STOPS[stopId];
+    if (!stop) { showToast(t('toast_saved_stop_gone'), true); return; }
+    const el = document.getElementById(which === 'origin' ? 'originSelect' : 'destSelect');
+    if (!el) return;
+    el.value = stop.name;
+    _acSetId(el, stop.id);
+    _acHide();
+    // The search bar is hidden on the profile pane on a phone, so filling it
+    // here would leave the traveller with nothing to press.
+    document.querySelector('.sidebar-nav .nav-item[data-pane="map"]')?.click();
+}
+
+document.addEventListener('click', e => {
+    const row = e.target.closest('.fav-stop-row');
+    if (!row) return;
+    const stopId = row.dataset.stopId;
+    const use = e.target.closest('.fav-stop-use');
+    if (use) { useFavoriteStop(stopId, use.dataset.use); return; }
+    if (e.target.closest('.fav-stop-del')) removeFavoriteStop(stopId);
+});
 
 async function loadFavorites() {
     try {
@@ -470,20 +582,48 @@ const userIcon = L.divIcon({
     iconAnchor: [13, 13]
 });
 
-// Destination pin — SVG teardrop
-function makeDestIcon(color) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="42" viewBox="0 0 28 42">
-        <circle cx="14" cy="14" r="12" fill="${color}" stroke="white" stroke-width="2.5"
-            style="filter:drop-shadow(0 3px 6px rgba(0,0,0,0.35))"/>
-        <circle cx="14" cy="14" r="5" fill="white" opacity="0.9"/>
-        <line x1="14" y1="26" x2="14" y2="41" stroke="${color}" stroke-width="3"
-            stroke-linecap="round" style="filter:drop-shadow(0 2px 3px rgba(0,0,0,0.2))"/>
+// ── Journey endpoints ─────────────────────────────────────────────
+// Where the traveller starts and where they are going are the two points the
+// whole search is about, and until now the map barely said so: the preview drew
+// no endpoint at all, and the running journey reused the ordinary stop icon for
+// the origin, so it was indistinguishable from the forty other stops around it.
+//
+// They get a silhouette nothing else on the map has — a pin, where every stop is
+// a circle — and they are half again as tall, so they read as endpoints before
+// any colour is even considered. Origin is the app's green with a solid centre;
+// destination is red with a chequered flag, matching the 🏁 the itinerary
+// already uses for "your destination".
+function makeEndpointIcon(kind) {
+    const dest  = kind === 'dest';
+    const color = dest ? '#ef4444' : '#10b981';
+    const glyph = dest
+        // Chequered flag: pole plus a 3x2 board, drawn big enough to survive
+        // being scaled down into an 18px disc.
+        // Glyph bounds are x 0..11.4, y -2.5..10.5, so its centre sits at (5.7, 4);
+        // this translate puts that centre on the pin head's centre, (16, 16).
+        ? `<g transform="translate(10.3,12)">
+             <rect x="0" y="-2.5" width="1.6" height="13" rx="0.8" fill="#fff"/>
+             <g fill="#fff">
+               <rect x="2.4" y="-2.5" width="3" height="3"/><rect x="8.4" y="-2.5" width="3" height="3"/>
+               <rect x="5.4" y="0.5"  width="3" height="3"/>
+               <rect x="2.4" y="3.5"  width="3" height="3"/><rect x="8.4" y="3.5" width="3" height="3"/>
+             </g>
+           </g>`
+        : `<circle cx="16" cy="16" r="6" fill="#fff"/>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="46" viewBox="0 0 32 46">
+        <path d="M16 45 L9 26 A14 14 0 1 1 23 26 Z" fill="${color}"
+              stroke="#fff" stroke-width="2.5" stroke-linejoin="round"
+              style="filter:drop-shadow(0 3px 6px rgba(15,23,42,0.4))"/>
+        ${glyph}
     </svg>`;
     return L.divIcon({
         html: svg,
+        // Empty, not left to Leaflet: its default DivIcon class paints a white
+        // box behind the pin. The anchor is the tip, so the pin points at the
+        // exact coordinate rather than hovering above it.
         className: '',
-        iconSize: [28, 42],
-        iconAnchor: [14, 41]
+        iconSize:   [32, 46],
+        iconAnchor: [16, 45]
     });
 }
 
@@ -1437,7 +1577,20 @@ const MODE_BTNS  = {
 };
 
 const LINE_COLORS     = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#10b981' };
-const BUS_LEG_COLORS  = ['#0f172a', '#3b82f6', '#7c3aed']; // indexed by bus-leg order
+
+// A bus leg is drawn in the colour of the line it runs on — the same colour that
+// line has on the network map, in the legend and on its badge. It used to take
+// a colour by position instead (first leg dark, second blue), so line 21 was
+// black on the map, blue in the header and green in the timeline, all at once.
+//
+// Keyed by route id first: two lines can share a number, and only the id tells
+// them apart. The number parsed out of the instruction ("21 → …") is the
+// fallback for a payload that carries no id.
+function legLineColor(leg) {
+    const byId = leg && leg.route_id && ROUTE_COLORS.byId[leg.route_id];
+    if (byId) return byId;
+    return routeColor(String((leg && leg.instruction) || '').split(' → ')[0].trim());
+}
 
 function greenColor(g) {
     return g >= 75 ? '#10b981' : g >= 50 ? '#f59e0b' : '#ef4444';
@@ -1550,12 +1703,10 @@ function showRoutePreview(mode, legs) {
     const color = LINE_COLORS[mode] || '#0f172a';
 
     if (mode === 'BUS' && legs && legs.length > 0) {
-        let colorIdx = 0;
         const activeBusLegs = [];
         legs.forEach(leg => {
             if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
-                const legColor = BUS_LEG_COLORS[colorIdx % BUS_LEG_COLORS.length];
-                colorIdx++;
+                const legColor = legLineColor(leg);
                 const coords     = leg.stop_coords.map(c => [c[0], c[1]]);
                 const stopDots   = (leg.bus_stop_coords || leg.stop_coords).map(c => [c[0], c[1]]);
                 window._previewLayers.push(
@@ -1584,6 +1735,8 @@ function showRoutePreview(mode, legs) {
                 );
             }
         });
+        drawEndpointMarkers(origin, dest, window._previewLayers);
+
         const allCoords = legs
             .filter(l => l.stop_coords)
             .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
@@ -1607,8 +1760,24 @@ function showRoutePreview(mode, legs) {
                 { color, weight: 4, opacity: 0.7, dashArray: mode === 'WALK' ? '8,8' : '8,4' }
             ).addTo(map)
         );
+        drawEndpointMarkers(origin, dest, window._previewLayers);
         map.fitBounds([[origin.lat, origin.lon], [dest.lat, dest.lon]], { padding: [50, 50] });
     }
+}
+
+// Both endpoints, pushed onto whichever layer list the caller will clean up.
+// The pins go above every other marker so a stop circle can never sit on top of
+// the point the traveller is actually heading for.
+function drawEndpointMarkers(origin, dest, layers) {
+    if (!origin || !dest) return;
+    [['origin', origin, t('lbl_starting_point')], ['dest', dest, t('lbl_destination')]]
+        .forEach(([kind, pt, label]) => {
+            if (pt.lat == null || pt.lon == null) return;
+            const m = L.marker([pt.lat, pt.lon], {
+                icon: makeEndpointIcon(kind), zIndexOffset: 1000
+            }).addTo(map).bindPopup('<b>' + escHtml(pt.name || '') + '</b><br>' + escHtml(label));
+            layers.push(m);
+        });
 }
 
 // The card button carries only the mode. It used to inline the whole option —
@@ -1764,9 +1933,16 @@ function fmtRouteLabel(instruction, circleStyle) {
     }
     const sep = instruction.indexOf(' → ');
     if (sep === -1) return escHtml(instruction);
-    const num = escHtml(instruction.slice(0, sep).trim());
+    const rawNum = instruction.slice(0, sep).trim();
+    const num  = escHtml(rawNum);
     const dest = escHtml(instruction.slice(sep + 3).trim());
-    const cs  = circleStyle || 'background:#1d4ed8;color:#fff';
+    // The badge takes the line's own colour, resolved from the number it shows.
+    // It used to default to one blue for every line, which is why the same
+    // journey could show a blue 21 in the header and a green 21 in the timeline.
+    // An explicit circleStyle still wins, for a caller that has the route id and
+    // can therefore tell two lines sharing a number apart.
+    const bg  = routeColor(rawNum);
+    const cs  = circleStyle || `background:${bg};color:${routeTextColor(rawNum, bg)}`;
     return `<span class="rnum-bus" style="${cs}">${num}</span> → ${dest}`;
 }
 
@@ -1798,7 +1974,9 @@ function buildTimeline(legs, totalMin, greenIdx) {
 
     legs.forEach((leg, i) => {
         const isLast = i === legs.length - 1;
-        const col = C[leg.mode] || '#94a3b8';
+        // A bus row is tinted with its own line's colour; every other mode keeps
+        // the fixed colour that identifies the mode itself.
+        const col = leg.mode === 'BUS' ? legLineColor(leg) : (C[leg.mode] || '#94a3b8');
         const names = leg.stop_names || [];
         const isTransfer = leg.mode === 'WAIT' && leg.transfer === true;
 
@@ -1882,7 +2060,7 @@ function buildTimeline(legs, totalMin, greenIdx) {
               <div class="tl-body">
                 ${_stopRow(boardStop, boardMs)}
                 <div class="tl-meta">
-                  <span class="tl-badge" style="background:${col}18;color:${col}">🚌 ${fmtRouteLabel(leg.instruction, `background:${col};color:#fff`)} · ${leg.duration_minutes || 0} min</span>
+                  <span class="tl-badge" style="background:${col}18;color:${col}">🚌 ${fmtRouteLabel(leg.instruction, `background:${col};color:${contrastingText(col)}`)} · ${leg.duration_minutes || 0} min</span>
                   ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
                 </div>
                 ${intermediates.length > 0 ? `
@@ -2045,7 +2223,7 @@ async function startJourney() {
         const color = LINE_COLORS[mode] || '#0f172a';
 
         // 5) Marker origine — same icon as any other stop, defined once above
-        window._journeyOriginMarker = L.marker([origin.lat, origin.lon], { icon: STOP_ICON })
+        window._journeyOriginMarker = L.marker([origin.lat, origin.lon], { icon: makeEndpointIcon('origin') })
             .addTo(map)
             .bindPopup('<b>' + escHtml(origin.name) + '</b><br>' + t('lbl_starting_point'));
 
@@ -2064,7 +2242,7 @@ async function startJourney() {
         }
 
         // 7) Marker destinazione
-        window._journeyDestMarker = L.marker([dest.lat, dest.lon], { icon: makeDestIcon('#ef4444') })
+        window._journeyDestMarker = L.marker([dest.lat, dest.lon], { icon: makeEndpointIcon('dest') })
             .addTo(map)
             .bindPopup('<b>📍 ' + dest.name + '</b>').openPopup();
 
@@ -2074,12 +2252,10 @@ async function startJourney() {
         window._busRouteLines = [];
 
         if (mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0) {
-            let colorIdx = 0;
 
             selectedJourney.legs.forEach(leg => {
                 if (leg.mode === 'BUS' && leg.stop_coords && leg.stop_coords.length >= 2) {
-                    const legColor = BUS_LEG_COLORS[colorIdx % BUS_LEG_COLORS.length];
-                    colorIdx++;
+                    const legColor = legLineColor(leg);
                     const coords   = leg.stop_coords.map(c => [c[0], c[1]]);
                     const stopDots = (leg.bus_stop_coords || leg.stop_coords).map(c => [c[0], c[1]]);
                     const line = L.polyline(coords, { color: legColor, weight: 5, opacity: 0.9 }).addTo(map);
@@ -2181,7 +2357,7 @@ async function startJourney() {
                 .filter(l => l.mode === 'BUS' && l.route_id)
                 .map((l, idx) => ({
                     routeId: l.route_id,
-                    color: BUS_LEG_COLORS[idx % BUS_LEG_COLORS.length],
+                    color: legLineColor(l),
                     boardingCoords: l.stop_coords ? l.stop_coords[0] : null
                 }));
             window._activeBusLegs     = activeBusLegs;
@@ -2352,21 +2528,40 @@ function endJourney() {
 
     map.setView([41.4901, 13.8303], 15);
 
-    // Restore route cards from the last search so the user can pick again without re-searching
-    if (window._lastSearchData) {
-        renderRoutes(window._lastSearchData);
-        showToast(`🏁 ${t('journey_completed')} — ${t('search_new_route')}`);
-    } else {
-        document.querySelector('.routes-list').innerHTML =
-            '<div style="text-align:center;padding:48px 20px;color:var(--text-soft)">'
-            + '<div style="font-size:36px;margin-bottom:12px">🌱</div>'
-            + `<div style="font-size:14px;font-weight:700;color:var(--text-dark)">${t('journey_completed')}</div>`
-            + `<div style="font-size:12px;margin-top:6px">${t('search_new_route')}</div>`
-            + '</div>';
-    }
+    // A finished journey is a finished search. The cards used to be restored
+    // from the last search "so the user can pick again without re-searching",
+    // but that left the traveller looking at the itinerary they had just
+    // completed, with its origin and destination still in the fields — and one
+    // distracted tap on Search planned the very same trip over again.
+    resetSearchFields();
+    document.querySelector('.routes-list').innerHTML =
+        '<div style="text-align:center;padding:48px 20px;color:var(--text-soft)">'
+        + '<div style="font-size:36px;margin-bottom:12px">🌱</div>'
+        + `<div style="font-size:14px;font-weight:700;color:var(--text-dark)">${t('journey_completed')}</div>`
+        + `<div style="font-size:12px;margin-top:6px">${t('search_new_route')}</div>`
+        + '</div>';
 
     if (!window.matchMedia('(max-width: 768px)').matches) showToast(t('toast_journey_ended'));
     loadEcoStats();
+}
+
+// Puts the search back to the state it has on a cold open.
+function resetSearchFields() {
+    ['originSelect', 'destSelect'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.value = '';
+        // The visible text is only a label — the stop actually chosen lives in
+        // dataset.id. Clearing one without the other would leave Search
+        // planning from a stop the field no longer names.
+        _acSetId(el, '');
+    });
+    _acHide();
+    // Without this the sort chips would re-render the stale cards through
+    // setSort(), putting the completed journey straight back on screen.
+    window._lastSearchData = null;
+    window._currentOrigin  = null;
+    window._currentDest    = null;
 }
 
 // ── Toast ─────────────────────────────────────────────────────────
@@ -2451,7 +2646,7 @@ function switchProfileTab(tab) {
     const el = document.getElementById('ptab-' + tab);
     if (el) el.classList.add('active');
     if (tab === 'history')   loadHistory();
-    if (tab === 'favorites') loadFavorites();
+    if (tab === 'favorites') { loadFavorites(); loadFavoriteStops(); }
     if (tab === 'settings')  loadPreferences();
     if (tab === 'account') {
         const user = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
@@ -2468,6 +2663,45 @@ function escAttr(s) {
 }
 
 // One delegated listener handles every star, present or future.
+// A recent trip or a favourite is a shortcut back to a journey already made, so
+// tapping one fills the search with its two ends and stops there: the traveller
+// reviews them and presses Search. It deliberately does not search on its own —
+// a saved trip carries no departure time, and re-planning silently would hide
+// that the answer is for now, not for whenever that trip was taken.
+document.addEventListener('click', e => {
+    const card = e.target.closest('.route-hist-card--reusable');
+    // The star sits inside the card and has its own job; a tap on it must not
+    // also rewrite the search fields.
+    if (!card || e.target.closest('.fav-star')) return;
+    fillSearchFromSaved(card.dataset.origin, card.dataset.dest);
+});
+
+function fillSearchFromSaved(originName, destName) {
+    // The field's value is only a label — doSearch validates dataset.id — so each
+    // one is run through _acSyncId to resolve the stop actually meant. It also
+    // maps "My Location" to GPS, which is what a history entry with no origin
+    // was rendered as.
+    const fill = (el, name) => {
+        el.value = name || '';
+        _acSyncId(el);
+        return !name || !!el.dataset.id;
+    };
+    const originEl = document.getElementById('originSelect');
+    const destEl   = document.getElementById('destSelect');
+    const okOrigin = fill(originEl, originName);
+    const okDest   = fill(destEl,   destName);
+    _acHide();
+
+    // Back to the map pane: on a phone the search bar is hidden on the profile
+    // pane, so filling it there would leave nothing to press.
+    document.querySelector('.sidebar-nav .nav-item[data-pane="map"]')?.click();
+
+    // A stop renamed or retired since the trip was saved leaves the field
+    // looking perfectly filled while Search refuses it. Better to say so than to
+    // let the traveller press Search and be told to pick a destination.
+    if (!okOrigin || !okDest) showToast(t('toast_saved_stop_gone'), true);
+}
+
 document.addEventListener('click', e => {
     const star = e.target.closest('.fav-star');
     if (!star) return;

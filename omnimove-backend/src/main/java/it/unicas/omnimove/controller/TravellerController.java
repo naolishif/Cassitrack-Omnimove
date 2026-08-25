@@ -2,9 +2,12 @@ package it.unicas.omnimove.controller;
 
 import it.unicas.omnimove.dto.TravellerUpdateRequest;
 import it.unicas.omnimove.model.FavoriteRoute;
+import it.unicas.omnimove.model.FavoriteStop;
 import it.unicas.omnimove.model.User;
 import it.unicas.omnimove.model.UserPreferences;
 import it.unicas.omnimove.repository.FavoriteRouteRepository;
+import it.unicas.omnimove.repository.FavoriteStopRepository;
+import it.unicas.omnimove.repository.StopRepository;
 import it.unicas.omnimove.repository.JourneyLogRepository;
 import it.unicas.omnimove.repository.UserPreferencesRepository;
 import it.unicas.omnimove.repository.UserRepository;
@@ -41,6 +44,8 @@ public class TravellerController {
     private final JourneyLogRepository journeyLogRepository;
     private final GreenIndexService greenIndexService;
     private final FavoriteRouteRepository favoriteRouteRepository;
+    private final FavoriteStopRepository  favoriteStopRepository;
+    private final StopRepository          stopRepository;
     private final UserPreferencesRepository preferencesRepository;
     private final SecurityAuditService securityAuditService;
 
@@ -205,6 +210,87 @@ public class TravellerController {
         }).toList();
 
         return ResponseEntity.ok(result);
+    }
+
+    // ── Favourite stops ───────────────────────────────────────────
+    // Separate from favourite routes on purpose: a route is a pair the traveller
+    // has already travelled, a stop is one end they keep reusing. Starring a stop
+    // must not require having made the trip first.
+
+    private static final java.util.regex.Pattern STOP_ID_RE =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9\\-_]{1,50}$");
+
+    @GetMapping("/favorite-stops")
+    @Operation(summary = "Stops the logged-in traveller has starred")
+    public ResponseEntity<?> getFavoriteStops(@AuthenticationPrincipal UserDetails principal) {
+        if (principal == null)
+            return ResponseEntity.status(401).body(Map.of("message", "Not authenticated"));
+
+        User user = userRepo.findByEmail(principal.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Names and coordinates come from the current stops, never from what was
+        // stored: the id is the only thing that survives a rename. A favourite
+        // whose stop the network no longer serves is left out rather than
+        // returned half-empty — there is nothing the traveller could do with it.
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (FavoriteStop f : favoriteStopRepository.findByUserIdOrderByCreatedAtAsc(user.getId())) {
+            stopRepository.findById(f.getStopId())
+                .filter(st -> st.getLat() != null && st.getLon() != null)
+                .ifPresent(st -> result.add(Map.of(
+                        "id",      f.getId(),
+                        "stop_id", st.getId(),
+                        "name",    st.getName() != null ? st.getName() : st.getId(),
+                        "lat",     st.getLat(),
+                        "lon",     st.getLon())));
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/favorite-stops")
+    @Operation(summary = "Star a stop")
+    public ResponseEntity<?> addFavoriteStop(@RequestBody Map<String, String> body,
+                                             @AuthenticationPrincipal UserDetails principal) {
+        if (principal == null)
+            return ResponseEntity.status(401).body(Map.of("message", "Not authenticated"));
+
+        String stopId = body == null ? null : body.get("stop_id");
+        if (stopId == null || !STOP_ID_RE.matcher(stopId).matches())
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid stop id"));
+        if (stopRepository.findById(stopId).isEmpty())
+            return ResponseEntity.badRequest().body(Map.of("message", "Unknown stop"));
+
+        User user = userRepo.findByEmail(principal.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Idempotent: starring twice is the same as starring once, and the unique
+        // constraint would otherwise turn a double tap into a 500.
+        favoriteStopRepository.findByUserIdAndStopId(user.getId(), stopId)
+                .orElseGet(() -> favoriteStopRepository.save(FavoriteStop.builder()
+                        .userId(user.getId()).stopId(stopId)
+                        .createdAt(ZonedDateTime.now()).build()));
+
+        return ResponseEntity.ok(Map.of("stop_id", stopId, "starred", true));
+    }
+
+    @DeleteMapping("/favorite-stops/{stopId}")
+    @Operation(summary = "Un-star a stop")
+    public ResponseEntity<?> removeFavoriteStop(@PathVariable String stopId,
+                                                @AuthenticationPrincipal UserDetails principal) {
+        if (principal == null)
+            return ResponseEntity.status(401).body(Map.of("message", "Not authenticated"));
+        if (!STOP_ID_RE.matcher(stopId).matches())
+            return ResponseEntity.badRequest().body(Map.of("message", "Invalid stop id"));
+
+        User user = userRepo.findByEmail(principal.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Scoped to the caller: the id in the path is the stop, never the row, so
+        // one traveller cannot delete another's favourite by guessing a number.
+        favoriteStopRepository.findByUserIdAndStopId(user.getId(), stopId)
+                .ifPresent(favoriteStopRepository::delete);
+
+        return ResponseEntity.ok(Map.of("stop_id", stopId, "starred", false));
     }
 
     @GetMapping("/favorites")

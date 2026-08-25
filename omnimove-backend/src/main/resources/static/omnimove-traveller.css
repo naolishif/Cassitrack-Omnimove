@@ -715,6 +715,9 @@ body {
     cursor: pointer;
 }
 .route-hist-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+/* Only the reusable ones are clickable, so only they get the pointer. */
+.route-hist-card--reusable { cursor: pointer; }
+.route-hist-card--reusable:hover { border-color: var(--primary); }
 .route-hist-icon {
     width: 42px; height: 42px;
     border-radius: 13px;
@@ -2398,3 +2401,79 @@ body {
    rule beats the browser's default [hidden] { display: none } — a hidden nav
    item would have stayed on screen. */
 [hidden] { display: none !important; }
+
+/* ── Favourite stops ──
+   A row is a stop plus the two places it can go, so the actions sit inline
+   rather than behind a menu: the whole point is reaching origin or destination
+   in one tap. */
+.fav-stop-add {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+.fav-stop-select {
+    flex: 1 1 220px;
+    min-width: 0;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text-dark);
+    background: var(--bg-white);
+    border: 1px solid var(--border-mid);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    cursor: pointer;
+}
+.fav-stop-select:disabled { color: var(--text-soft); cursor: not-allowed; }
+.fav-stop-add-btn { width: auto; padding: 10px 22px; flex: 0 0 auto; }
+
+.fav-stop-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 28px; }
+.fav-stop-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-white);
+    border: 1px solid var(--border-mid);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    box-shadow: var(--shadow-sm);
+}
+.fav-stop-pin  { font-size: 14px; flex-shrink: 0; }
+.fav-stop-name {
+    flex: 1; min-width: 0;
+    font-size: 13px; font-weight: 700; color: var(--text-dark);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fav-stop-use {
+    flex-shrink: 0;
+    border: 1px solid var(--border-mid);
+    background: var(--bg-app);
+    border-radius: 50px;
+    padding: 5px 12px;
+    font-family: inherit; font-size: 11px; font-weight: 700;
+    color: var(--text-mid);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.fav-stop-use:hover {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    color: var(--primary-dark);
+}
+.fav-stop-del {
+    flex-shrink: 0;
+    width: 26px; height: 26px;
+    border: none; background: transparent;
+    color: var(--text-soft);
+    font-size: 13px; cursor: pointer;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+}
+.fav-stop-del:hover { background: #fee2e2; color: #991b1b; }
+
+@media (max-width: 768px) {
+    /* The two actions keep their tap target; the name gives up the width. */
+    .fav-stop-name { flex-basis: 100%; order: -1; white-space: normal; }
+    .fav-stop-row  { flex-wrap: wrap; }
+}

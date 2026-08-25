@@ -331,6 +331,14 @@
                 </div>
 
                 <div class="ptab-pane" id="ptab-favorites">
+                    <span class="section-label" data-i18n="label_fav_stops">Favourite stops</span>
+                    <div class="fav-stop-add">
+                        <select id="favStopPicker" class="fav-stop-select"></select>
+                        <button class="action-btn btn-dark fav-stop-add-btn"
+                                onclick="addFavoriteStop()" data-i18n="btn_add_fav_stop">Add</button>
+                    </div>
+                    <div class="fav-stop-list" id="favStops"></div>
+
                     <span class="section-label" data-i18n="label_saved_routes">Saved Favourite Routes</span>
                     <div class="route-hist-grid" id="favs-list"></div>
                 </div>
