@@ -19,6 +19,13 @@ public interface RouteShapeRepository extends JpaRepository<RouteShape, RouteSha
     List<RouteShape> findByRouteIdOrderBySeqAsc(String routeId);
 
     /**
+     * Every route's path in one shot, grouped by route and in drawing order.
+     * Feeds the traveller map, which paints the whole network on open instead
+     * of one line at a time.
+     */
+    List<RouteShape> findAllByOrderByRouteIdAscSeqAsc();
+
+    /**
      * Clear one route's path before re-importing it. The NeTEx import replaces
      * a shape wholesale rather than diffing it: paths are reshaped in the route
      * editor as a unit, so point-by-point merging would add complexity for no

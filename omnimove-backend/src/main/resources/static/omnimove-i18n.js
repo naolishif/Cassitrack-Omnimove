@@ -201,6 +201,8 @@ const OMNI_T = {
     loading_buses:'Loading next buses…',
     lbl_line:'line', lbl_lines:'lines',
     lbl_next_departures:'next departures',
+    // Network legend on the map
+    legend_lines:'Lines', legend_all:'All',
     no_buses:'No upcoming buses found',
     err_arrivals:'Could not load arrivals',
     err_service:'Service unavailable',
@@ -231,6 +233,7 @@ const OMNI_T = {
     toast_shape_unavailable:'Route shape not available',
     toast_shape_empty:'No shape data for this route',
     toast_shape_error:'Could not load route shape',
+    toast_network_error:'Could not load the line network',
     toast_stops_error:'Could not load the stops from the server',
     toast_locating:'📡 Getting your location…',
     toast_located:'📍 Location detected!',
@@ -462,6 +465,8 @@ const OMNI_T = {
     loading_buses:'Caricamento bus…',
     lbl_line:'linea', lbl_lines:'linee',
     lbl_next_departures:'prossime partenze',
+    // Legenda della rete sulla mappa
+    legend_lines:'Linee', legend_all:'Tutte',
     no_buses:'Nessun bus in arrivo',
     err_arrivals:'Impossibile caricare gli arrivi',
     err_service:'Servizio non disponibile',
@@ -492,6 +497,7 @@ const OMNI_T = {
     toast_shape_unavailable:'Tracciato della linea non disponibile',
     toast_shape_empty:'Nessun tracciato per questa linea',
     toast_shape_error:'Impossibile caricare il tracciato della linea',
+    toast_network_error:'Impossibile caricare la rete delle linee',
     toast_stops_error:'Impossibile caricare le fermate dal server',
     toast_locating:'📡 Sto rilevando la tua posizione…',
     toast_located:'📍 Posizione rilevata!',

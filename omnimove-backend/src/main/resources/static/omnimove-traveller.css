@@ -972,7 +972,9 @@ body {
 .stop-sheet-overlay {
     position: fixed; inset: 0;
     background: rgba(15,23,42,0.45);
-    z-index: 3000;
+    /* Above #stopListPanel (3400): tapping a stop in the list must show its
+       arrivals without the list swallowing the sheet. */
+    z-index: 3600;
     display: none;
     align-items: flex-end;
 }
@@ -1239,18 +1241,41 @@ body {
     100% { transform: translate(-50%,-50%) scale(1.7); opacity: 0;   }
 }
 
-/* ── Route stop list — full-screen overlay with embedded map ── */
+/* ── Route stop list — a sheet over the main map ──
+   It used to be a full-screen page carrying its own small map. The line is drawn
+   on the main map now, so the panel only has to leave that map visible: a bottom
+   sheet on phones, a floating card in the corner on wide screens. */
 #stopListPanel {
     position: fixed;
-    inset: 0;
+    left: 0; right: 0; bottom: 0;
+    /* Deliberately under half the screen: the point of the redesign is that the
+       line stays visible on the map above the list. */
+    max-height: 45vh;
     background: var(--bg-white);
-    z-index: 3500;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -8px 40px rgba(15,23,42,0.20);
+    z-index: 3400;
     display: flex;
     flex-direction: column;
-    transform: translateY(100%);
+    transform: translateY(105%);
     transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 #stopListPanel.open { transform: translateY(0); }
+
+@media (min-width: 769px) {
+    #stopListPanel {
+        /* Clear of the nav rail, so the card floats over the map and not over
+           the app's own sidebar. */
+        left: calc(var(--sidebar-w) + 16px);
+        right: auto;
+        bottom: 16px;
+        width: 380px;
+        max-height: min(62vh, 560px);
+        border-radius: 18px;
+        transform: translateY(calc(100% + 24px));
+    }
+}
 
 /* Topbar */
 .slp-topbar {
@@ -1309,43 +1334,25 @@ body {
     padding: 0 6px; flex-shrink: 0;
 }
 
-/* Embedded map */
-.slp-map {
-    height: 38%;
-    min-height: 160px;
-    flex-shrink: 0;
-    position: relative;
-}
-
-/* Stop list card — overlaps the map slightly with rounded top + shadow */
+/* Stop list */
 .slp-body {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 8px 20px 24px;
+    padding: 10px 20px 20px;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     background: var(--bg-white);
-    border-radius: 18px 18px 0 0;
-    box-shadow: 0 -6px 20px rgba(15,23,42,0.12);
-    margin-top: -18px;   /* pull up over the map edge */
     position: relative;
-    z-index: 1;
 }
 .slp-body::-webkit-scrollbar { width: 3px; }
 .slp-body::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 3px; }
-/* Drag pill hint at the top of the card */
-.slp-body::before {
-    content: '';
-    display: block;
-    width: 36px; height: 4px;
-    background: var(--border-mid);
-    border-radius: 2px;
-    margin: 8px auto 12px;
-}
 
 /* Timeline rows */
-.slp-row { display: flex; gap: 12px; min-height: 52px; }
+.slp-row { display: flex; gap: 12px; min-height: 52px; cursor: pointer; border-radius: 8px; }
+.slp-row:hover { background: #f8fafc; }
 .slp-row--current { background: #f0fdf4; border-radius: 8px; margin: 0 -8px; padding: 0 8px; }
+.slp-row--current:hover { background: #dcfce7; }
 .slp-line-col {
     display: flex; flex-direction: column; align-items: center;
     flex-shrink: 0; width: 18px;
@@ -2358,4 +2365,72 @@ body {
 /* Respect users who ask the system for less motion: keep the halo, drop the animation */
 @media (prefers-reduced-motion: reduce) {
     .me-halo { animation: none; transform: scale(1.2); opacity: 0.5; }
+}
+
+/* ── Network legend — which colour is which line ──
+   The map opens with every line drawn on it, so the legend is what turns a
+   tangle of colours into a readable network: one chip per line, tap to bring
+   that line forward and list its stops. */
+.network-legend {
+    background: var(--bg-white);
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
+    padding: 8px 9px 9px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    max-width: 190px;
+    font-family: inherit;
+}
+.network-legend--hidden { display: none; }
+.nl-title {
+    flex-basis: 100%;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    margin-bottom: 1px;
+}
+.nl-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--border-mid);
+    background: var(--bg-white);
+    border-radius: 50px;
+    padding: 4px 9px 4px 6px;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--text-dark);
+    cursor: pointer;
+    line-height: 1;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.nl-chip:hover { background: var(--bg-app); }
+.nl-swatch {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--nl-color, var(--text-soft));
+    flex-shrink: 0;
+}
+.nl-chip--active {
+    background: var(--nl-color);
+    border-color: var(--nl-color);
+    /* The label colour travels with the swatch: white is unreadable on the
+       lighter lines (lime, gold, orange). */
+    color: var(--nl-text, #fff);
+}
+.nl-chip--active .nl-swatch { background: currentColor; opacity: 0.9; }
+.nl-chip--reset {
+    padding: 4px 9px;
+    font-weight: 700;
+    color: var(--text-soft);
+}
+
+@media (max-width: 768px) {
+    .network-legend { max-width: 152px; padding: 7px 8px 8px; gap: 4px; }
+    .nl-chip { font-size: 10px; padding: 3px 8px 3px 5px; }
 }

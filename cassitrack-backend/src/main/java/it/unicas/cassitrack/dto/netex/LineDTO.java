@@ -23,6 +23,13 @@ public class LineDTO {
     private String transportMode = "bus";
 
     /**
+     * Line and label colour. Null when the route has no colour set, in which
+     * case consumers fall back to whatever they generate themselves.
+     */
+    @JacksonXmlProperty(localName = "Presentation")
+    private PresentationDTO presentation;
+
+    /**
      * Road geometry of the line, or null when it has none. Optional by design:
      * consumers that predate it ignore the element, and lines without a shape
      * keep the stop-to-stop rendering.

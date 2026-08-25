@@ -159,6 +159,12 @@ public class NetexController {
             dto.setShortName(route.getShortName());
             // transportMode è già "bus" per default
 
+            // Publish the line colour. Omitted when the route has none, so a
+            // consumer can distinguish "not set" from a real colour.
+            if (route.getColor() != null && !route.getColor().isBlank()) {
+                dto.setPresentation(new PresentationDTO(route.getColor(), route.getTextColor()));
+            }
+
             // Publish the path as a GML-style posList so consumers (OmniMove)
             // get the geometry with the rest of the network. Omitted entirely
             // for lines without a shape.

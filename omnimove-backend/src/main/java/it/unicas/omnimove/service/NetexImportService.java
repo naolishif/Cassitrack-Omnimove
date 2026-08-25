@@ -106,6 +106,22 @@ public class NetexImportService {
         return (s == null || s.isBlank()) ? null : s;
     }
 
+    /**
+     * Feed colour → the 6-hex form the column holds, or null.
+     *
+     * The column is VARCHAR(6), so anything that is not a clean 6-digit hex has
+     * to become NULL rather than reach the insert: a stray '#RRGGBB' from a
+     * hand-edited route would be truncated to '#RRGGB' and paint the wrong
+     * colour on every map that reads it. Null is honest — the traveller map
+     * falls back to a generated colour.
+     */
+    private static String normalizeHex(String c) {
+        if (c == null) return null;
+        String v = c.trim();
+        if (v.startsWith("#")) v = v.substring(1);
+        return v.matches("(?i)[0-9a-f]{6}") ? v.toUpperCase() : null;
+    }
+
     @Transactional
     public void importDataFromCassitrack() {
         System.out.println("Inizio scaricamento dati NeTEx da Cassitrack...");
@@ -217,6 +233,13 @@ public class NetexImportService {
                     route.setLongName(dto.getName());
                     route.setShortName(dto.getShortName());
                     route.setActive(true);
+                    // Colour, when the feed carries it. Normalised here rather
+                    // than at every read site: CassiTrack stores bare hex, but a
+                    // hand-edited route could carry a leading '#'.
+                    if (dto.getPresentation() != null) {
+                        route.setColor(normalizeHex(dto.getPresentation().getColour()));
+                        route.setTextColor(normalizeHex(dto.getPresentation().getTextColour()));
+                    }
                     return route;
                 }).collect(java.util.stream.Collectors.toList());
                 routeRepository.saveAll(routes);

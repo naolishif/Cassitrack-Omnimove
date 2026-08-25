@@ -22,6 +22,13 @@ public class LineDTO {
     private String transportMode;
 
     /**
+     * Line and label colour, or null on feeds that predate it. Imported into
+     * routes.color / routes.text_color.
+     */
+    @JacksonXmlProperty(localName = "Presentation")
+    private PresentationDTO presentation;
+
+    /**
      * Road geometry of the line, or null when the feed carries none (older
      * CassiTrack builds). Imported into route_shapes; absence simply leaves the
      * existing shape untouched.

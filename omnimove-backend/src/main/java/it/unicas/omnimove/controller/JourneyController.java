@@ -73,6 +73,7 @@ public class JourneyController {
     private final WeatherService        weatherService;
     private final it.unicas.omnimove.repository.RouteShapeRepository    routeShapeRepository;
     private final it.unicas.omnimove.repository.ScheduledStopRepository scheduledStopRepository;
+    private final it.unicas.omnimove.repository.RouteRepository         routeRepository;
 
     @GetMapping("/stops")
     @Operation(summary = "List active stops for origin/destination pickers")
@@ -412,6 +413,63 @@ public class JourneyController {
         List<List<Object>> result = points.stream()
                 .map(p -> List.<Object>of(p.getLat(), p.getLon(), Boolean.TRUE.equals(p.getIsStop())))
                 .toList();
+
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * GET /api/v1/journeys/routes/shapes
+     *
+     * Geometry of the whole network in a single call.
+     *
+     * The traveller map draws every line the moment it opens, so asking for one
+     * route at a time would mean a request per line before the map is readable.
+     * The payload is small — a few hundred vertices per line — and static enough
+     * that the client fetches it once per session.
+     *
+     * Each entry is {route_id, short_name, long_name, points:[[lat, lon, isStop], ...]}.
+     */
+    @GetMapping("/routes/shapes")
+    @Operation(summary = "Road geometry of every active route, for the network overview map")
+    public ResponseEntity<List<Map<String, Object>>> allRouteShapes() {
+
+        // Group the flat vertex table back into one path per route. The query is
+        // already ordered by (route_id, seq), so a LinkedHashMap keeps both the
+        // route order and the drawing order without a second sort.
+        java.util.LinkedHashMap<String, List<List<Object>>> byRoute = new java.util.LinkedHashMap<>();
+        for (var p : routeShapeRepository.findAllByOrderByRouteIdAscSeqAsc()) {
+            byRoute.computeIfAbsent(p.getRouteId(), k -> new ArrayList<>())
+                   .add(List.<Object>of(p.getLat(), p.getLon(), Boolean.TRUE.equals(p.getIsStop())));
+        }
+        if (byRoute.isEmpty()) return ResponseEntity.ok(List.of());
+
+        // Route rows arrive at runtime from the NeTEx import, so geometry can
+        // outlive its route: fall back to the id rather than dropping the line.
+        Map<String, it.unicas.omnimove.model.Route> routes = routeRepository.findAll().stream()
+                .collect(Collectors.toMap(it.unicas.omnimove.model.Route::getId, r -> r, (a, b) -> a));
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        byRoute.forEach((routeId, points) -> {
+            var route = routes.get(routeId);
+            if (route != null && !route.isActive()) return;   // retired line: not on the map
+            String shortName = route != null && route.getShortName() != null
+                    ? route.getShortName() : routeId;
+            String longName  = route != null && route.getLongName() != null
+                    ? route.getLongName() : "";
+
+            // A LinkedHashMap, not Map.of: the colour is nullable for a line
+            // CassiTrack never gave one, and Map.of throws on a null value.
+            // Sending the key as null lets the client tell "no colour set" from
+            // a real colour and fall back to its own.
+            Map<String, Object> entry = new java.util.LinkedHashMap<>();
+            entry.put("route_id",   routeId);
+            entry.put("short_name", shortName);
+            entry.put("long_name",  longName);
+            entry.put("color",      route != null ? route.getColor()     : null);
+            entry.put("text_color", route != null ? route.getTextColor() : null);
+            entry.put("points",     points);
+            result.add(entry);
+        });
 
         return ResponseEntity.ok(result);
     }

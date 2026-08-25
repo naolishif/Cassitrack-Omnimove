@@ -511,6 +511,184 @@ function renderStopMarkers() {
     });
 }
 
+// ── The line network, drawn on the main map from the first frame ───
+// Opening the app used to show bare stop markers: the traveller had to tap a
+// stop, then a line inside the arrivals sheet, before a single route appeared.
+// The network is the map's baseline content now — every line in its own colour,
+// no taps required — and tapping one only promotes it to the foreground.
+
+let NETWORK_ROUTES = [];        // [{route_id, short_name, long_name, points}]
+window._networkLayers = {};     // routeId → polyline on the main map
+let _focusedRouteId  = null;
+let _networkHidden   = false;   // true while a journey preview owns the map
+
+// Urban lines share whole streets. Drawn at equal width they would hide one
+// another, so each successive line is thinner than the one before: on a shared
+// stretch every colour keeps a visible band at the edges.
+function networkWeight(index) {
+    return Math.max(3, 8 - index * 1.8);
+}
+
+async function loadNetworkLines() {
+    try {
+        const r = await apiFetch('/journeys/routes/shapes');
+        if (!r.ok) throw new Error('shapes ' + r.status);
+        const routes = await r.json();
+        if (!Array.isArray(routes) || !routes.length) return;
+        NETWORK_ROUTES = routes.filter(rt => Array.isArray(rt.points) && rt.points.length > 1);
+        registerRouteColors(routes);
+        drawNetworkLines();
+        renderNetworkLegend();
+    } catch (e) {
+        console.error('loadNetworkLines failed:', e);
+        showToast(t('toast_network_error'), true);
+    }
+}
+
+// Every line the feed knows about, including any without geometry: the arrivals
+// sheet and the interchange badges name lines that may never be drawn on the map.
+function registerRouteColors(routes) {
+    ROUTE_COLORS.byId = {};
+    ROUTE_COLORS.byShortName = {};
+    ROUTE_COLORS.textByShortName = {};
+    routes.forEach(r => {
+        if (!r.color) return;
+        const hex = '#' + r.color;
+        ROUTE_COLORS.byId[r.route_id] = hex;
+        // First line to claim a short name keeps it. Two routes can share one
+        // ("11" is both the Liceo and the ITIS run) and a badge showing only the
+        // number cannot tell them apart, so it has to settle on one colour.
+        if (!ROUTE_COLORS.byShortName[r.short_name]) {
+            ROUTE_COLORS.byShortName[r.short_name] = hex;
+            if (r.text_color) ROUTE_COLORS.textByShortName[r.short_name] = '#' + r.text_color;
+        }
+    });
+}
+
+function drawNetworkLines() {
+    Object.values(window._networkLayers).forEach(l => { try { map.removeLayer(l); } catch(_) {} });
+    window._networkLayers = {};
+
+    NETWORK_ROUTES.forEach((route, i) => {
+        const color = routeColorById(route.route_id, route.short_name);
+        const line  = L.polyline(route.points.map(p => [p[0], p[1]]), {
+            color,
+            weight:   networkWeight(i),
+            opacity:  0.85,
+            lineCap:  'round',
+            lineJoin: 'round'
+        }).addTo(map);
+
+        const label = route.long_name
+            ? `<b>${escHtml(route.short_name)}</b> · ${escHtml(route.long_name)}`
+            : `<b>${escHtml(route.short_name)}</b>`;
+        line.bindTooltip(label, { sticky: true, direction: 'top' });
+        line.on('click', () => drawBusRoute(route.route_id, route.short_name, color));
+
+        window._networkLayers[route.route_id] = line;
+    });
+}
+
+// Highlight one line without removing the rest: dimming instead of hiding keeps
+// the traveller's sense of where this route sits inside the network.
+function focusNetworkLine(routeId) {
+    _focusedRouteId = routeId;
+    NETWORK_ROUTES.forEach((route, i) => {
+        const layer = window._networkLayers[route.route_id];
+        if (!layer) return;
+        const isFocus = route.route_id === routeId;
+        layer.setStyle({
+            opacity: isFocus ? 1 : 0.15,
+            weight:  isFocus ? Math.max(6, networkWeight(i)) : networkWeight(i)
+        });
+        if (isFocus) layer.bringToFront();
+    });
+    document.querySelectorAll('.nl-chip').forEach(c =>
+        c.classList.toggle('nl-chip--active', c.dataset.routeId === routeId));
+}
+
+function clearNetworkFocus() {
+    _focusedRouteId = null;
+    // Re-asserting the original order matters as much as the style: bringToFront
+    // during focus left the highlighted line on top, covering the thinner ones.
+    NETWORK_ROUTES.forEach((route, i) => {
+        const layer = window._networkLayers[route.route_id];
+        if (!layer) return;
+        layer.setStyle({ opacity: 0.85, weight: networkWeight(i) });
+        layer.bringToFront();
+    });
+    document.querySelectorAll('.nl-chip').forEach(c => c.classList.remove('nl-chip--active'));
+}
+
+// A planned journey draws its own legs; the full network underneath would turn
+// the map into noise, so it steps aside until the journey is cleared.
+function setNetworkLinesVisible(visible) {
+    _networkHidden = !visible;
+    Object.values(window._networkLayers).forEach(l => {
+        try { visible ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
+    });
+    const legend = document.getElementById('networkLegend');
+    if (legend) legend.classList.toggle('network-legend--hidden', !visible);
+}
+
+// A Leaflet control rather than a div in the pane: the map sits next to the
+// Smart Routes sidebar on desktop and fills the pane on mobile, and only the
+// control keeps the legend pinned inside the map itself in both layouts.
+let _legendControl = null;
+
+function renderNetworkLegend() {
+    if (!_legendControl) {
+        const Legend = L.Control.extend({
+            options: { position: 'topright' },
+            onAdd: function () {
+                const div = L.DomUtil.create('div', 'network-legend');
+                div.id = 'networkLegend';
+                // Chip taps belong to the chips, not to the map under them
+                L.DomEvent.disableClickPropagation(div);
+                L.DomEvent.disableScrollPropagation(div);
+                return div;
+            }
+        });
+        _legendControl = new Legend().addTo(map);
+    }
+    const legend = document.getElementById('networkLegend');
+    if (!legend) return;
+    legend.innerHTML =
+        `<span class="nl-title">${escHtml(t('legend_lines'))}</span>` +
+        NETWORK_ROUTES.map(r =>
+            `<button type="button" class="nl-chip" data-route-id="${escHtml(r.route_id)}"` +
+            ` style="--nl-color:${routeColorById(r.route_id, r.short_name)};` +
+            `--nl-text:${routeTextColor(r.short_name, routeColorById(r.route_id, r.short_name))}"` +
+            ` title="${escHtml(r.long_name || r.short_name)}">` +
+            `<span class="nl-swatch"></span>${escHtml(r.short_name)}</button>`
+        ).join('') +
+        `<button type="button" class="nl-chip nl-chip--reset" onclick="resetNetworkView()">` +
+        `${escHtml(t('legend_all'))}</button>`;
+}
+
+document.addEventListener('click', e => {
+    const chip = e.target.closest('.nl-chip[data-route-id]');
+    if (!chip) return;
+    const route = NETWORK_ROUTES.find(r => r.route_id === chip.dataset.routeId);
+    if (!route) return;
+    // A second tap on the active chip clears the highlight instead of re-opening it
+    if (_focusedRouteId === route.route_id) { resetNetworkView(); return; }
+    drawBusRoute(route.route_id, route.short_name, routeColorById(route.route_id, route.short_name));
+});
+
+// Back to the whole network: no line highlighted, no stop list open.
+function resetNetworkView() {
+    clearBusRoute();
+    // Fresh bounds object: Polyline.getBounds() hands back the layer's own
+    // instance, so extending it in place would corrupt the layer.
+    const bounds = L.latLngBounds([]);
+    Object.values(window._networkLayers).forEach(l => {
+        const b = l.getBounds();
+        if (b && b.isValid()) bounds.extend(b);
+    });
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
+}
+
 // ── Stop arrivals bottom sheet ─────────────────────────────────────
 
 const STATUS_BG = {
@@ -571,6 +749,7 @@ async function showStopArrivals(stopId, stopName) {
 
 function closeStopSheet() {
     document.getElementById('stopSheetOverlay').classList.remove('open');
+    _sheetCurrentStopId = null;
 }
 
 function handleSheetBackdrop(e) {
@@ -596,6 +775,10 @@ document.addEventListener('click', e => {
 let _slpPreviousStopId   = null;
 let _slpPreviousStopName = null;
 
+// The stop the traveller came from, marked in red along the line and in the list.
+// Distinct from _sheetCurrentStopId, which only lives as long as the sheet is open.
+let _slpHighlightStopId = null;
+
 // State for the invert-route feature
 let _slpShapePoints = null;
 let _slpStopList    = null;
@@ -605,78 +788,74 @@ let _slpRouteDir    = null;
 let _slpReversed    = false;
 
 async function drawBusRoute(routeId, shortName, color, routeDir = '') {
-    clearBusRoute();
+    // Drop whatever line was highlighted before, then promote this one.
+    clearRouteHighlight();
 
     // Remember context so back button can reopen the arrivals sheet
     _slpPreviousStopId   = _sheetCurrentStopId;
-    _slpPreviousStopName = document.getElementById('stopSheetTitle')?.textContent || null;
+    _slpPreviousStopName = _slpPreviousStopId
+        ? (document.getElementById('stopSheetTitle')?.textContent || null) : null;
+    _slpHighlightStopId  = _slpPreviousStopId;   // the stop to mark along the line
     _slpReversed         = false;
 
     // Close the arrivals sheet — the stop list panel takes its place
     closeStopSheet();
 
-    // Hide generic stop markers while route is shown
+    // Dim the rest of the network rather than erasing it
+    focusNetworkLine(routeId);
+
+    // Generic stop markers step aside for this line's own dots, which carry the
+    // stop name and open the same arrivals sheet on tap.
     (window._stopMarkers || []).forEach(m => { try { map.removeLayer(m); } catch(_) {} });
 
-    // Fetch shape + stop list in parallel
     try {
-        const [shapeRes, stopsRes] = await Promise.all([
-            apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/shape'),
-            apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/stops')
-        ]);
-        if (!shapeRes.ok) { showToast(t('toast_shape_unavailable'), true); clearBusRoute(); return; }
+        // Geometry is already in memory from the network load; only the ordered
+        // stop list still needs a round trip.
+        const cached   = NETWORK_ROUTES.find(r => r.route_id === routeId);
+        // Swallowed here rather than left dangling: the shape request below is
+        // awaited first, and a rejection nobody is listening to yet is an
+        // unhandled rejection.
+        const stopsReq = apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/stops')
+                            .catch(() => null);
 
-        const points   = await shapeRes.json();   // [[lat, lon, isStop], ...]
-        const stopList = stopsRes.ok ? await stopsRes.json() : [];
+        let points = cached ? cached.points : null;
+        if (!points) {
+            const shapeRes = await apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/shape');
+            if (!shapeRes.ok) { showToast(t('toast_shape_unavailable'), true); clearBusRoute(); return; }
+            points = await shapeRes.json();   // [[lat, lon, isStop], ...]
+        }
+
+        const stopsRes = await stopsReq;
+        const stopList = stopsRes && stopsRes.ok ? await stopsRes.json() : [];
 
         if (!points.length) { showToast(t('toast_shape_empty'), true); clearBusRoute(); return; }
 
-        // Draw polyline
-        const line = L.polyline(points.map(p => [p[0], p[1]]), { color, weight: 4, opacity: 0.88 }).addTo(map);
-        _busRouteLayers.push(line);
+        // A line with no cached geometry (never returned by /routes/shapes) still
+        // has to be drawn, otherwise focusing it would highlight nothing.
+        if (!cached) {
+            const line = L.polyline(points.map(p => [p[0], p[1]]),
+                { color, weight: 6, opacity: 0.95 }).addTo(map);
+            _busRouteLayers.push(line);
+        }
 
-        // Build stop lookup from stopList for name resolution
-        const stopByLatLon = {};
-        stopList.forEach(s => { stopByLatLon[`${s.lat.toFixed(4)},${s.lon.toFixed(4)}`] = s; });
+        renderRouteStopDots(stopList, points, color);
 
-        // Interactive white dots at stop vertices only
-        const currentStopLat = _sheetCurrentStopId ? (STOPS[_sheetCurrentStopId] || {}).lat : null;
-        const currentStopLon = _sheetCurrentStopId ? (STOPS[_sheetCurrentStopId] || {}).lon : null;
-
-        points.filter(p => p[2]).forEach(p => {
-            const isCurrent = currentStopLat != null
-                && Math.abs(p[0] - currentStopLat) < 0.0002
-                && Math.abs(p[1] - currentStopLon) < 0.0002;
-
-            // Resolve stop name from stopList
-            const key  = `${p[0].toFixed(4)},${p[1].toFixed(4)}`;
-            const info = stopByLatLon[key];
-            const name = info ? info.name : null;
-
-            const dot = L.circleMarker([p[0], p[1]], {
-                radius:      isCurrent ? 9 : 6,
-                color:       isCurrent ? '#ef4444' : color,
-                fillColor:   '#ffffff',
-                fillOpacity: 1,
-                weight:      isCurrent ? 3 : 2,
-                interactive: true
-            }).addTo(map);
-
-            if (name) dot.bindPopup(`<b style="font-size:13px">${escHtml(name)}</b>`, { closeButton: false, offset: [0, -4] });
-            _busRouteLayers.push(dot);
-        });
-
-        map.fitBounds(line.getBounds(), { padding: [50, 50] });
+        // Opened from the map or the legend there is no direction to inherit from
+        // an arrivals card, so the terminus stands in for it.
+        const dir = routeDir || (stopList.length ? stopList[stopList.length - 1].name : '');
 
         // Store for invert-route toggle
         _slpShapePoints = points;
         _slpStopList    = stopList;
         _slpShortName   = shortName;
         _slpColor       = color;
-        _slpRouteDir    = routeDir;
+        _slpRouteDir    = dir;
 
-        // Show stop list panel (full-screen with embedded map)
-        showStopListPanel(shortName, color, stopList, points, routeDir, false);
+        // Stop list is a sheet now, not a full-screen page: the route stays
+        // visible on the main map right next to the list of its stops.
+        showStopListPanel(shortName, color, stopList, points, dir, false);
+
+        fitRouteBounds(L.latLngBounds(points.map(p => [p[0], p[1]])));
 
     } catch(e) {
         showToast(t('toast_shape_error'), true);
@@ -684,29 +863,70 @@ async function drawBusRoute(routeId, shortName, color, routeDir = '') {
     }
 }
 
+// White dots on every stop of the highlighted line. They resolve their name and
+// id from the ordered stop list; the shape's isStop vertices are the fallback for
+// a route with geometry but no timetable rows.
+function renderRouteStopDots(stopList, points, color) {
+    const dots = (stopList && stopList.length)
+        ? stopList.map(s => ({ id: s.stop_id, name: s.name, lat: s.lat, lon: s.lon }))
+        : points.filter(p => p[2]).map(p => ({ id: null, name: null, lat: p[0], lon: p[1] }));
+
+    dots.forEach(s => {
+        const isCurrent = _slpHighlightStopId && s.id === _slpHighlightStopId;
+        const dot = L.circleMarker([s.lat, s.lon], {
+            radius:      isCurrent ? 9 : 6,
+            color:       isCurrent ? '#ef4444' : color,
+            fillColor:   '#ffffff',
+            fillOpacity: 1,
+            weight:      isCurrent ? 3 : 2,
+            interactive: true
+        }).addTo(map);
+
+        if (s.name) dot.bindTooltip(`<b>${escHtml(s.name)}</b>`, { direction: 'top', offset: [0, -6] });
+        if (s.id)   dot.on('click', () => showStopArrivals(s.id, s.name || s.id));
+        _busRouteLayers.push(dot);
+    });
+}
+
+// The stop list sheet covers part of the map; without compensating for it the
+// route would be centred behind the sheet and read as half missing.
+function fitRouteBounds(bounds) {
+    if (!bounds || !bounds.isValid()) return;
+    const panel  = document.getElementById('stopListPanel');
+    const open   = panel && panel.classList.contains('open');
+    const rect   = open ? panel.getBoundingClientRect() : null;
+    const mobile = window.matchMedia('(max-width: 768px)').matches;
+
+    if (!open)   { map.fitBounds(bounds, { padding: [50, 50] }); return; }
+    if (mobile)  { map.fitBounds(bounds, { paddingTopLeft: [30, 30], paddingBottomRight: [30, rect.height + 20] }); return; }
+    map.fitBounds(bounds, { paddingTopLeft: [rect.width + 40, 40], paddingBottomRight: [40, 40] });
+}
+
+// Everything drawn on top of the base network for one highlighted line.
+function clearRouteHighlight() {
+    _busRouteLayers.forEach(l => { try { map.removeLayer(l); } catch(_) {} });
+    _busRouteLayers = [];
+    clearNetworkFocus();
+    if (!_networkHidden && window._stopMarkers)
+        window._stopMarkers.forEach(m => { try { m.addTo(map); } catch(_) {} });
+}
+
 function closeStopListPanel() {
     const panel = document.getElementById('stopListPanel');
     if (panel) panel.classList.remove('open');
-    if (_slpMap) { try { _slpMap.remove(); } catch(_) {} _slpMap = null; }
-    // Clear main-map route layers and restore generic stop markers
-    _busRouteLayers.forEach(l => { try { map.removeLayer(l); } catch(_) {} });
-    _busRouteLayers = [];
-    if (window._stopMarkers) window._stopMarkers.forEach(m => { try { m.addTo(map); } catch(_) {} });
+    clearRouteHighlight();
     // Reopen the next-buses sheet if we came from one
     if (_slpPreviousStopId && _slpPreviousStopName) {
         showStopArrivals(_slpPreviousStopId, _slpPreviousStopName);
     }
-    _slpPreviousStopId = _slpPreviousStopName = null;
+    _slpPreviousStopId = _slpPreviousStopName = _slpHighlightStopId = null;
 }
 
 function clearBusRoute() {
-    if (_slpMap) { try { _slpMap.remove(); } catch(_) {} _slpMap = null; }
-    _busRouteLayers.forEach(l => { try { map.removeLayer(l); } catch(_) {} });
-    _busRouteLayers = [];
-    if (window._stopMarkers) window._stopMarkers.forEach(m => { try { m.addTo(map); } catch(_) {} });
+    clearRouteHighlight();
     const panel = document.getElementById('stopListPanel');
     if (panel) panel.classList.remove('open');
-    _slpPreviousStopId = _slpPreviousStopName = null;
+    _slpPreviousStopId = _slpPreviousStopName = _slpHighlightStopId = null;
 }
 
 function showBusRouteBanner(shortName, color) {
@@ -721,8 +941,6 @@ function showBusRouteBanner(shortName, color) {
     _busRouteBanner = banner;
 }
 
-let _slpMap = null;  // the embedded Leaflet map inside the stop list panel
-
 function showStopListPanel(shortName, color, stopList, shapePoints, routeDir, reversed) {
     const panel = document.getElementById('stopListPanel');
     const title = document.getElementById('stopListTitle');
@@ -732,28 +950,22 @@ function showStopListPanel(shortName, color, stopList, shapePoints, routeDir, re
     // Title: badge + direction arrow
     const dirText = routeDir ? ` → ${routeDir}` : '';
     title.innerHTML =
-        `<span class="slp-badge" style="background:${color}">${escHtml(shortName)}</span>` +
+        `<span class="slp-badge" style="background:${color};color:${routeTextColor(shortName, color)}">${escHtml(shortName)}</span>` +
         `<span class="slp-dir">${escHtml(dirText)}</span>`;
-
-    // Current stop coordinates (from arrivals context)
-    const currentStopLat = _sheetCurrentStopId ? (STOPS[_sheetCurrentStopId] || {}).lat : null;
-    const currentStopLon = _sheetCurrentStopId ? (STOPS[_sheetCurrentStopId] || {}).lon : null;
-
-    function isCurrentStop(lat, lon) {
-        return currentStopLat != null
-            && Math.abs(lat - currentStopLat) < 0.0003
-            && Math.abs(lon - currentStopLon) < 0.0003;
-    }
 
     // Build stop list HTML from stopList coords (reliable — no isStop flag needed)
     body.innerHTML = stopList.map((stop, i) => {
         const isFirst   = i === 0;
         const isLast    = i === stopList.length - 1;
-        const isCurrent = isCurrentStop(stop.lat, stop.lon);
+        const isCurrent = !!_slpHighlightStopId && stop.stop_id === _slpHighlightStopId;
+        // Interchanges: every other line calling at this stop, in its own colour
         const linesHtml = (stop.lines || []).map(l =>
-            `<span class="slp-line-badge" style="background:${routeColor(l)}">${escHtml(l)}</span>`
+            `<span class="slp-line-badge" style="background:${routeColor(l)};color:${routeTextColor(l)}">${escHtml(l)}</span>`
         ).join('');
-        return `<div class="slp-row${isCurrent ? ' slp-row--current' : ''}">
+        return `<div class="slp-row${isCurrent ? ' slp-row--current' : ''}"
+                     data-stop-id="${escHtml(stop.stop_id || '')}"
+                     data-stop-name="${escHtml(stop.name || '')}"
+                     data-lat="${Number(stop.lat)}" data-lon="${Number(stop.lon)}">
             <div class="slp-line-col">
                 <div class="slp-connector${isFirst ? ' slp-connector--hidden' : ''}"></div>
                 <div class="slp-dot${isCurrent ? ' slp-dot--current' : ''}"></div>
@@ -773,41 +985,18 @@ function showStopListPanel(shortName, color, stopList, shapePoints, routeDir, re
         const cur = body.querySelector('.slp-row--current');
         if (cur) cur.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
-
-    // Init embedded Leaflet map (destroy previous if any)
-    if (_slpMap) { try { _slpMap.remove(); } catch(_) {} _slpMap = null; }
-
-    requestAnimationFrame(() => {
-        _slpMap = L.map('slpMap', { zoomControl: false, attributionControl: false })
-                   .setView([41.4901, 13.8303], 14);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19, attribution: '© OpenStreetMap'
-        }).addTo(_slpMap);
-
-        // Draw route polyline from shape points
-        if (shapePoints && shapePoints.length) {
-            const line = L.polyline(shapePoints.map(p => [p[0], p[1]]), {
-                color, weight: 4, opacity: 0.88
-            }).addTo(_slpMap);
-            _slpMap.fitBounds(line.getBounds(), { padding: [24, 24] });
-        }
-
-        // Draw stop dots directly from stopList (no brittle isStop-flag lookup)
-        stopList.forEach(stop => {
-            const isCurrent = isCurrentStop(stop.lat, stop.lon);
-            const m = L.circleMarker([stop.lat, stop.lon], {
-                radius:      6,
-                color:       color,
-                fillColor:   isCurrent ? color : '#ffffff',
-                fillOpacity: 1,
-                weight:      2
-            }).addTo(_slpMap)
-             .bindPopup(`<b style="font-size:13px">${escHtml(stop.name)}</b>`,
-                        { closeButton: false, offset: [0, -4] });
-            if (isCurrent) m.openPopup();
-        });
-    });
 }
+
+// Tapping a stop in the list pans the main map to it and opens its arrivals —
+// the same sheet a tap on the map marker gives, reached from the list instead.
+document.addEventListener('click', e => {
+    const row = e.target.closest('#stopListBody .slp-row[data-stop-id]');
+    if (!row || !row.dataset.stopId) return;
+    const lat = parseFloat(row.dataset.lat);
+    const lon = parseFloat(row.dataset.lon);
+    if (!Number.isNaN(lat) && !Number.isNaN(lon)) map.panTo([lat, lon]);
+    showStopArrivals(row.dataset.stopId, row.dataset.stopName || row.dataset.stopId);
+});
 
 function invertRoute() {
     if (!_slpStopList || !_slpShapePoints) return;
@@ -820,6 +1009,8 @@ function invertRoute() {
     _slpShapePoints = revShape;
     _slpRouteDir    = newDir;
     showStopListPanel(_slpShortName, _slpColor, revStops, revShape, newDir, _slpReversed);
+    // The dots on the map are the same set in the same places — only the list
+    // order and the direction label flip, so the map layers are left untouched.
 }
 
 // Ritardo nel popup fermata: real-time (Google on), retrospettivo C1 (off), o niente.
@@ -838,11 +1029,47 @@ function delayLine(a) {
 }
 
 // Deterministic color per route short-name (consistent across renders)
+// Colours come from CassiTrack, where the fleet manager sets them per line and
+// where they are chosen to stay apart from one another. They are filled in by
+// loadNetworkLines() and keyed both ways: by route id for the map, by short name
+// for the interchange badges, which only ever know the number.
+const ROUTE_COLORS = { byId: {}, byShortName: {}, textByShortName: {} };
+
+// Fallback only. A hash into ten colours cannot keep eighteen lines apart — two
+// lines landing on the same swatch is arithmetic, not bad luck — so this is what
+// a line gets when CassiTrack has no colour for it, not the normal path.
 const ROUTE_PALETTE = ['#d32f2f','#1565c0','#2e7d32','#e65100','#6a1b9a','#00695c','#37474f','#ad1457','#0277bd','#558b2f'];
-function routeColor(name) {
+function hashColor(name) {
     let h = 0;
     for (const c of (name || '')) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
     return ROUTE_PALETTE[Math.abs(h) % ROUTE_PALETTE.length];
+}
+
+function routeColor(name) {
+    return ROUTE_COLORS.byShortName[name] || hashColor(name);
+}
+
+function routeColorById(routeId, shortName) {
+    return ROUTE_COLORS.byId[routeId] || routeColor(shortName);
+}
+
+// Label colour for a badge painted in `hex`. CassiTrack publishes one per line,
+// but a route added in the editor may carry a colour and no text colour, so the
+// readable choice is computed when it is missing rather than defaulting to white
+// and leaving white-on-yellow badges.
+function routeTextColor(shortName, hex) {
+    return ROUTE_COLORS.textByShortName[shortName] || contrastingText(hex || routeColor(shortName));
+}
+
+function contrastingText(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+    if (!m) return '#ffffff';
+    const n = parseInt(m[1], 16);
+    // WCAG relative luminance, so the choice matches the contrast the palette
+    // was validated against rather than a rough brightness average.
+    const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+    return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#ffffff' : '#111111';
 }
 
 function etaText(isoString, now) {
@@ -866,8 +1093,12 @@ function renderArrivals(list, arrivals) {
     }
 
     list.innerHTML = [...groups.entries()].map(([shortName, group]) => {
-        const color   = routeColor(shortName);
         const first   = group[0];
+        // Keyed by route id, not by the number on the badge: two routes can
+        // share a short name ("11" is both the Liceo and the ITIS run) and have
+        // different colours, and the dots this colour paints must match the line
+        // the map highlights.
+        const color   = routeColorById(first.route_id, shortName);
         const second  = group[1];
         const t1      = etaText(first.estimated_arrival, now);
         const t2      = second ? etaText(second.estimated_arrival, now) : null;
@@ -906,7 +1137,7 @@ function renderArrivals(list, arrivals) {
                      data-route-color="${color}"
                      data-route-dir="${escHtml(routeDir)}"
                      ${routeId ? 'title="Tap to show route on map"' : ''}>
-            <div class="tmb-badge" style="background:${color}">${escHtml(shortName)}</div>
+            <div class="tmb-badge" style="background:${color};color:${routeTextColor(shortName, color)}">${escHtml(shortName)}</div>
             <div class="tmb-info">
                 <div class="tmb-times">${timesHtml}</div>
                 <div class="tmb-meta">${rtHtml}${delayHtml}${crowdHtml}</div>
@@ -1120,6 +1351,9 @@ async function doSearch() {
     // pair: the sheet is an opaque overlay on the sidebar, so the new results rendered
     // underneath stayed invisible and Search looked dead. Tear it down exactly like ✕ does.
     clearJourneySelection();
+    // Same for a line the traveller was browsing on the network map
+    clearBusRoute();
+    closeStopSheet();
 
     // Switch to map pane
     document.querySelectorAll('.sidebar-nav .nav-item').forEach(n => n.classList.remove('active'));
@@ -1263,8 +1497,7 @@ function renderRoutes(data) {
             <div class="metric-value" style="color:${greenColor(opt.green_index)}">${opt.green_index}/100</div>
         </div>
     </div>
-    <button class="action-btn ${btn.cls}"
-        onclick="selectMode('${opt.mode}','${opt.mode_label}',${opt.green_index},${opt.distance_metres},${opt.cost_euros})">
+    <button class="action-btn ${btn.cls}" data-select-mode="${escHtml(opt.mode)}">
         ${btn.label}
     </button>
 </div>`;
@@ -1295,6 +1528,8 @@ function showRoutePreview(mode, legs) {
 
     // Hide all generic stop markers — we'll show only relevant ones for BUS
     (window._stopMarkers || []).forEach(m => map.removeLayer(m));
+    // …and the base network too, so the journey legs are the only lines drawn
+    setNetworkLinesVisible(false);
 
     const color = LINE_COLORS[mode] || '#0f172a';
 
@@ -1360,9 +1595,27 @@ function showRoutePreview(mode, legs) {
     }
 }
 
+// The card button carries only the mode. It used to inline the whole option —
+// onclick="selectMode('BUS','17 → Ospedale … Capo d'Acqua',…)" — and the
+// apostrophe in a stop name closed the string literal mid-call, so the browser
+// threw a SyntaxError and the button did nothing. Everything the handler needs
+// is already in window._routeOptions, keyed by mode.
+document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-select-mode]');
+    if (btn) selectMode(btn.dataset.selectMode);
+});
+
 // selectMode — highlights the card, previews the route on the map, and shows the Start Journey banner.
 // Full GPS resolution + solid lines happen in startJourney.
 function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
+    // Arguments stay optional so the function is still callable directly; when
+    // omitted they come from the option the cards were rendered from.
+    const _opt     = (window._routeOptions || {})[mode] || {};
+    label          = label          ?? _opt.mode_label ?? mode;
+    greenIndex     = greenIndex     ?? _opt.green_index ?? 0;
+    distanceMetres = distanceMetres ?? _opt.distance_metres ?? 0;
+    costEuros      = costEuros      ?? _opt.cost_euros ?? 0;
+
     selectedJourney = {
         mode, label, greenIndex,
         distanceKm: distanceMetres / 1000,
@@ -1461,8 +1714,9 @@ function clearJourneySelection() {
         window._busRouteLines = [];
     }
 
-    // Restore bus-stop markers
+    // Restore bus-stop markers and the base network underneath them
     if (window._stopMarkers) window._stopMarkers.forEach(m => m.addTo(map));
+    setNetworkLinesVisible(true);
 
     selectedJourney = null;
     // Left true by a successful start: without this reset, Start Journey on the next pick
@@ -1759,8 +2013,9 @@ async function startJourney() {
             });
         } catch (e) { console.warn('Could not record journey event:', e); }
 
-        // 3) Nascondi le fermate
+        // 3) Nascondi le fermate e la rete di base
         if (window._stopMarkers) window._stopMarkers.forEach(m => map.removeLayer(m));
+        setNetworkLinesVisible(false);
 
         // 4) Pulisci i layer del viaggio precedente
         clearRoutePreview();
@@ -2356,8 +2611,11 @@ function renderSuggestions(suggestions) {
     msgs.scrollTop = msgs.scrollHeight;
 }
 
-// ── Initial load: populate stops (dropdowns + map markers) ─────────
+// ── Initial load: stops (dropdowns + map markers) and the line network ──
+// Independent of each other on purpose: a failing stops call should not leave
+// the map blank of lines, and vice versa.
 loadStops();
+loadNetworkLines();
 
 // ══════════════════════════════════════════════════════════════
 

@@ -86,7 +86,15 @@ window.addEventListener('load', () => {
 
     fetch(`${API}/routes`).then(r=>r.json()).then(routes=>{
         routes.forEach((route, i)=>{
-            const color = `hsl(${(i * 137.5) % 360}, 70%, 55%)`;
+            // The line's own colour, the same value OmniMove draws. This map
+            // used to generate a golden-angle hue per index instead, so the two
+            // apps painted the same line differently and the colour a fleet
+            // manager picked in Data Management was visible nowhere but the
+            // swatch in that table. The generated hue is the fallback now, for
+            // a route that genuinely has no colour set.
+            const color = route.color
+                ? '#' + String(route.color).replace(/^#/, '')
+                : `hsl(${(i * 137.5) % 360}, 70%, 55%)`;
             routeColors[route.id] = color;
             routeColors[route.name] = color;
 
@@ -155,7 +163,7 @@ window.addEventListener('load', () => {
             // CSP FIX (A05): per-line colour is genuinely dynamic (one of N route
             // hues) -> data-fg + applyDynStyles() on popupopen, instead of style="".
             const linesHtml = st.lines.map(l=>
-                `<span class="line-fg" data-fg="${l.color}">${escHtml(l.name)}</span>`
+                `<span class="line-fg" data-fg="${routeInk(l.color)}">${escHtml(l.name)}</span>`
             ).join(' · ');
             const sm = L.circleMarker([st.lat, st.lon],{
                 radius:7, fillColor:'#0f1623', color:'#94A3B8', weight:2, opacity:1, fillOpacity:1
@@ -557,8 +565,43 @@ function selV(id){
 // Helpers
 function crowdPct(v){return typeof v.occupancy_pct === 'number' ? v.occupancy_pct : 0;}
 function crowdColor(l){return {LOW:'#22C55E',MEDIUM:'#F59E0B',HIGH:'#EF4444',VERY_HIGH:'#EF4444'}[l]||'#4B5563';}
+// Every caller of this paints TEXT on a dark panel, so it hands back the ink
+// variant rather than the raw line colour. The polylines take routeColors
+// directly and stay exactly the colour CassiTrack stores.
 function routeColor(routeId){
-    return routeColors[routeId] || '#4B5563';
+    return routeInk(routeColors[routeId] || '#4B5563');
+}
+
+// ── Line colour → readable ink on the dark UI ─────────────────────
+// The palette is tuned for lines drawn ON a map, where a 4px stroke at 2:1
+// against the tiles reads fine. The same colour as 9px bold text on #0F1623
+// does not: the darker lines (plum, olive, navy) come out unreadable. So for
+// text the colour is lifted towards white just far enough to clear 4.5:1, which
+// keeps the hue recognisable instead of falling back to a flat grey.
+const PANEL_RGB = [0x0F, 0x16, 0x23];
+const _inkCache = {};
+
+function _relLum(rgb){
+    const f = v => { v /= 255; return v <= 0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); };
+    return 0.2126*f(rgb[0]) + 0.7152*f(rgb[1]) + 0.0722*f(rgb[2]);
+}
+function _contrast(a, b){
+    const la = _relLum(a), lb = _relLum(b);
+    return (Math.max(la,lb) + 0.05) / (Math.min(la,lb) + 0.05);
+}
+function routeInk(color){
+    if(_inkCache[color]) return _inkCache[color];
+    const m = /^#([0-9a-f]{6})$/i.exec(String(color).trim());
+    // hsl() fallbacks and anything unparsed are already light by construction
+    if(!m) return _inkCache[color] = color;
+    const n = parseInt(m[1], 16);
+    const base = [(n>>16)&255, (n>>8)&255, n&255];
+    let rgb = base, t = 0;
+    while(_contrast(rgb, PANEL_RGB) < 4.5 && t < 0.85){
+        t += 0.05;
+        rgb = base.map(v => Math.round(v + (255 - v) * t));
+    }
+    return _inkCache[color] = '#' + rgb.map(v => v.toString(16).padStart(2,'0')).join('');
 }
 // Show on the map ONLY the route of the currently selected bus.
 // With no bus selected, every route is shown (default behaviour).
@@ -690,7 +733,7 @@ function adherenceText(v){
 }
 
 function chartColor(key, i){
-    return routeColors[key] || `hsl(${(i * 137.5) % 360}, 70%, 55%)`;
+    return routeInk(routeColors[key] || `hsl(${(i * 137.5) % 360}, 70%, 55%)`);
 }
 function fmtT(iso){if(!iso)return'—';return new Date(iso).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});}
 function fmtDist(m){if(!m)return'—';return m<1000?(Math.round(m)+'m'):(m/1000).toFixed(1)+'km';}
