@@ -779,7 +779,6 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeStopShe
 
 // ── Route shape drawing from next-bus cards ────────────────────────
 let _busRouteLayers  = [];   // polyline + circle markers for the drawn route
-let _busRouteBanner  = null; // the dismissible banner element
 
 document.addEventListener('click', e => {
     const row = e.target.closest('.tmb-route-tappable');
@@ -948,18 +947,6 @@ function clearBusRoute() {
     _slpPreviousStopId = _slpPreviousStopName = _slpHighlightStopId = null;
 }
 
-function showBusRouteBanner(shortName, color) {
-    if (_busRouteBanner) _busRouteBanner.remove();
-    const banner = document.createElement('div');
-    banner.id = 'busRouteBanner';
-    banner.innerHTML =
-        `<span class="brb-dot" style="background:${color}"></span>` +
-        `<span class="brb-label">Route <strong>${escHtml(shortName)}</strong></span>` +
-        `<button class="brb-close" onclick="clearBusRoute()" aria-label="Clear route">✕</button>`;
-    document.getElementById('pane-map').appendChild(banner);
-    _busRouteBanner = banner;
-}
-
 function showStopListPanel(shortName, color, stopList, shapePoints, routeDir, reversed) {
     const panel = document.getElementById('stopListPanel');
     const title = document.getElementById('stopListTitle');
@@ -1125,7 +1112,12 @@ function renderArrivals(list, arrivals) {
             ? `<span class="tmb-t1">${t1}</span><span class="tmb-sep"> | </span><span class="tmb-t2">${t2}</span>`
             : `<span class="tmb-t1">${t1}</span>`;
 
-        const isLive = first.real_time || first.departed;
+        // The badge says where the TIMES come from, so it follows real_time alone.
+        // It used to accept `departed` too, which badged "Real time" any bus that
+        // had merely left — harmless while nothing contradicted it, plainly wrong
+        // now that the chip beside it can say "was 4 min late at Stazione FF.SS.",
+        // a reading that is by definition not live.
+        const isLive = first.real_time;
         const rtHtml = isLive
             ? `<span class="tmb-rt live">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
@@ -1136,11 +1128,16 @@ function renderArrivals(list, arrivals) {
 
         const direction = first.route_name ? escHtml(first.route_name) : '';
 
-        // Delay note on first arrival only (if live and delayed)
-        let delayHtml = '';
-        if (isLive && first.delay_minutes != null && first.delay_minutes > 0) {
-            delayHtml = `<span class="tmb-delay">${tf('delay_late', { m: first.delay_minutes })}</span>`;
-        }
+        // Punctuality of the first arrival. This used to render only "N min late",
+        // and only for a live reading, so a bus that was on time said nothing and
+        // CassiTrack's retrospective delay — what the backend sends when Google is
+        // off, together with the stop it was measured at — was dropped on the
+        // floor. delayLine covers every case the payload reports.
+        //
+        // Its "Live" chip is the one case left out: it would only repeat the
+        // Real time badge sitting beside it in this same row.
+        const delayHtml = (first.real_time && first.delay_minutes == null)
+            ? '' : delayLine(first);
 
         // Crowding on first arrival
         const crowding = first.crowding_level;
@@ -2390,6 +2387,38 @@ function showToast(msg, isError = false) {
     setTimeout(() => toast.remove(), 3000);
 }
 
+// ── Feature flags ─────────────────────────────────────────────────
+// Payment is markup only: no provider is wired up, the saved cards are
+// placeholders and "Add Payment Method" does nothing. A section the traveller
+// can open but cannot use is worse than one that is not offered yet, so it is
+// hidden rather than deleted. Flip this to true when the integration lands and
+// the section comes back exactly as it is.
+const FEATURE_PAYMENT = false;
+
+// The ticket-expiry reminder warns about a ticket expiring, and there is no
+// longer any way to hold one — the fare list only quotes prices. The toggle is
+// hidden rather than removed, and hiding it leaves the stored preference alone,
+// so whatever a traveller had chosen is still there when ticketing arrives.
+const FEATURE_TICKET_REMINDER = false;
+
+function applyFeatureFlags() {
+    // The `hidden` attribute rather than a class, so anything switched off here
+    // leaves the accessibility tree and the tab order too, not just the screen.
+    if (!FEATURE_PAYMENT) {
+        // Every way in, not just the sidebar: the entry in the nav, the tab in
+        // the profile strip, and the pane itself.
+        document.querySelectorAll(
+            '.nav-item[data-tab="payment"], .profile-tab[data-ptab="payment"], #ptab-payment'
+        ).forEach(el => { el.hidden = true; });
+    }
+    if (!FEATURE_TICKET_REMINDER) {
+        // The whole row, label and description included — not just the switch,
+        // which would leave its caption behind with nothing to operate.
+        const row = document.getElementById('prefNotifyTicket')?.closest('.pref-row');
+        if (row) row.hidden = true;
+    }
+}
+
 // ── Sidebar nav ───────────────────────────────────────────────────
 document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -2412,6 +2441,11 @@ function showTicketType(type, el) {
 }
 
 function switchProfileTab(tab) {
+    // Hiding the entry points is not enough on its own: this is also called
+    // from inline onclick handlers and could be reached by a caller that
+    // predates the flag. Fall back to the first tab rather than opening a
+    // pane the traveller was not meant to see.
+    if (tab === 'payment' && !FEATURE_PAYMENT) tab = 'history';
     document.querySelectorAll('.profile-tab').forEach(t => t.classList.toggle('active', t.dataset.ptab === tab));
     document.querySelectorAll('.ptab-pane').forEach(p => p.classList.remove('active'));
     const el = document.getElementById('ptab-' + tab);
@@ -2625,6 +2659,9 @@ function renderSuggestions(suggestions) {
     msgs.appendChild(wrap);
     msgs.scrollTop = msgs.scrollHeight;
 }
+
+// Before anything is drawn, so a disabled section never flashes into view
+applyFeatureFlags();
 
 // ── Initial load: stops (dropdowns + map markers) and the line network ──
 // Independent of each other on purpose: a failing stops call should not leave

@@ -502,7 +502,6 @@ body {
 .delay-unknown            { background: #f1f5f9; color: var(--text-soft); }
 
 
-
 .metrics-row {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -580,34 +579,6 @@ body {
     display: block;
 }
 
-.active-ticket-card {
-    background: var(--ai-gradient);
-    border-radius: var(--radius-lg);
-    padding: 24px;
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    box-shadow: 0 8px 32px rgba(16,185,129,0.25);
-}
-.active-ticket-card .ticket-info .line { font-size: 18px; font-weight: 800; }
-.active-ticket-card .ticket-info .validity { font-size: 12px; opacity: 0.85; margin-top: 4px; }
-.qr-btn {
-    background: rgba(255,255,255,0.2);
-    backdrop-filter: blur(8px);
-    border: 1.5px solid rgba(255,255,255,0.3);
-    border-radius: var(--radius-sm);
-    color: white;
-    padding: 10px 18px;
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
 .type-selector { display: flex; gap: 10px; margin-bottom: 18px; }
 .type-chip {
     flex: 0 0 auto;
@@ -625,15 +596,25 @@ body {
     align-items: center;
     gap: 8px;
 }
-.type-chip:hover { border-color: var(--primary); color: var(--primary-dark); }
-.type-chip.active { border-color: var(--primary); background: var(--primary-light); color: var(--primary-dark); }
+.type-chip:hover { border-color: var(--fare-accent); color: var(--fare-accent); }
+.type-chip.active { border-color: var(--fare-accent); background: var(--fare-tint); color: var(--fare-accent); }
 .type-chip .t-icon { font-size: 17px; }
 
 .ticket-list { display: none; }
 .ticket-list.active { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 
+/* Each mode carries its own accent, and they are the colours the traveller
+   already associates with it elsewhere: the journey legs and the map use blue
+   for the bike and violet for the scooter (LINE_COLORS), and green is the app's
+   primary — the same green as the bus stops.
+   One declaration per mode, claimed by both the selector chip and the list it
+   opens, so the chip cannot drift from the cards it belongs to. */
+.type-chip[data-mode="bus"],     #bus-tickets     { --fare-accent: var(--primary); --fare-tint: #f0fdf4; }
+.type-chip[data-mode="scooter"], #scooter-tickets { --fare-accent: var(--purple);  --fare-tint: #f5f3ff; }
+.type-chip[data-mode="bike"],    #bike-tickets    { --fare-accent: var(--blue);    --fare-tint: #eff6ff; }
+
 .ticket-option {
-    background: var(--bg-white);
+    background: var(--fare-tint);
     border: 1px solid var(--border-mid);
     border-radius: var(--radius-md);
     padding: 18px;
@@ -641,10 +622,13 @@ body {
     transition: box-shadow 0.15s, transform 0.15s;
 }
 .ticket-option:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
-.ticket-option h3 { font-size: 14px; font-weight: 800; margin-bottom: 4px; }
+.ticket-option h3 { font-size: 14px; font-weight: 800; margin-bottom: 4px; color: var(--fare-accent); }
 .ticket-option p { font-size: 11px; color: var(--text-soft); margin-bottom: 14px; }
-.ticket-bottom { display: flex; align-items: center; justify-content: space-between; }
-.price-tag { font-size: 20px; font-weight: 800; color: var(--primary); }
+/* Only the price is left in here now that the buy buttons are gone, so there
+   is nothing for space-between to push apart. */
+.ticket-bottom { display: flex; align-items: center; }
+.price-tag { font-size: 20px; font-weight: 800; color: var(--fare-accent, var(--primary)); }
+.price-unit { font-size: 12px; font-weight: 700; opacity: 0.75; }
 
 /* ─── PROFILE PANE ─── */
 #pane-profile { flex-direction: row; overflow: hidden; }
@@ -1148,11 +1132,7 @@ body {
 }
 .tmb-rt.live  { color: #1d4ed8; }
 .tmb-rt.sched { color: var(--text-soft); }
-.tmb-delay {
-    font-size: 11px;
-    font-weight: 600;
-    color: #ef4444;
-}
+
 .tmb-crowd {
     font-size: 9px;
     font-weight: 800;
@@ -1195,44 +1175,6 @@ body {
     transition: background 0.15s, color 0.15s;
 }
 .tmb-route-tappable:hover .tmb-map-btn { background: #e2e8f0; color: #0f172a; }
-
-/* Route banner — floats above the map */
-#busRouteBanner {
-    position: absolute;
-    top: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 500;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-radius: 20px;
-    padding: 7px 10px 7px 12px;
-    box-shadow: 0 4px 16px rgba(15,23,42,0.12);
-    font-size: 13px;
-    white-space: nowrap;
-    pointer-events: auto;
-}
-.brb-dot {
-    width: 12px; height: 12px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-.brb-label { color: #0f172a; }
-.brb-close {
-    width: 24px; height: 24px;
-    border: none;
-    background: #f1f5f9;
-    border-radius: 50%;
-    font-size: 11px;
-    color: #64748b;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-}
-.brb-close:hover { background: #e2e8f0; color: #0f172a; }
 
 /* ── Bus marker pulsing animation ── */
 @keyframes busPulse {
@@ -2119,7 +2061,6 @@ body {
     width: 100%;
 }
 
-
 /* ── Step 19: nicer back-arrow button ── */
 @media (max-width: 768px) {
     body[data-pane="tickets"] .mobile-back,
@@ -2451,3 +2392,9 @@ body {
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.28);
 }
 .stop-marker svg { display: block; }
+
+/* The `hidden` attribute has to win. Components here set their own display
+   (.nav-item is flex, so is the profile tab strip), and any author display
+   rule beats the browser's default [hidden] { display: none } — a hidden nav
+   item would have stayed on screen. */
+[hidden] { display: none !important; }

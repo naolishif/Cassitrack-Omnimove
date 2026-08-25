@@ -20,7 +20,7 @@ const OMNI_T = {
     // Sidebar
     brand_tagline:'Smarter urban mobility',
     nav_section_nav:'Navigation',
-    nav_plan:'Plan Route', nav_tickets:'My Tickets',
+    nav_plan:'Plan Route', nav_tickets:'Fares',
     nav_section_account:'My Account',
     nav_history:'Last Routes', nav_favourites:'Favourite Routes',
     nav_payment:'Payment', nav_preferences:'Preferences', nav_account:'Account',
@@ -88,7 +88,7 @@ const OMNI_T = {
     // Profile stats
     stat_eco_pts:'Eco pts', stat_co2:'CO₂ saved', stat_trips:'Trips', stat_spent:'Spent (30d)',
     // Tickets
-    section_my_tickets:'My Tickets',
+    section_my_tickets:'Fares',
     label_active_ticket:'Active Ticket',
     btn_show_qr:'📱 Show QR',
     label_buy_ticket:'Buy New Ticket',
@@ -98,13 +98,14 @@ const OMNI_T = {
     ticket_weekly:'Weekly Pass', ticket_weekly_desc:'7 days · Unlimited rides',
     ticket_monthly:'Monthly Pass', ticket_monthly_desc:'30 days · All urban lines',
     btn_buy:'Buy',
-    ticket_unlock:'Standard Unlock', ticket_unlock_desc:'€1.00 unlock + €0.15/min',
-    ticket_30min:'30 Min Bundle', ticket_30min_desc:'No unlock fee included',
-    ticket_60min:'60 Min Bundle', ticket_60min_desc:'Best value for longer rides',
-    price_paygo:'Pay-as-go', btn_start:'Start',
-    ticket_casual:'Casual Ride', ticket_casual_desc:'Up to 15 minutes',
-    ticket_hour:'Hour Pass', ticket_hour_desc:'Up to 60 minutes',
-    ticket_day:'Day Pass', ticket_day_desc:'Unlimited rides, 24 h',
+    // Shared-mobility fares, spelled out component by component rather than
+    // bundled into invented passes: this is what the operator actually charges.
+    fare_fixed:'Fixed fee',        fare_fixed_desc:'Charged when the ride starts',
+    fare_time:'Time-based fare',   fare_time_desc:'Per minute, from the first minute',
+    fare_pause:'Paused',           fare_pause_desc:'While the ride is on hold',
+    fare_deposit:'Temporary hold', fare_deposit_desc:'Refunded when the ride ends — not a charge',
+    fare_unlock:'Unlock',          fare_unlock_desc:'Charged when the ride starts',
+    fare_bike_time:'Time-based fare', fare_bike_time_desc:'Per minute of use',
     btn_unlock_bike:'Unlock',
     // Profile section labels
     label_recent_trips:'Recent Trips',
@@ -284,7 +285,7 @@ const OMNI_T = {
     // Sidebar
     brand_tagline:'Mobilità urbana intelligente',
     nav_section_nav:'Navigazione',
-    nav_plan:'Pianifica percorso', nav_tickets:'I miei biglietti',
+    nav_plan:'Pianifica percorso', nav_tickets:'Listino prezzi',
     nav_section_account:'Il mio account',
     nav_history:'Ultimi percorsi', nav_favourites:'Percorsi preferiti',
     nav_payment:'Pagamento', nav_preferences:'Preferenze', nav_account:'Account',
@@ -352,7 +353,7 @@ const OMNI_T = {
     // Profile stats
     stat_eco_pts:'Eco pts', stat_co2:'CO₂ risparmiata', stat_trips:'Percorsi', stat_spent:'Spesi (30g)',
     // Tickets
-    section_my_tickets:'I miei biglietti',
+    section_my_tickets:'Listino prezzi',
     label_active_ticket:'Biglietto attivo',
     btn_show_qr:'📱 Mostra QR',
     label_buy_ticket:'Acquista biglietto',
@@ -362,13 +363,14 @@ const OMNI_T = {
     ticket_weekly:'Abbonamento settimanale', ticket_weekly_desc:'7 giorni · Corse illimitate',
     ticket_monthly:'Abbonamento mensile', ticket_monthly_desc:'30 giorni · Tutte le linee urbane',
     btn_buy:'Acquista',
-    ticket_unlock:'Sblocco standard', ticket_unlock_desc:'€1.00 sblocco + €0.15/min',
-    ticket_30min:'Pacchetto 30 min', ticket_30min_desc:'Sblocco incluso',
-    ticket_60min:'Pacchetto 60 min', ticket_60min_desc:'Il migliore per percorsi più lunghi',
-    price_paygo:'A consumo', btn_start:'Inizia',
-    ticket_casual:'Corsa occasionale', ticket_casual_desc:'Fino a 15 minuti',
-    ticket_hour:'Pass orario', ticket_hour_desc:'Fino a 60 minuti',
-    ticket_day:'Pass giornaliero', ticket_day_desc:'Corse illimitate, 24 h',
+    // Tariffe della mobilità condivisa, voce per voce invece che in pacchetti
+    // inventati: è quello che l'operatore addebita davvero.
+    fare_fixed:'Canone fisso',           fare_fixed_desc:'Addebitato all\'avvio della corsa',
+    fare_time:'Tariffa a tempo',         fare_time_desc:'Al minuto, dal primo minuto',
+    fare_pause:'In pausa',               fare_pause_desc:'Mentre la corsa è sospesa',
+    fare_deposit:'Trattenuta temporanea',fare_deposit_desc:'Deposito restituito a fine corsa — non è un costo',
+    fare_unlock:'Sblocco',               fare_unlock_desc:'Addebitato all\'avvio della corsa',
+    fare_bike_time:'Tariffa a tempo',    fare_bike_time_desc:'Al minuto di utilizzo',
     btn_unlock_bike:'Sblocca',
     // Profile section labels
     label_recent_trips:'Percorsi recenti',

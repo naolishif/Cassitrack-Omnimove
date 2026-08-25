@@ -41,7 +41,6 @@
         </div>
         <div class="nav-item" data-pane="tickets">
             <span class="nav-icon">🎫</span> <span data-i18n="nav_tickets">My Tickets</span>
-            <span class="nav-badge">1</span>
         </div>
 
         <span class="nav-section-label" data-i18n="nav_section_account">My Account</span>
@@ -190,26 +189,17 @@
 
                 <div>
                     <div class="section-title" data-i18n="section_my_tickets">My Tickets</div>
-                    <span class="section-label" data-i18n="label_active_ticket">Active Ticket</span>
-                    <div class="active-ticket-card">
-                        <div class="ticket-info">
-                            <div class="line">🚌 Bus Line 16 — Active</div>
-                            <div class="validity">Valid for 45 more minutes · Urban zone A</div>
-                        </div>
-                        <button class="qr-btn" data-i18n="btn_show_qr">📱 Show QR</button>
-                    </div>
                 </div>
 
                 <div>
-                    <span class="section-label" data-i18n="label_buy_ticket">Buy New Ticket</span>
                     <div class="type-selector">
-                        <div class="type-chip active" onclick="showTicketType('bus', this)">
+                        <div class="type-chip active" data-mode="bus" onclick="showTicketType('bus', this)">
                             <span class="t-icon">🚌</span> <span data-i18n="type_bus">Bus</span>
                         </div>
-                        <div class="type-chip" onclick="showTicketType('scooter', this)">
+                        <div class="type-chip" data-mode="scooter" onclick="showTicketType('scooter', this)">
                             <span class="t-icon">🛴</span> <span data-i18n="type_scooter">Scooter</span>
                         </div>
-                        <div class="type-chip" onclick="showTicketType('bike', this)">
+                        <div class="type-chip" data-mode="bike" onclick="showTicketType('bike', this)">
                             <span class="t-icon">🚲</span> <span data-i18n="type_bike">Bike</span>
                         </div>
                     </div>
@@ -219,8 +209,7 @@
                             <h3 data-i18n="ticket_single">Single Ride</h3>
                             <p data-i18n="ticket_single_desc">90 min · All urban lines</p>
                             <div class="ticket-bottom">
-                                <span class="price-tag">€1.10</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
+                                <span class="price-tag">€1.00</span>
                             </div>
                         </div>
                         <div class="ticket-option">
@@ -228,7 +217,6 @@
                             <p data-i18n="ticket_daily_desc">24 h · Unlimited rides</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€3.50</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                         <div class="ticket-option">
@@ -236,7 +224,6 @@
                             <p data-i18n="ticket_weekly_desc">7 days · Unlimited rides</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€16.00</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                         <div class="ticket-option">
@@ -244,61 +231,54 @@
                             <p data-i18n="ticket_monthly_desc">30 days · All urban lines</p>
                             <div class="ticket-bottom">
                                 <span class="price-tag">€48.00</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
                             </div>
                         </div>
                     </div>
 
                     <div id="scooter-tickets" class="ticket-list">
                         <div class="ticket-option">
-                            <h3 data-i18n="ticket_unlock">Standard Unlock</h3>
-                            <p data-i18n="ticket_unlock_desc">€1.00 unlock + €0.15/min</p>
+                            <h3 data-i18n="fare_fixed">fare_fixed</h3>
+                            <p data-i18n="fare_fixed_desc">fare_fixed_desc</p>
                             <div class="ticket-bottom">
-                                <span class="price-tag" data-i18n="price_paygo">Pay-as-go</span>
-                                <button class="action-btn btn-blue" style="width:auto;padding:8px 18px" data-i18n="btn_start">Start</button>
+                                <span class="price-tag">€1.00</span>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3 data-i18n="ticket_30min">30 Min Bundle</h3>
-                            <p data-i18n="ticket_30min_desc">No unlock fee included</p>
+                            <h3 data-i18n="fare_time">fare_time</h3>
+                            <p data-i18n="fare_time_desc">fare_time_desc</p>
                             <div class="ticket-bottom">
-                                <span class="price-tag">€4.00</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
+                                <span class="price-tag">€0.25<span class="price-unit">/min</span></span>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3 data-i18n="ticket_60min">60 Min Bundle</h3>
-                            <p data-i18n="ticket_60min_desc">Best value for longer rides</p>
+                            <h3 data-i18n="fare_pause">fare_pause</h3>
+                            <p data-i18n="fare_pause_desc">fare_pause_desc</p>
                             <div class="ticket-bottom">
-                                <span class="price-tag">€7.00</span>
-                                <button class="action-btn btn-dark" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
+                                <span class="price-tag">€0.25<span class="price-unit">/min</span></span>
+                            </div>
+                        </div>
+                        <div class="ticket-option">
+                            <h3 data-i18n="fare_deposit">fare_deposit</h3>
+                            <p data-i18n="fare_deposit_desc">fare_deposit_desc</p>
+                            <div class="ticket-bottom">
+                                <span class="price-tag">€5.00</span>
                             </div>
                         </div>
                     </div>
 
                     <div id="bike-tickets" class="ticket-list">
                         <div class="ticket-option">
-                            <h3 data-i18n="ticket_casual">Casual Ride</h3>
-                            <p data-i18n="ticket_casual_desc">Up to 15 minutes</p>
+                            <h3 data-i18n="fare_unlock">fare_unlock</h3>
+                            <p data-i18n="fare_unlock_desc">fare_unlock_desc</p>
                             <div class="ticket-bottom">
-                                <span class="price-tag">€1.50</span>
-                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px" data-i18n="btn_unlock_bike">Unlock</button>
+                                <span class="price-tag">€1.00</span>
                             </div>
                         </div>
                         <div class="ticket-option">
-                            <h3 data-i18n="ticket_hour">Hour Pass</h3>
-                            <p data-i18n="ticket_hour_desc">Up to 60 minutes</p>
+                            <h3 data-i18n="fare_bike_time">fare_bike_time</h3>
+                            <p data-i18n="fare_bike_time_desc">fare_bike_time_desc</p>
                             <div class="ticket-bottom">
-                                <span class="price-tag">€4.00</span>
-                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
-                            </div>
-                        </div>
-                        <div class="ticket-option">
-                            <h3 data-i18n="ticket_day">Day Pass</h3>
-                            <p data-i18n="ticket_day_desc">Unlimited rides, 24 h</p>
-                            <div class="ticket-bottom">
-                                <span class="price-tag">€12.00</span>
-                                <button class="action-btn btn-green" style="width:auto;padding:8px 18px" data-i18n="btn_buy">Buy</button>
+                                <span class="price-tag">€0.29<span class="price-unit">/min</span></span>
                             </div>
                         </div>
                     </div>

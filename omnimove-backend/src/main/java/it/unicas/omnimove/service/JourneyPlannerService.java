@@ -71,14 +71,22 @@ public class JourneyPlannerService {
     private static final double[] W_BUDGET = { 0.20,  0.70,  0.10 };
     private static final double[] W_ECO    = { 0.20,  0.10,  0.70 };
 
-    @Value("${elerent.bike.unlock:0.50}")
+    @Value("${elerent.bike.unlock:1.00}")
     private double bikeUnlock;
-    @Value("${elerent.bike.per-minute:0.15}")
+    @Value("${elerent.bike.per-minute:0.29}")
     private double bikePerMin;
     @Value("${elerent.scooter.unlock:1.00}")
     private double scooterUnlock;
     @Value("${elerent.scooter.per-minute:0.25}")
     private double scooterPerMin;
+    /**
+     * Refundable hold taken at unlock. Deliberately NOT added to costEuros: it
+     * comes back at the end of the ride, so counting it would make the scooter
+     * look more expensive than it is and skew the budget ranking. It is only
+     * disclosed, so the figure the traveller sees here matches the fare list.
+     */
+    @Value("${elerent.scooter.deposit:5.00}")
+    private double scooterDeposit;
 
     public JourneyResponse plan(JourneyRequest req) {
         log.info("Planning: {} → {}", req.getOriginName(), req.getDestName());
@@ -533,7 +541,8 @@ public class JourneyPlannerService {
                         .from(req.getOriginName()).to(req.getDestName())
                         .durationMinutes(dur).distanceMetres(roadM)
                         .instruction("Elerent e-scooter · Unlock €" + scooterUnlock
-                                + " + €" + scooterPerMin + "/min · elerent.it").build()))
+                                + " + €" + scooterPerMin + "/min · €" + scooterDeposit
+                                + " refundable hold · elerent.it").build()))
                 .build();
     }
 

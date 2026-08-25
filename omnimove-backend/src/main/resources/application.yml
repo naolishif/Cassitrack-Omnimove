@@ -102,11 +102,14 @@ weather:
 # ── Elerent Shared Mobility Pricing ──────────────────────────
 elerent:
   bike:
-    unlock: 0.50
-    per-minute: 0.15
-  scooter:
     unlock: 1.00
-    per-minute: 0.25
+    per-minute: 0.29
+  scooter:
+    unlock: 1.00          # canone fisso, addebitato all'avvio
+    per-minute: 0.25      # anche mentre la corsa e' in pausa
+    # Trattenuta temporanea di 5.00 EUR: non entra nel costo del viaggio
+    # perche' viene restituita a fine corsa. E' dichiarata nel listino.
+    deposit: 5.00
 
 # ── OpenAPI ───────────────────────────────────────────────────
 springdoc:
