@@ -81,7 +81,7 @@ async function loadSummary() {
         </div>`;
 
     document.getElementById('lastUpdate').textContent =
-        `Linea 16 — MAGNI Autoservizi · Updated: ${new Date().toLocaleTimeString('it-IT')}`;
+        `Linea 16 · Updated: ${new Date().toLocaleTimeString('it-IT')}`;
     document.getElementById('statusDot').className = 'dot dot-green';
     document.getElementById('statusText').textContent = `${d.active_buses_now} buses live`;
 }

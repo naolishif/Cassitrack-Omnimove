@@ -16,7 +16,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
  * via REST API only. No shared database or code imports.
  *
  * Two-server architectures
- * CASSITRACK :8280 (MAGNI fleet monitoring)
+ * CASSITRACK :8280 (fleet monitoring)
  * OMNIMOVE   :8180 (passenger journey planning)
  */
 

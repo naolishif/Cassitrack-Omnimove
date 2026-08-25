@@ -201,8 +201,8 @@ public class AiOrchestrationService {
             You are CASSITRACK Assistant, an intelligent
             transport information system for the city of
             Cassino, Italy. You help passengers and fleet
-            managers get information about the MAGNI
-            Autoservizi bus fleet, specifically Linea 16.
+            managers get information about the urban bus
+            fleet, specifically Linea 16.
 
             You have access to LIVE real-time data about
             the buses. Use this data to answer questions
@@ -318,10 +318,10 @@ public class AiOrchestrationService {
         int activeCount = vehicleStateCache.getActive().size();
         return italian
                 ? String.format(Locale.ROOT,
-                "Il servizio AI cloud non e disponibile (crediti API insufficienti). Traccio %d autobus attivi. Prova: 'Dov'e MAGNI-001?', 'Quale bus arriva prima al Campus?', 'ETA al Centro'.",
+                "Il servizio AI cloud non e disponibile (crediti API insufficienti). Traccio %d autobus attivi. Prova: 'Dov'e BUS-101?', 'Quale bus arriva prima al Campus?', 'ETA al Centro'.",
                 activeCount)
                 : String.format(Locale.ROOT,
-                "Cloud AI is unavailable (insufficient API credits). I currently track %d active buses. Try: 'Where is MAGNI-001?', 'Which bus reaches Campus first?', 'ETA to Centro'.",
+                "Cloud AI is unavailable (insufficient API credits). I currently track %d active buses. Try: 'Where is BUS-101?', 'Which bus reaches Campus first?', 'ETA to Centro'.",
                 activeCount);
     }
 

@@ -235,7 +235,7 @@ public class NetexController {
         List<VehicleDTO> netexVehicles = dbBuses.stream().map(bus -> {
             VehicleDTO dto = new VehicleDTO();
             dto.setId("CASSITRACK:Vehicle:" + bus.getBusId());
-            dto.setPrivateCode(bus.getCurrentVehicleId()); // ID MQTT (es. MAGNI-001)
+            dto.setPrivateCode(bus.getCurrentVehicleId()); // ID MQTT (es. BUS-101)
             VehicleExtensionsDTO ext = new VehicleExtensionsDTO();
             ext.setTarga(bus.getTarga());
             ext.setNumeroPosti(bus.getNumeroPosti());

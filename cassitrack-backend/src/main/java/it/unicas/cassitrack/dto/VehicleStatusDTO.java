@@ -18,7 +18,7 @@ import java.time.Instant;
 @Builder
 public class VehicleStatusDTO {
 
-    /** Bus identifier (e.g. "MAGNI-001") */
+    /** Bus identifier (e.g. "BUS-101") */
     @JsonProperty("vehicle_id")
     private String vehicleId;
 

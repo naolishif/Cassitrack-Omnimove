@@ -13,7 +13,7 @@ import java.time.Instant;
  * Example response:
  * [
  *   {
- *     "vehicle_id": "MAGNI-001",
+ *     "vehicle_id": "BUS-101",
  *     "route_id": "LINEA-16",
  *     "route_name": "Linea 16 - Campus Folcara",
  *     "scheduled_arrival": "2026-04-04T08:45:00Z",

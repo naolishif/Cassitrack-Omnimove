@@ -69,12 +69,6 @@ GPS_NOISE_METRES     = 6       # ±6m GPS jitter
 MAX_SPEED_KMH        = 50
 MIN_SPEED_KMH        = 12
 MAX_DELAY_MINUTES    = 20
-BUS_CAPACITY         = {       # from buses.numero_posti
-    "MAGNI-001": 85,
-    "MAGNI-002": 85,
-    "MAGNI-003": 52,
-    "MAGNI-004": 52,
-}
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -237,7 +231,7 @@ def find_waypoint_index_for_time(waypoints, now_seconds):
 class BusSimulator:
     def __init__(self, bus_row, conn):
         self.bus_id      = bus_row["bus_id"]
-        self.vehicle_id  = bus_row["current_vehicle_id"]   # e.g. MAGNI-001
+        self.vehicle_id  = bus_row["current_vehicle_id"]   # e.g. BUS-101
         self.targa       = bus_row["targa"]
         self.capacity    = bus_row["numero_posti"]
         self.wheelchair  = bus_row["wheelchair_accessible"]

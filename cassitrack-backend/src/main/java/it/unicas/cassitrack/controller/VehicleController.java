@@ -49,7 +49,7 @@ public class VehicleController {
     @GetMapping(produces = "application/json")
     @Operation(
         summary = "Get all active vehicles",
-        description = "Returns real-time position and status of all active MAGNI buses in Cassino.",
+        description = "Returns real-time position and status of all active buses in Cassino.",
         responses = {
             @ApiResponse(responseCode = "200", description = "List of active vehicles",
                 content = @Content(schema = @Schema(implementation = VehicleStatusDTO.class)))
@@ -74,14 +74,14 @@ public class VehicleController {
     @GetMapping(value="/{id}",  produces = "application/json")
     @Operation(
         summary = "Get a single vehicle",
-        description = "Returns real-time status of a specific vehicle by its ID (e.g. MAGNI-001).",
+        description = "Returns real-time status of a specific vehicle by its ID (e.g. BUS-101).",
         responses = {
             @ApiResponse(responseCode = "200", description = "Vehicle found"),
             @ApiResponse(responseCode = "404", description = "Vehicle not found or not active")
         }
     )
     public ResponseEntity<VehicleStatusDTO> getVehicleById(
-        @Parameter(description = "Vehicle ID, e.g. MAGNI-001")
+        @Parameter(description = "Vehicle ID, e.g. BUS-101")
         @PathVariable String id
     ) {
         return vehicleService.getVehicleById(id)

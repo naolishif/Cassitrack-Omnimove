@@ -9,7 +9,7 @@ import lombok.Data;
  *
  * Example:
  * {
- *   "answer": "Yes — MAGNI-001 is near Cassino Centro
+ *   "answer": "Yes — BUS-101 is near Cassino Centro
  *              and will reach Campus in about 8 minutes.",
  *   "success": true
  * }

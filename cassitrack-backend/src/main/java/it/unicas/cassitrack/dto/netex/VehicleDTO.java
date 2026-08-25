@@ -26,7 +26,7 @@ public class VehicleDTO {
     @JacksonXmlProperty(localName = "Extensions")
     private VehicleExtensionsDTO extensions;
 
-    /** ID del veicolo nel sistema MQTT (es. MAGNI-001) */
+    /** ID del veicolo nel sistema MQTT (es. BUS-101) */
     @JacksonXmlProperty(localName = "PrivateCode")
     private String privateCode;
 }

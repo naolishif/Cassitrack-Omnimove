@@ -9,7 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * CASSITRACK — Real-time bus fleet monitoring system
  * University of Cassino and Southern Lazio — 2025/2026
  *
- * This system tracks the MAGNI Autoservizi bus fleet in Cassino,
+ * This system tracks the urban bus fleet in Cassino,
  * receiving GPS telemetry via MQTT from ESP32 on-board units
  * and exposing real-time positions and ETAs through a REST API.
  */

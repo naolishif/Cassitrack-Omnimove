@@ -63,7 +63,7 @@ public class BusDTO {
     private Boolean mapVisible;
 
     /**
-     * MQTT antenna / vehicle id this bus is linked to (e.g. "MAGNI-001").
+     * MQTT antenna / vehicle id this bus is linked to (e.g. "BUS-101").
      * Optional — a bus in the depot may have none.
      */
     private String currentVehicleId;

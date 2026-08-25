@@ -20,7 +20,7 @@ import java.time.Instant;
 @AllArgsConstructor
 public class VehiclePosition {
 
-    @Id // 🔑 Il vehicleId diventa la CHIAVE del record (es. vehicle_positions:MAGNI-001)
+    @Id // 🔑 Il vehicleId diventa la CHIAVE del record (es. vehicle_positions:BUS-101)
     private String vehicleId;
 
     private Integer busId; // 🚌

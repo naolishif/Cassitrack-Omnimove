@@ -170,7 +170,7 @@ window.addEventListener('load', () => {
             }).addTo(map).bindPopup(`
                     <div class="stop-popup">
                         <div class="stop-popup-title">🚏 ${escHtml(st.name)}</div>
-                        <div class="stop-popup-lines">Linee: ${linesHtml} · Magni Autoservizi</div>
+                        <div class="stop-popup-lines">Linee: ${linesHtml}</div>
                     </div>`);
             // Popup content is only parsed into the DOM when it actually opens
             // (Leaflet lazy-renders bindPopup() strings), so the dynamic colours

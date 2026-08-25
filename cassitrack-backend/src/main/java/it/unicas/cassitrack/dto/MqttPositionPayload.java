@@ -18,7 +18,7 @@ import java.time.Instant;
  *
  * Example JSON:
  * {
- *   "vehicle_id": "MAGNI-001",
+ *   "vehicle_id": "BUS-101",
  *   "timestamp": "2026-04-04T08:30:00Z",
  *   "lat": 41.4917,
  *   "lon": 13.8314,
