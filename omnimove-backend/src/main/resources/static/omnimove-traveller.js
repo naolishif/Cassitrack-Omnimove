@@ -72,6 +72,9 @@ async function loadPreferences() {
             if (el) el.classList.toggle('on', !!val);
         };
 
+        const walkSel = document.getElementById('prefMaxBikeWalk');
+        if (walkSel) walkSel.value = String(p.maxBikeWalkMetres || 500);
+
         set('prefAvoidOccupancy', p.avoidHighOccupancy);
         set('prefShowWalking',    p.showWalking);
         set('prefBikeOverBus',    p.preferBikeOverBus);
@@ -104,7 +107,8 @@ async function savePreferences() {
         onlyBusWhenRaining: isOn('prefOnlyBusRain'),
         notifyDelays:       isOn('prefNotifyDelays'),
         notifyTicketExpiry: isOn('prefNotifyTicket'),
-        notifyEcoTip:       isOn('prefNotifyEcoTip')
+        notifyEcoTip:       isOn('prefNotifyEcoTip'),
+        maxBikeWalkMetres:  parseInt(document.getElementById('prefMaxBikeWalk')?.value, 10) || 500
     };
 
     try {
@@ -507,6 +511,22 @@ document.addEventListener('click', e => {
 window._bikeMarkers    = [];
 window._bikeZoneLayers = [];
 
+// Battery bars: charged (green, 3 bars ≥60%), critical (yellow, 2 bars 25–59%),
+// low (red, 1 bar 10–24% or 0 bars <10%). Battery never hides a vehicle.
+function batteryBadgeHtml(pct) {
+    if (pct == null) return '';
+    const s = pct >= 60 ? { col: '#10b981', bars: 3, key: 'bat_charged' }
+            : pct >= 25 ? { col: '#f59e0b', bars: 2, key: 'bat_critical' }
+            : pct >= 10 ? { col: '#ef4444', bars: 1, key: 'bat_low' }
+            :             { col: '#ef4444', bars: 0, key: 'bat_low' };
+    let bars = '';
+    for (let i = 0; i < 3; i++) {
+        bars += `<span style="display:inline-block;width:4px;height:${6 + i * 3}px;border-radius:1px;background:${i < s.bars ? s.col : '#e2e8f0'}"></span>`;
+    }
+    return `<span title="${t(s.key)} · ${pct}%" style="display:inline-flex;align-items:flex-end;gap:1.5px;margin-left:4px">${bars}` +
+           `<span style="font-size:10px;font-weight:700;color:${s.col};margin-left:3px">${pct}%</span></span>`;
+}
+
 function makeBikeMarkerHtml(type) {
     const scooter = type === 'SCOOTER';
     const color = scooter ? LINE_COLORS.SCOOTER : LINE_COLORS.BIKE;
@@ -531,7 +551,7 @@ function renderBikeMarkers(list) {
         const type = b.vehicle_type === 'SCOOTER' ? 'SCOOTER' : 'BIKE';
         if (!_bikeTypeVisible(type)) return;
         const batteryTxt = b.battery_pct != null
-            ? `🔋 ${t('bike_battery')}: ${b.battery_pct}%<br>` : '';
+            ? `${t('bike_battery')}: ${batteryBadgeHtml(b.battery_pct)}<br>` : '';
         const priceTxt = type === 'SCOOTER' ? t('bike_price_scooter') : t('bike_price_bike');
         const popup =
             `<b>${type === 'SCOOTER' ? '🛴' : '🚲'} Elerent ${escHtml(b.plate || b.bike_id || '—')}</b><br>` +
@@ -1004,6 +1024,9 @@ function renderRoutes(data) {
             : '';
         const warn = opt.weather_warning
             ? `<span class="status-badge s-delay">${opt.weather_warning}</span>` : '';
+        // Zone check on the ride destination (Elerent operating / no-parking areas)
+        const bikeWarn = opt.bike_warning
+            ? `<span class="status-badge s-delay">${escHtml(opt.bike_warning)}</span>` : '';
         // Departure / arrival time labels for the card
         const _depDate = _getPickerTripStart();
         const _arrDate = new Date(_depDate.getTime() + (opt.duration_minutes || 0) * 60000);
@@ -1022,6 +1045,7 @@ function renderRoutes(data) {
     </div>
     <div class="status-row">
         ${warn || `<span class="status-badge s-ok">${t('badge_available')}</span>`}
+        ${bikeWarn}
         ${delayBadge}
     </div>
     <div class="metrics-row">
@@ -1066,7 +1090,8 @@ function showRoutePreview(mode, legs) {
 
     const color = LINE_COLORS[mode] || '#0f172a';
 
-    if (mode === 'BUS' && legs && legs.length > 0) {
+    // Multi-leg options (BUS, or WALK+BIKE/SCOOTER) are drawn leg by leg
+    if ((mode === 'BUS' || (legs || []).length > 1) && legs && legs.length > 0) {
         let colorIdx = 0;
         const activeBusLegs = [];
         legs.forEach(leg => {
@@ -1098,6 +1123,12 @@ function showRoutePreview(mode, legs) {
                 window._previewLayers.push(
                     L.polyline(coords, { color: '#94a3b8', weight: 3, opacity: 0.6, dashArray: '5,6' }).addTo(map)
                 );
+            } else if ((leg.mode === 'BIKE' || leg.mode === 'SCOOTER')
+                    && leg.stop_coords && leg.stop_coords.length >= 2) {
+                const coords = leg.stop_coords.map(c => [c[0], c[1]]);
+                window._previewLayers.push(
+                    L.polyline(coords, { color: LINE_COLORS[leg.mode] || color, weight: 4, opacity: 0.8, dashArray: '6,4' }).addTo(map)
+                );
             }
         });
         const allCoords = legs
@@ -1110,11 +1141,13 @@ function showRoutePreview(mode, legs) {
 
         // Only show live bus positions for "Now" trips — future departures would show
         // vehicles at their current position, which is irrelevant to the planned time.
-        if (_pickerHour === null) {
-            fetchAndRenderBusMarkers();
-            window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
-        } else {
-            showStaleNotice(t('live_buses_future') || '🕐 Live positions not shown for future trips');
+        if (activeBusLegs.length > 0) {
+            if (_pickerHour === null) {
+                fetchAndRenderBusMarkers();
+                window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+            } else {
+                showStaleNotice(t('live_buses_future') || '🕐 Live positions not shown for future trips');
+            }
         }
     } else {
         window._previewLayers.push(
@@ -1170,9 +1203,10 @@ function _openRouteDetail(mode, label, greenIndex, distanceMetres, costEuros) {
     const depDate = _getPickerTripStart();
     const arrDate = new Date(depDate.getTime() + durationMin * 60000);
 
-    const isBusMode = mode === 'BUS' && selectedJourney.legs?.length > 0;
-    const timelineHtml = isBusMode
-        ? buildTimeline(selectedJourney.legs, durationMin, greenIndex)
+    const isBusMode  = mode === 'BUS' && selectedJourney.legs?.length > 0;
+    const isMultiLeg = isBusMode || selectedJourney.legs?.length > 1;   // WALK+BIKE/SCOOTER
+    const timelineHtml = isMultiLeg
+        ? buildTimeline(selectedJourney.legs, durationMin, greenIndex, opt)
         : buildSingleLegTimeline(mode, selectedJourney.legs || [], distanceKm, co2g);
 
     const modeLabel = isBusMode ? (fmtRouteLabel(label) || label) : label;
@@ -1242,8 +1276,9 @@ function fmtRouteLabel(instruction, circleStyle) {
 }
 
 // ── Build Google Maps-style vertical timeline ──────────────────────
-function buildTimeline(legs, totalMin, greenIdx) {
-    const C = { WALK:'#6366f1', WAIT:'#f59e0b', BUS:'#10b981', TRANSFER:'#ef4444' };
+function buildTimeline(legs, totalMin, greenIdx, opt) {
+    const C = { WALK:'#6366f1', WAIT:'#f59e0b', BUS:'#10b981', TRANSFER:'#ef4444',
+                BIKE:'#3b82f6', SCOOTER:'#7c3aed' };
     let html = '';
     let busIndex = 0;
 
@@ -1326,6 +1361,41 @@ function buildTimeline(legs, totalMin, greenIdx) {
                 <div class="tl-meta">
                   <span class="tl-badge" style="background:${col}18;color:${col}">🕐 ${t('wait_lbl')} · ${leg.duration_minutes || 0} min</span>
                 </div>
+              </div>
+            </div>`;
+
+        } else if (leg.mode === 'BIKE' || leg.mode === 'SCOOTER') {
+            // ── Shared-vehicle ride (Elerent): pick-up row + arrival row ──
+            const icon   = leg.mode === 'SCOOTER' ? '🛴' : '🚲';
+            const lbl    = t(leg.mode === 'SCOOTER' ? 'scooter' : 'bike');
+            const rideMs = _runMs;
+            _tick(leg.duration_minutes);
+            const arrMs  = _runMs;
+            const batt   = opt && opt.bike_battery_pct != null ? batteryBadgeHtml(opt.bike_battery_pct) : '';
+            html += `
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-board" style="background:${col};border-color:${col}"></div>
+                <div class="tl-line" style="background:${col}"></div>
+              </div>
+              <div class="tl-body">
+                ${_stopRow(leg.from || 'Start', rideMs)}
+                <div class="tl-meta">
+                  <span class="tl-badge" style="background:${col}18;color:${col}">${icon} ${lbl} · ${leg.duration_minutes || 0} min</span>
+                  ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
+                  ${batt}
+                </div>
+              </div>
+            </div>
+            <!-- Drop-off row -->
+            <div class="tl-row">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-alight" style="background:white;border-color:${col}"></div>
+                ${!isLast ? `<div class="tl-line" style="background:#e2e8f0"></div>` : ''}
+              </div>
+              <div class="tl-body" style="padding-bottom:${isLast?'0':'12px'}">
+                ${_stopRow(leg.to || 'Destination', arrMs)}
+                ${isLast ? `<div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">${t('your_destination')}</div>` : ''}
               </div>
             </div>`;
 
@@ -1537,7 +1607,8 @@ async function startJourney() {
         window._busRouteLines.forEach(l => map.removeLayer(l));
         window._busRouteLines = [];
 
-        if (mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0) {
+        if ((mode === 'BUS' || (selectedJourney.legs || []).length > 1)
+                && selectedJourney.legs && selectedJourney.legs.length > 0) {
             let colorIdx = 0;
 
             selectedJourney.legs.forEach(leg => {
@@ -1561,6 +1632,11 @@ async function startJourney() {
                 } else if (leg.mode === 'WALK' && leg.stop_coords && leg.stop_coords.length >= 2) {
                     const coords = leg.stop_coords.map(c => [c[0], c[1]]);
                     const line = L.polyline(coords, { color: '#94a3b8', weight: 3, opacity: 0.7, dashArray: '6,6' }).addTo(map);
+                    window._busRouteLines.push(line);
+                } else if ((leg.mode === 'BIKE' || leg.mode === 'SCOOTER')
+                        && leg.stop_coords && leg.stop_coords.length >= 2) {
+                    const coords = leg.stop_coords.map(c => [c[0], c[1]]);
+                    const line = L.polyline(coords, { color: LINE_COLORS[leg.mode] || color, weight: 5, opacity: 0.85, dashArray: '6,4' }).addTo(map);
                     window._busRouteLines.push(line);
                 }
             });
@@ -1587,9 +1663,10 @@ async function startJourney() {
         const durationMin = selectedJourney.durationMinutes
             || Math.ceil(distanceKm / (mode==='WALK'?5:mode==='BIKE'?15:mode==='SCOOTER'?20:25) * 60);
         const modeEmoji = MODE_ICONS[mode];
-        const isBusMode = mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0;
-        const timelineHtml = isBusMode
-            ? buildTimeline(selectedJourney.legs, durationMin, greenIndex)
+        const isBusMode  = mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0;
+        const isMultiLeg = isBusMode || (selectedJourney.legs && selectedJourney.legs.length > 1);
+        const timelineHtml = isMultiLeg
+            ? buildTimeline(selectedJourney.legs, durationMin, greenIndex, window._routeOptions?.[mode])
             : buildSingleLegTimeline(mode, selectedJourney.legs, distanceKm, selectedJourney.co2Grams ?? 0);
 
         document.querySelector('.routes-list').innerHTML = `

@@ -406,6 +406,18 @@
                             </div>
                             <div class="toggle" id="prefOnlyBusRain" onclick="togglePref(this)"></div>
                         </div>
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_max_bike_walk">Max walk to a shared bike</div>
+                                <div class="pref-desc" data-i18n="desc_max_bike_walk">Bike/scooter options only if a vehicle is within this distance</div>
+                            </div>
+                            <select class="pref-select" id="prefMaxBikeWalk">
+                                <option value="250">250 m</option>
+                                <option value="500" selected>500 m</option>
+                                <option value="750">750 m</option>
+                                <option value="1000">1 km</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="settings-section">
                         <span class="section-label" data-i18n="label_notifications">Notifications</span>

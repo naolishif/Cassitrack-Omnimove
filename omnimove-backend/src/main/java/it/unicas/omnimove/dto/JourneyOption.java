@@ -26,4 +26,10 @@ public class JourneyOption {
     @JsonProperty("score_budget") private Double scoreBudget;
     @JsonProperty("score_eco")    private Double scoreEco;
 
+    // Shared-vehicle (Elerent) grounding — set only on BIKE/SCOOTER options
+    @JsonProperty("bike_id")          private String  bikeId;
+    @JsonProperty("bike_plate")       private String  bikePlate;
+    @JsonProperty("bike_battery_pct") private Integer bikeBatteryPct;
+    @JsonProperty("bike_walk_metres") private Integer bikeWalkMetres;
+    @JsonProperty("bike_warning")     private String  bikeWarning;
 }

@@ -3,10 +3,12 @@ package it.unicas.omnimove.service;
 import it.unicas.omnimove.client.BikeSharingClient;
 import it.unicas.omnimove.dto.BikeVehicleDTO;
 import it.unicas.omnimove.dto.BikeZoneDTO;
+import it.unicas.omnimove.util.GeoUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Bike-sharing availability with a short in-process TTL cache
@@ -53,5 +55,60 @@ public class BikeSharingService {
             zonesTimestamp = now;
         }
         return cachedZones;
+    }
+
+    // ── Journey-planning support ──────────────────────────────────────
+
+    /** A vehicle plus its straight-line distance from the query point. */
+    public record NearestVehicle(BikeVehicleDTO vehicle, int walkMetres) {}
+
+    /** Zone problems a destination can have. */
+    public enum ZoneIssue { OUT_OF_OPERATING_AREA, NO_PARKING }
+
+    /**
+     * Nearest available vehicle of the given type ("BIKE" | "SCOOTER") within
+     * maxMetres of (lat, lon). Uses the same cached fleet as the map — no
+     * extra provider calls. Battery level is deliberately NOT a filter: a
+     * low-battery bike is still shown, flagged by the frontend battery bars.
+     */
+    public Optional<NearestVehicle> findNearest(double lat, double lon,
+                                                String vehicleType, int maxMetres) {
+        NearestVehicle best = null;
+        for (BikeVehicleDTO v : getAvailableBikes()) {
+            if (v.getLat() == null || v.getLon() == null) continue;
+            if (Boolean.FALSE.equals(v.getIsAvailable())) continue;
+            if (vehicleType != null && !vehicleType.equalsIgnoreCase(v.getVehicleType())) continue;
+            int d = (int) Math.round(GeoUtils.haversineMetres(lat, lon, v.getLat(), v.getLon()));
+            if (d <= maxMetres && (best == null || d < best.walkMetres())) {
+                best = new NearestVehicle(v, d);
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    /**
+     * Checks the ride destination against the provider zones:
+     *  - outside every operating zone (when at least one is defined) → OUT_OF_OPERATING_AREA
+     *  - inside a no-parking zone → NO_PARKING
+     * Zone types come from the provider unnormalised, so matching is lenient.
+     */
+    public Optional<ZoneIssue> checkDestinationZones(double lat, double lon) {
+        List<BikeZoneDTO> zones = getZones();
+        if (zones == null || zones.isEmpty()) return Optional.empty();
+
+        boolean hasOperating = false, inOperating = false;
+        for (BikeZoneDTO z : zones) {
+            String type = z.getZoneType() != null ? z.getZoneType().toUpperCase() : "";
+            boolean contains = GeoUtils.pointInPolygon(lat, lon, z.getPolygon())
+                    || (z.getRadiusM() != null && GeoUtils.inCircle(lat, lon, z.getCenter(), z.getRadiusM()));
+            if (type.contains("NO_PARK") || type.contains("NO_GO") || type.contains("FORBIDDEN")) {
+                if (contains) return Optional.of(ZoneIssue.NO_PARKING);
+            } else if (type.contains("OPERAT") || type.contains("SERVICE") || type.contains("ALLOWED")) {
+                hasOperating = true;
+                if (contains) inOperating = true;
+            }
+        }
+        if (hasOperating && !inOperating) return Optional.of(ZoneIssue.OUT_OF_OPERATING_AREA);
+        return Optional.empty();
     }
 }
