@@ -107,12 +107,9 @@
             </div>
 
             <button class="search-btn" onclick="swapStops()" style="background:var(--bg-app);color:var(--text-dark);border-left:1px solid var(--border-mid);padding:10px 14px;font-size:16px" title="Swap">⇄</button>
+            <button class="search-btn time-pill" id="sidebarTimePill" onclick="openTimePicker()"
+                    data-i18n-title="time_depart">🕐 <span id="sidebarTimeDisplay">Now</span></button>
             <button class="search-btn" id="searchBtn" onclick="doSearch()" data-i18n="search_btn" data-label="Search">Search</button>
-        </div>
-        <div class="cats" id="sortChips">
-            <div class="cat-chip active" data-sort="eco" onclick="setSort(this)" data-i18n="chip_eco">🌱 Eco</div>
-            <div class="cat-chip" data-sort="budget" onclick="setSort(this)" data-i18n="chip_budget">💸 Budget</div>
-            <div class="cat-chip" data-sort="fast" onclick="setSort(this)" data-i18n="chip_fast">⚡ Fast</div>
         </div>
         <div class="cats" id="modeChips">
             <div class="cat-chip" data-mode="BUS" onclick="toggleModeChip(this)" data-i18n="chip_bus">🚌 Bus</div>
@@ -135,9 +132,12 @@
                 <div class="map-sidebar-header">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
                         <h2 data-i18n="smart_routes">Smart Routes</h2>
-                        <button id="sidebarTimePill" class="sidebar-time-pill" onclick="openTimePicker()">
-                            🕐 <span id="sidebarTimeDisplay">Now</span>
-                        </button>
+                        <select id="sortSelect" class="sort-select" onchange="setSort(this.value)"
+                                data-i18n-title="sort_by">
+                            <option value="eco"    data-i18n="chip_eco">🌱 Eco</option>
+                            <option value="budget" data-i18n="chip_budget">💸 Budget</option>
+                            <option value="fast"   data-i18n="chip_fast">⚡ Fast</option>
+                        </select>
                     </div>
                     <div class="weather-pill">☁️ 18°C · Light rain</div>
                 </div>

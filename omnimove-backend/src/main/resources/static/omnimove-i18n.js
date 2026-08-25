@@ -87,6 +87,7 @@ const OMNI_T = {
     msg_reset_failed:'Reset failed. The link may have expired.',
     btn_sending:'Sending…',
     // Main sheet
+    sort_by:'Sort routes by',
     smart_routes:'Smart Routes',
     plan_trip_title:'Plan your trip',
     plan_trip_desc:'Pick origin & destination above, then tap Search.',
@@ -375,6 +376,7 @@ const OMNI_T = {
     msg_reset_failed:'Reset fallito. Il link potrebbe essere scaduto.',
     btn_sending:'Invio…',
     // Main sheet
+    sort_by:'Ordina i percorsi per',
     smart_routes:'Percorsi intelligenti',
     plan_trip_title:'Pianifica il tuo percorso',
     plan_trip_desc:'Scegli origine e destinazione qui sopra, poi premi Cerca.',

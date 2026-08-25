@@ -427,27 +427,42 @@ body {
     border-bottom: 1px solid var(--border);
 }
 .map-sidebar-header h2 { font-size: 16px; font-weight: 800; color: var(--text-dark); }
-.sidebar-time-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: #f1f5f9;
-    border: 1px solid #e2e8f0;
-    border-radius: 20px;
-    padding: 4px 10px;
+/* Departure time — now a segment of the search row, between the swap and Search */
+.time-pill {
+    background: var(--bg-app);
+    color: var(--text-mid);
+    border-left: 1px solid var(--border-mid);
+    padding: 10px 14px;
     font-size: 12px;
     font-weight: 700;
-    color: #64748b;
-    cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
 }
-.sidebar-time-pill:hover { background: #e2e8f0; }
-.sidebar-time-pill--active {
-    background: #ecfdf5;
-    border-color: #6ee7b7;
-    color: #059669;
+.time-pill:hover { background: #e2e8f0; color: var(--text-dark); }
+/* A time actually chosen has to look different from the "Now" default, or the
+   traveller cannot tell at a glance that results are for a future departure. */
+.time-pill--active {
+    background: var(--primary-light);
+    color: var(--primary-dark);
 }
+
+/* Sort — takes the place the time pill used to hold in the panel header */
+.sort-select {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-mid);
+    background: #f1f5f9;
+    border: 1px solid var(--border-mid);
+    border-radius: 20px;
+    padding: 5px 10px;
+    cursor: pointer;
+    max-width: 150px;
+}
+.sort-select:hover { background: #e2e8f0; }
+.sort-select:focus { outline: 2px solid var(--primary-light); outline-offset: 1px; }
 .weather-pill {
     display: inline-flex;
     align-items: center;
@@ -1717,6 +1732,7 @@ body {
         grid-template-areas:
             "origin swap"
             "dest   swap"
+            "time   time"
             "search search";
         height: auto !important;
         min-height: 0 !important;
@@ -1748,6 +1764,22 @@ body {
         padding: 0 !important;
     }
     .search-btn[title="Swap"]::after { content: "\2195"; font-size: 15px; }
+
+    /* Departure time: its own full-width row between the fields and Search.
+       Without an explicit area it was auto-placed into an implicit row after
+       "search", which is what put it below the button — and `order` cannot fix
+       that, because it does not apply to items placed by grid-area. */
+    .topbar-search > .time-pill {
+        grid-area: time;
+        width: 100%;
+        height: 34px !important;
+        border-top: 1px solid var(--border-mid);
+        border-left: none;
+        border-radius: 0 !important;
+        justify-content: center;
+        font-size: 12px !important;
+        padding: 0 !important;
+    }
 
     /* Search button: full-width row at the bottom of the box */
     .topbar-search > .search-btn:last-child {

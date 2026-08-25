@@ -92,10 +92,7 @@ async function loadPreferences() {
         // Applica subito il sort di default ai chip nella topbar
         const sortMap = { ECO: 'eco', BUDGET: 'budget', FAST: 'fast' };
         const sortVal = sortMap[p.defaultJourneyMode] || 'eco';
-        document.querySelectorAll('#sortChips .cat-chip').forEach(c => {
-            c.classList.toggle('active', c.dataset.sort === sortVal);
-        });
-        activeSort = sortVal;
+        setSort(sortVal);
 
     } catch (e) {
         console.warn('Could not load preferences:', e);
@@ -126,10 +123,7 @@ async function savePreferences() {
         // Aggiorna subito il sort attivo nella topbar
         const sortMap = { ECO: 'eco', BUDGET: 'budget', FAST: 'fast' };
         const sortVal = sortMap[body.defaultJourneyMode] || 'eco';
-        document.querySelectorAll('#sortChips .cat-chip').forEach(c => {
-            c.classList.toggle('active', c.dataset.sort === sortVal);
-        });
-        activeSort = sortVal;
+        setSort(sortVal);
 
         showToast(t('toast_prefs_saved'));
     } catch (e) {
@@ -423,7 +417,7 @@ function updateTimeDisplay() {
     const sidebarPill = document.getElementById('sidebarTimePill');
     if (sidebarEl) sidebarEl.textContent = pillLabel;
     if (sidebarPill) {
-        sidebarPill.classList.toggle('sidebar-time-pill--active', _pickerHour !== null);
+        sidebarPill.classList.toggle('time-pill--active', _pickerHour !== null);
     }
 }
 updateTimeDisplay();
@@ -1414,10 +1408,18 @@ function getDest() {
 let activeSort  = 'eco';   // 'eco' | 'budget' | 'fast'  — always exactly one
 let activeModes = [];      // [] = all modes; otherwise subset of BUS/BIKE/SCOOTER (WALK always included)
 
-function setSort(el) {
-    document.querySelectorAll('#sortChips .cat-chip').forEach(c => c.classList.remove('active'));
-    el.classList.add('active');
-    activeSort = el.dataset.sort;
+// Declared here rather than reusing SCORE_KEY below: loadPreferences() runs from
+// the top of the file and calls setSort, so validating against a const declared
+// further down would work only for as long as that call stays behind an await.
+const SORT_VALUES = ['eco', 'budget', 'fast'];
+
+// Takes the value now that the control is a dropdown. It used to take the chip
+// that was clicked and read its dataset, which a <select> has no equivalent of.
+function setSort(value) {
+    if (!SORT_VALUES.includes(value)) return;   // ignore anything not one of the three
+    activeSort = value;
+    const sel = document.getElementById('sortSelect');
+    if (sel && sel.value !== value) sel.value = value;   // keeps it in step when set from code
     if (window._lastSearchData) renderRoutes(window._lastSearchData);
 }
 
@@ -2642,6 +2644,16 @@ function switchProfileTab(tab) {
     // pane the traveller was not meant to see.
     if (tab === 'payment' && !FEATURE_PAYMENT) tab = 'history';
     document.querySelectorAll('.profile-tab').forEach(t => t.classList.toggle('active', t.dataset.ptab === tab));
+
+    // The tab strip and the sidebar are two views of one choice, so both have to
+    // follow it. Only the sidebar used to do the syncing, from its own click
+    // handler, which is why picking from the strip left the sidebar still
+    // highlighting whatever had been chosen before — Account open, Last Routes lit.
+    // Every entry is cleared, not just the profile ones: we are in the profile
+    // pane now, so Plan Route or Fares staying lit would be just as wrong.
+    document.querySelectorAll('.sidebar-nav .nav-item').forEach(n =>
+        n.classList.toggle('active', n.dataset.pane === 'profile' && n.dataset.tab === tab));
+
     document.querySelectorAll('.ptab-pane').forEach(p => p.classList.remove('active'));
     const el = document.getElementById('ptab-' + tab);
     if (el) el.classList.add('active');
@@ -2963,6 +2975,32 @@ function backToMap() {
 // ── Step 7: ensure the Leaflet map renders on mobile / after reflow ──
 window.addEventListener('resize', function () { try { map.invalidateSize(); } catch (e) {} });
 setTimeout(function () { try { map.invalidateSize(); } catch (e) {} }, 500);
+
+// Leaflet measures its container once, on init, and never notices it changing.
+// The two lines above only cover the cases where the WINDOW changes — and on a
+// phone the container moves without it: the top bar wraps to a different height
+// when the web font is swapped in or the chip row reflows, which resizes the map
+// underneath it. Leaflet keeps painting tiles for the old, smaller box and
+// leaves a blank band where it believes there is nothing, with the controls
+// (the line legend among them) laid out off the visible area.
+//
+// A ResizeObserver watches the element itself, so it fires whatever moved it.
+// Coalesced through requestAnimationFrame: a reflow can emit a burst of
+// callbacks, and invalidateSize() redraws every tile each time it is called.
+if (window.ResizeObserver) {
+    let _sizePending = 0;
+    new ResizeObserver(function () {
+        cancelAnimationFrame(_sizePending);
+        _sizePending = requestAnimationFrame(function () {
+            try { map.invalidateSize(); } catch (e) {}
+        });
+    }).observe(document.getElementById('map'));
+}
+
+// Fonts land after first paint and are the most common cause of that reflow.
+if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { try { map.invalidateSize(); } catch (e) {} });
+}
 
 // ── Step 9: the ← on option pages reopens the menu ──
 function backToMap() { openMenu(); }
