@@ -499,6 +499,93 @@ document.addEventListener('click', e => {
     if (btn) showStopArrivals(btn.dataset.stopId, btn.dataset.stopName);
 });
 
+// ── Elerent bike-sharing layer (read-only) ────────────────────────
+// Vehicles from GET /journeys/bikes (RideAtom API or mock, cached 60s
+// server-side), zones from GET /journeys/bikes/zones. Accessory layer:
+// on any failure it silently disappears — no banner, map still works.
+
+window._bikeMarkers    = [];
+window._bikeZoneLayers = [];
+
+function makeBikeMarkerHtml(type) {
+    const scooter = type === 'SCOOTER';
+    const color = scooter ? LINE_COLORS.SCOOTER : LINE_COLORS.BIKE;
+    return `<div style="background:${color};color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-size:14px;cursor:pointer">${scooter ? '🛴' : '🚲'}</div>`;
+}
+
+function clearBikeMarkers() {
+    window._bikeMarkers.forEach(m => map.removeLayer(m));
+    window._bikeMarkers = [];
+}
+
+// Mode chips filter the layer too: [] = all modes visible
+function _bikeTypeVisible(type) {
+    if (!Array.isArray(activeModes) || activeModes.length === 0) return true;
+    return activeModes.includes(type);
+}
+
+function renderBikeMarkers(list) {
+    clearBikeMarkers();
+    (list || []).forEach(b => {
+        if (b.lat == null || b.lon == null) return;
+        const type = b.vehicle_type === 'SCOOTER' ? 'SCOOTER' : 'BIKE';
+        if (!_bikeTypeVisible(type)) return;
+        const batteryTxt = b.battery_pct != null
+            ? `🔋 ${t('bike_battery')}: ${b.battery_pct}%<br>` : '';
+        const priceTxt = type === 'SCOOTER' ? t('bike_price_scooter') : t('bike_price_bike');
+        const popup =
+            `<b>${type === 'SCOOTER' ? '🛴' : '🚲'} Elerent ${escHtml(b.plate || b.bike_id || '—')}</b><br>` +
+            batteryTxt +
+            `${priceTxt}`;
+        const icon = L.divIcon({
+            html: makeBikeMarkerHtml(type),
+            className: '', iconSize: [28, 28], iconAnchor: [14, 14]
+        });
+        window._bikeMarkers.push(
+            L.marker([b.lat, b.lon], { icon }).addTo(map).bindPopup(popup));
+    });
+}
+
+async function fetchAndRenderBikeMarkers() {
+    try {
+        const r = await apiFetch('/journeys/bikes');
+        if (!r.ok) throw new Error(r.status);
+        const list = await r.json();
+        window._lastBikeList = Array.isArray(list) ? list : [];
+        renderBikeMarkers(window._lastBikeList);
+    } catch (e) {
+        console.warn('[BIKE] fetch failed:', e);
+        clearBikeMarkers();
+    }
+}
+
+async function loadBikeZones() {
+    try {
+        const r = await apiFetch('/journeys/bikes/zones');
+        if (!r.ok) throw new Error(r.status);
+        const zones = await r.json();
+        window._bikeZoneLayers.forEach(l => map.removeLayer(l));
+        window._bikeZoneLayers = [];
+        (zones || []).forEach(z => {
+            const color = z.color || LINE_COLORS.BIKE;
+            const opts = { color, weight: 1.5, fillColor: color, fillOpacity: 0.07, dashArray: '4,4' };
+            let layer = null;
+            if (Array.isArray(z.polygon) && z.polygon.length >= 3) {
+                layer = L.polygon(z.polygon, opts);
+            } else if (Array.isArray(z.center) && z.radius_m) {
+                layer = L.circle(z.center, { ...opts, radius: z.radius_m, fillOpacity: 0.12 });
+            }
+            if (layer) {
+                if (z.title) layer.bindPopup(escHtml(z.title));
+                layer.addTo(map);
+                window._bikeZoneLayers.push(layer);
+            }
+        });
+    } catch (e) {
+        console.warn('[BIKE] zones fetch failed:', e);
+    }
+}
+
 // ── Stop arrivals bottom sheet ─────────────────────────────────────
 
 const STATUS_BG = {
@@ -753,6 +840,8 @@ function toggleModeChip(el) {
     el.classList.toggle('active');
     activeModes = Array.from(document.querySelectorAll('#modeChips .cat-chip.active'))
         .map(c => c.dataset.mode);
+    // Bike-sharing layer follows the mode filter (no refetch needed)
+    renderBikeMarkers(window._lastBikeList || []);
     // Mode filter changes what was actually computed server-side, so re-search.
     doSearch();
 }
@@ -1961,6 +2050,11 @@ function renderSuggestions(suggestions) {
 
 // ── Initial load: populate stops (dropdowns + map markers) ─────────
 loadStops();
+
+// ── Elerent bike-sharing layer: zones once, vehicles polled 60 s ───
+loadBikeZones();
+fetchAndRenderBikeMarkers();
+window._bikePollInterval = setInterval(fetchAndRenderBikeMarkers, 60000);
 
 // ══════════════════════════════════════════════════════════════
 
