@@ -12,12 +12,6 @@
     <div class="logo">OMNI<span>MOVE</span></div>
     <div class="tagline">Smart mobility for Cassino — UNICAS 2025/2026</div>
 
-    <!-- Language toggle -->
-    <div class="lang-toggle">
-        <button class="lang-pill lang-pill-active" data-lang="en" onclick="setLanguage('en')">EN</button>
-        <button class="lang-pill" data-lang="it" onclick="setLanguage('it')">IT</button>
-    </div>
-
     <div class="card">
         <!-- Tabs -->
         <div class="tabs" id="tabBar">
@@ -51,12 +45,12 @@
             <div class="name-row" style="display:flex;gap:10px">
                 <div style="flex:1">
                     <div class="label" data-i18n="label_name">Name</div>
-                    <input class="input" type="text" id="regFirstName" placeholder="Nawaye"/>
+                    <input class="input" type="text" id="regFirstName" data-i18n="ph_name" placeholder="Your name" autocomplete="given-name"/>
                     <span class="field-err" id="err-regFirstName"></span>
                 </div>
                 <div style="flex:1">
                     <div class="label" data-i18n="label_surname">Surname</div>
-                    <input class="input" type="text" id="regLastName" placeholder="Shiferaw"/>
+                    <input class="input" type="text" id="regLastName" data-i18n="ph_surname" placeholder="Your surname" autocomplete="family-name"/>
                     <span class="field-err" id="err-regLastName"></span>
                 </div>
             </div>
@@ -130,6 +124,13 @@
             <button type="button" class="btn-ghost" onclick="cancelReset()" data-i18n="btn_back_signin">← Back to Sign In</button>
         </form>
 
+    </div>
+
+    <!-- Language toggle — below the card: it is a setting for the page, not a
+         step of signing in, and above the form it read as the first field. -->
+    <div class="lang-toggle lang-toggle--below">
+        <button class="lang-pill lang-pill-active" data-lang="en" onclick="setLanguage('en')">EN</button>
+        <button class="lang-pill" data-lang="it" onclick="setLanguage('it')">IT</button>
     </div>
 </div>
 

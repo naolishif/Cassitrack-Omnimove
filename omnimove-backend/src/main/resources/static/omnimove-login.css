@@ -100,3 +100,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--display);
     background:transparent;color:var(--dim);transition:all .18s}
 .lang-pill:hover{border-color:var(--accent);color:var(--text)}
 .lang-pill-active{background:var(--accent) !important;color:#fff !important;border-color:var(--accent) !important}
+
+/* Below the card the margin belongs on top, not underneath: the base rule was
+   written for the old position above the form. */
+.lang-toggle--below { margin-bottom: 0; margin-top: 18px; }
