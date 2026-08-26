@@ -1718,6 +1718,7 @@ async function loadSummary() {
         set('kpiLate',        d.late_count ?? '—');
         set('kpiLateSub',     d.late_count > 0 ? 'attention needed' : 'all running well');
         set('kpiEarly',       d.early_count ?? '—');
+        set('reportName',     `CASSITRACK Analytics · ${new Date().toLocaleDateString('it-IT')}`);
     } catch (e) {
         console.error('Failed to load analytics summary', e);
     }
@@ -1893,6 +1894,7 @@ let hoursChartInstance = null;
 async function loadBusiestHours() {
     const canvas  = document.getElementById('hoursChart');
     const emptyEl = document.getElementById('hoursChartEmpty');
+    const wrap    = document.getElementById('hours-chart-wrap');
     if (!canvas) return;
 
     try {
@@ -1912,13 +1914,13 @@ async function loadBusiestHours() {
         if (hoursChartInstance) hoursChartInstance.destroy();
 
         if (!peak) {
-            canvas.style.display = 'none';
+            if (wrap) wrap.style.display = 'none';
             if (emptyEl) emptyEl.style.display = 'block';
             hoursChartInstance = null;
             return;
         }
 
-        canvas.style.display = '';
+        if (wrap) wrap.style.display = '';
         if (emptyEl) emptyEl.style.display = 'none';
 
         // Colour by intensity rather than by series: one bar per hour, so a
@@ -1947,7 +1949,7 @@ async function loadBusiestHours() {
                 maintainAspectRatio: false,
                 plugins: {
                     legend:  { display: false },
-                    tooltip: { callbacks: { label: ctx => `${ctx.parsed.y ?? 0} devices` } }
+                    tooltip: { callbacks: { label: ctx => `${ctx.parsed.y ?? 0} reports` } }
                 },
                 scales: {
                     x: {
@@ -1957,7 +1959,7 @@ async function loadBusiestHours() {
                     },
                     y: {
                         beginAtZero: true,
-                        title: { display: true, text: 'Devices',
+                        title: { display: true, text: 'GPS reports',
                             color: '#4B5563', font: { family: 'DM Mono', size: 10 } },
                         ticks: { color: '#4B5563', font: { family: 'DM Mono', size: 9 } },
                         grid: { color: 'rgba(255,255,255,.04)' }
@@ -1967,7 +1969,7 @@ async function loadBusiestHours() {
         });
     } catch (e) {
         console.error('Failed to load busiest hours', e);
-        canvas.style.display = 'none';
+        if (wrap) wrap.style.display = 'none';
         if (emptyEl) emptyEl.style.display = 'block';
     }
 }
@@ -2002,7 +2004,7 @@ function loadAllAnalytics() {
     const sub = document.getElementById('hoursChartSub');
     if (sub) {
         const busTxt = activeFilters.busId ? ` · ${activeFilters.busId}` : '';
-        sub.textContent = `Average onboard devices by hour · ${PRESET_LABEL[activeFilters.preset] || ''}${busTxt}`;
+        sub.textContent = `GPS reports · ${PRESET_LABEL[activeFilters.preset] || ''}${busTxt}`;
     }
 
     loadSummary();
@@ -2263,6 +2265,7 @@ document.getElementById('presetBtnCustom').addEventListener('click', e => setPre
 
 document.getElementById('applyFiltersBtn').addEventListener('click', applyFilters);
 document.getElementById('anExportBtn').addEventListener('click', exportAnalyticsCsv);
+document.getElementById('anPrintBtn').addEventListener('click', () => window.print());
 
 const dmState = {
     search:     '',

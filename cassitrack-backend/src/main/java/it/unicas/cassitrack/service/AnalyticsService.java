@@ -196,15 +196,19 @@ public class AnalyticsService {
                 "from(bucket: \"%s\") " +
                         "|> range(%s) " +
                         "|> filter(fn: (r) => r[\"_measurement\"] == \"vehicle_position\") " +
-                        "|> filter(fn: (r) => r[\"_field\"] == \"ble_device_count\")%s " +
-                        "|> aggregateWindow(every: 1h, fn: mean, createEmpty: false)",
+                        "|> filter(fn: (r) => r[\"_field\"] == \"lat\")%s " +
+                        "|> aggregateWindow(every: 1h, fn: count, createEmpty: false)",
                 bucket, buildFluxRange(startTime, endTime), buildVehicleFilter(busId));
 
-        // A range wider than one day yields several windows per hour-of-day, so the
-        // buckets are averaged rather than overwritten: the chart answers "what does
-        // a typical 08:00 look like over this period", not "what did the last 08:00 do".
-        double[] sums    = new double[24];
-        int[]    samples = new int[24];
+        // Counting position reports rather than averaging ble_device_count: the
+        // simulator publishes that field as a literal 0 on every message, and
+        // MqttMessageHandler stores the zero instead of skipping it, so the old
+        // query returned twenty-four empty buckets against a fleet that was
+        // plainly running. 'lat' is written unconditionally, so one record there
+        // is one GPS report. Buckets are summed, not averaged, because a range
+        // spanning several days should answer "how many reports landed in the
+        // 08:00 hour over this period".
+        long[] reports = new long[24];
         try {
             List<FluxTable> tables = influxDBClient.getQueryApi().query(fluxBusiest);
             for (FluxTable table : tables)
@@ -213,10 +217,7 @@ public class AnalyticsService {
                     Number  val  = (Number) record.getValue();
                     if (time != null && val != null) {
                         int hour = time.atZone(ZoneId.systemDefault()).getHour();
-                        if (hour >= 0 && hour < 24) {
-                            sums[hour] += val.doubleValue();
-                            samples[hour]++;
-                        }
+                        if (hour >= 0 && hour < 24) reports[hour] += val.longValue();
                     }
                 }
         } catch (Exception e) {
@@ -224,8 +225,8 @@ public class AnalyticsService {
         }
 
         for (int h = 0; h < 24; h++) {
-            if (samples[h] > 0)
-                hourlyData.get(h).put("count", (int) Math.round(sums[h] / samples[h]));
+            if (reports[h] > 0)
+                hourlyData.get(h).put("count", (int) Math.min(Integer.MAX_VALUE, reports[h]));
         }
 
         String peakHour = "N/A";

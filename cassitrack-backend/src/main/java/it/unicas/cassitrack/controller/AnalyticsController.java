@@ -54,7 +54,7 @@ public class AnalyticsController {
 
     @GetMapping("/busiest-hours")
     @Operation(summary = "Busiest hours of the day",
-        description = "Average onboard devices per hour of day; filter by startTime/endTime/busId")
+        description = "GPS reports per hour of day; filter by startTime/endTime/busId")
     public ResponseEntity<Map<String, Object>> getBusiestHours(
             @RequestParam(required = false) String startTime,
             @RequestParam(required = false) String endTime,
