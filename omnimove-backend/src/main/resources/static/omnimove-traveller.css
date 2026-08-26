@@ -411,7 +411,13 @@ body {
 
 /* ─── MAP PANE ─── */
 #pane-map { position: relative; }
-#map { flex: 1; height: 100%; }
+/* The position is deliberate. Leaflet writes position:relative inline on its
+   container whenever it finds it static, and that inline style then outranks the
+   mobile rule further down (position:absolute + inset:0). The map was left with
+   no height source at all: a 402x0 box holding thirty perfectly loaded tiles
+   nobody could see. Declaring a position here means Leaflet finds the container
+   already positioned and writes nothing, so the mobile rule keeps working. */
+#map { flex: 1; height: 100%; position: relative; }
 
 .map-sidebar {
     width: 340px;

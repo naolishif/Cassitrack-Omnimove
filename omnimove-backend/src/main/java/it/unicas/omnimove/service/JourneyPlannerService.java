@@ -299,20 +299,19 @@ public class JourneyPlannerService {
 
         double walkMetres = 0;
         int walkMin = 0;
+        List<double[]> walkPoints = List.of();
         if (fromGps) {
-            var walkResult = googleMapsService.getTravelTime(
-                    req.getOriginLat(), req.getOriginLon(),
-                    getStopLat(nearestStop), getStopLon(nearestStop),
-                    "walking");
-            if (walkResult.isPresent()) {
-                walkMetres = walkResult.get().distanceMetres();
-                walkMin    = (int) Math.ceil(walkResult.get().durationSeconds() / 60.0);
-            } else {
+            var w = walkStretch(req.getOriginLat(), req.getOriginLon(),
+                                getStopLat(nearestStop), getStopLon(nearestStop));
+            walkMetres = w.metres();
+            walkMin    = w.minutes();
+            walkPoints = w.points();
+            if (!w.routed()) {
                 msgs.add(req.isItalian()
-                        ? "🚶 Non riesco a calcolare il percorso a piedi fino alla fermata "
-                            + fmtStop(nearestStop) + ". Recati alla fermata per prendere il bus."
-                        : "🚶 Could not work out the walk to stop " + fmtStop(nearestStop)
-                            + ". Make your own way there to catch the bus.");
+                        ? "🚶 Percorso a piedi fino alla fermata " + fmtStop(nearestStop)
+                            + " stimato in linea d'aria: Google Maps non è disponibile."
+                        : "🚶 Walk to stop " + fmtStop(nearestStop)
+                            + " estimated as the crow flies: Google Maps is unavailable.");
             }
         }
         // --- Step 2+3: la linea e la sua attesa si calcolano insieme ---
@@ -430,20 +429,19 @@ public class JourneyPlannerService {
         // stretch is on foot and has to count towards the total.
         double destWalkMetres = 0;
         int destWalkMin = 0;
+        List<double[]> destWalkPoints = List.of();
         if (req.isDestGps()) {
-            var destWalk = googleMapsService.getTravelTime(
-                    getStopLat(destStop), getStopLon(destStop),
-                    req.getDestLat(), req.getDestLon(),
-                    "walking");
-            if (destWalk.isPresent()) {
-                destWalkMetres = destWalk.get().distanceMetres();
-                destWalkMin    = (int) Math.ceil(destWalk.get().durationSeconds() / 60.0);
-            } else {
+            var w = walkStretch(getStopLat(destStop), getStopLon(destStop),
+                                req.getDestLat(), req.getDestLon());
+            destWalkMetres = w.metres();
+            destWalkMin    = w.minutes();
+            destWalkPoints = w.points();
+            if (!w.routed()) {
                 msgs.add(req.isItalian()
-                        ? "🚶 Non riesco a calcolare il percorso a piedi dalla fermata "
-                            + fmtStop(destStop) + " fino alla tua posizione."
-                        : "🚶 Could not work out the walk from stop " + fmtStop(destStop)
-                            + " to your position.");
+                        ? "🚶 Ultimo tratto a piedi dalla fermata " + fmtStop(destStop)
+                            + " stimato in linea d'aria: Google Maps non è disponibile."
+                        : "🚶 Final walk from stop " + fmtStop(destStop)
+                            + " estimated as the crow flies: Google Maps is unavailable.");
             }
         }
 
@@ -452,7 +450,9 @@ public class JourneyPlannerService {
         if (walkMin > 0) legs.add(JourneyLeg.builder().mode("WALK")
                 .from(req.getOriginName()).to(fmtStop(nearestStop))
                 .durationMinutes(walkMin).distanceMetres(walkMetres)
-                .instruction("Walk to bus stop").build());
+                .stopCoords(walkPoints)
+                .instruction("Walk " + fmtDist(walkMetres) + " to " + fmtStop(nearestStop))
+                .build());
         legs.add(JourneyLeg.builder().mode("WAIT")
                 .from(fmtStop(nearestStop)).to(fmtStop(nearestStop))
                 .durationMinutes(waitMin).distanceMetres(0.0)
@@ -461,7 +461,9 @@ public class JourneyPlannerService {
         if (destWalkMin > 0) legs.add(JourneyLeg.builder().mode("WALK")
                 .from(fmtStop(destStop)).to(req.getDestName())
                 .durationMinutes(destWalkMin).distanceMetres(destWalkMetres)
-                .instruction("Walk to your destination").build());
+                .stopCoords(destWalkPoints)
+                .instruction("Walk " + fmtDist(destWalkMetres) + " to " + req.getDestName())
+                .build());
 
         String occupancyWarning = null;
         if (req.getUserId() != null) {
@@ -491,7 +493,7 @@ public class JourneyPlannerService {
 
         return JourneyOption.builder()
                 .mode("BUS").modeLabel(lineLabel)
-                .durationMinutes(total).distanceMetres(busMetres)
+                .durationMinutes(total).distanceMetres(busMetres + walkMetres + destWalkMetres)
                 .costEuros(busCost)
                 .greenIndex(greenIndex.computeGreenIndex("BUS", busMetres / 1000.0))
                 .co2Grams(greenIndex.computeCo2Grams("BUS", busMetres / 1000.0))
@@ -501,7 +503,8 @@ public class JourneyPlannerService {
                 .delayRealTime(isNow && busDelay != null ? busDelay.realTime() : null)
                 .delayAtStop(isNow && busDelay != null ? busDelay.atStop() : null)
                 .delayLabel(isNow ? delayLabel(busDelay) : null)
-                .summary("Take " + lineLabel + " from " + fmtStop(nearestStop))
+                .summary("Take " + lineLabel + " from " + fmtStop(nearestStop)
+                        + (walkMin > 0 ? " (" + fmtDist(walkMetres) + " walk)" : ""))
                 .weatherWarning(occupancyWarning != null ? occupancyWarning
                         : weatherService.getModeWarning(weather.condition, "BUS"))
                 .weatherSuggestion(weather.suggestion)
@@ -511,13 +514,14 @@ public class JourneyPlannerService {
     private JourneyOption planBike(JourneyRequest req, List<String> msgs,
                                    WeatherService.WeatherData weather, int maxWalkM) {
         return planSharedVehicle(req, msgs, weather, maxWalkM,
-                "BIKE", "Elerent Bike Share", 15.0, bikeUnlock, bikePerMin, "🚲", "bike");
+                "BIKE", "Elerent Bike Share", 15.0, bikeUnlock, bikePerMin, 0.0, "🚲", "bike");
     }
 
     private JourneyOption planScooter(JourneyRequest req, List<String> msgs,
                                       WeatherService.WeatherData weather, int maxWalkM) {
         return planSharedVehicle(req, msgs, weather, maxWalkM,
-                "SCOOTER", "Elerent E-Scooter", SPEED_SCOOTER, scooterUnlock, scooterPerMin, "🛴", "e-scooter");
+                "SCOOTER", "Elerent E-Scooter", SPEED_SCOOTER, scooterUnlock, scooterPerMin,
+                scooterDeposit, "🛴", "e-scooter");
     }
 
     /**
@@ -530,7 +534,8 @@ public class JourneyPlannerService {
      */
     private JourneyOption planSharedVehicle(JourneyRequest req, List<String> msgs,
             WeatherService.WeatherData weather, int maxWalkM, String mode, String label,
-            double speedKmh, double unlock, double perMin, String emoji, String noun) {
+            double speedKmh, double unlock, double perMin, double deposit,
+            String emoji, String noun) {
 
         var nearest = bikeSharingService.findNearest(
                 req.getOriginLat(), req.getOriginLon(), mode, maxWalkM);
@@ -550,28 +555,37 @@ public class JourneyPlannerService {
         int walkMin = 0;
         double walkM = 0;
         if (airM >= 40) {   // vehicle basically at the origin → skip the walk leg
-            var w = googleMapsService.getTravelTime(
-                    req.getOriginLat(), req.getOriginLon(), v.getLat(), v.getLon(), "walking");
-            walkM = w.map(g -> (double) g.distanceMetres()).orElse(airM * 1.3);
-            walkMin = w.map(g -> (int) Math.ceil(g.durationSeconds() / 60.0))
-                       .orElse((int) Math.ceil(walkM / 1000.0 / 5.0 * 60));
+            var w = walkStretch(req.getOriginLat(), req.getOriginLon(), v.getLat(), v.getLon());
+            walkM   = w.metres();
+            walkMin = w.minutes();
             legs.add(JourneyLeg.builder().mode("WALK")
                     .from(req.getOriginName()).to("Elerent " + vehName)
                     .durationMinutes(walkMin).distanceMetres(walkM)
-                    .stopCoords(List.of(
-                            new double[]{req.getOriginLat(), req.getOriginLon()},
-                            new double[]{v.getLat(), v.getLon()}))
+                    .stopCoords(w.points())
                     .instruction("Walk " + fmtDist(walkM) + " to " + noun + " " + vehName)
                     .build());
         }
 
-        var r = googleMapsService.getTravelTime(
-                v.getLat(), v.getLon(), req.getDestLat(), req.getDestLon(), "bicycling");
+        // A destination outside the operating area — or inside a no-parking zone —
+        // is not somewhere the ride may end. The planner used to route the whole
+        // ride there anyway and then attach a warning saying it was impossible,
+        // which is a plan nobody can follow. Instead the ride stops at the nearest
+        // legal point and the last stretch is walked, the way anyone would do it.
+        var dropOff = bikeSharingService.findLegalDropOff(req.getDestLat(), req.getDestLon());
+        final double rideLat = dropOff.map(BikeSharingService.DropOff::lat).orElse(req.getDestLat());
+        final double rideLon = dropOff.map(BikeSharingService.DropOff::lon).orElse(req.getDestLon());
+        String rideEndName = dropOff.isPresent()
+                ? (req.isItalian() ? "Limite area Elerent" : "Elerent area edge")
+                : req.getDestName();
+
+        // Google has no scooter profile: bicycling is the closest road network,
+        // and the scooter keeps its own speed for the timing below.
+        var r = googleMapsService.getRoute(
+                v.getLat(), v.getLon(), rideLat, rideLon, "bicycling");
         double rideM = r.map(g -> (double) g.distanceMetres())
                         .orElseGet(() -> {
                             log.warn("{}: Google non disponibile — uso stima haversine", mode);
-                            return haversineMetres(v.getLat(), v.getLon(),
-                                                   req.getDestLat(), req.getDestLon()) * 1.25;
+                            return haversineMetres(v.getLat(), v.getLon(), rideLat, rideLon) * 1.25;
                         });
         // Google's "bicycling" duration fits bikes; scooters keep their own speed
         int rideMin = "BIKE".equals(mode)
@@ -580,55 +594,76 @@ public class JourneyPlannerService {
                 : (int) Math.ceil(rideM / 1000.0 / speedKmh * 60);
         double cost = Math.round((unlock + rideMin * perMin) * 100) / 100.0;
 
+        List<double[]> ridePoints = r.map(GoogleMapsService.RouteResult::points)
+                .filter(pts -> pts.size() >= 2)
+                .orElse(List.of(new double[]{v.getLat(), v.getLon()},
+                                new double[]{rideLat, rideLon}));
+
         legs.add(JourneyLeg.builder().mode(mode)
                 .from(legs.isEmpty() ? req.getOriginName() : "Elerent " + vehName)
-                .to(req.getDestName())
+                .to(rideEndName)
                 .durationMinutes(rideMin).distanceMetres(rideM)
-                .stopCoords(List.of(
-                        new double[]{v.getLat(), v.getLon()},
-                        new double[]{req.getDestLat(), req.getDestLon()}))
+                .stopCoords(ridePoints)
                 .instruction("Elerent " + noun + " " + vehName + " · Unlock €" + unlock
-                        + " + €" + perMin + "/min · elerent.it")
+                        + " + €" + perMin + "/min"
+                        + (deposit > 0 ? " · €" + deposit + " refundable hold" : "")
+                        + " · elerent.it")
                 .build());
 
-        String zoneWarning = bikeSharingService
-                .checkDestinationZones(req.getDestLat(), req.getDestLon())
-                .map(issue -> switch (issue) {
-                    case OUT_OF_OPERATING_AREA -> req.isItalian()
-                            ? "⚠️ Destinazione fuori dalla zona operativa Elerent: la corsa non può terminare lì."
-                            : "⚠️ Destination outside the Elerent operating area: the ride cannot end there.";
-                    case NO_PARKING -> req.isItalian()
-                            ? "⚠️ Destinazione in zona divieto di sosta Elerent: parcheggia ai margini della zona."
-                            : "⚠️ Destination inside an Elerent no-parking zone: park at the zone edge.";
-                })
-                .orElse(null);
+        // The stretch the vehicle is not allowed to cover
+        final WalkStretch lastWalk = dropOff.isPresent()
+                ? walkStretch(rideLat, rideLon, req.getDestLat(), req.getDestLon())
+                : null;
+        if (lastWalk != null) {
+            legs.add(JourneyLeg.builder().mode("WALK")
+                    .from(rideEndName).to(req.getDestName())
+                    .durationMinutes(lastWalk.minutes()).distanceMetres(lastWalk.metres())
+                    .stopCoords(lastWalk.points())
+                    .instruction("Walk " + fmtDist(lastWalk.metres()) + " to " + req.getDestName())
+                    .build());
+        }
 
-        int totalMin = walkMin + rideMin;
+        String zoneWarning = dropOff.map(d -> switch (d.reason()) {
+            case OUT_OF_OPERATING_AREA -> req.isItalian()
+                    ? "ℹ️ Destinazione fuori dalla zona operativa Elerent: la corsa termina al limite dell'area, "
+                        + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."
+                    : "ℹ️ Destination outside the Elerent operating area: the ride ends at the boundary, "
+                        + "last " + fmtDist(lastWalk.metres()) + " on foot.";
+            case NO_PARKING -> req.isItalian()
+                    ? "ℹ️ Destinazione in zona divieto di sosta Elerent: si lascia il mezzo ai margini della zona, "
+                        + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."
+                    : "ℹ️ Destination inside an Elerent no-parking zone: leave the vehicle at the zone edge, "
+                        + "last " + fmtDist(lastWalk.metres()) + " on foot.";
+        }).orElse(null);
+
+        int lastWalkMin = lastWalk != null ? lastWalk.minutes() : 0;
+        double lastWalkM = lastWalk != null ? lastWalk.metres() : 0;
+
+        int totalMin = walkMin + rideMin + lastWalkMin;
         String summary = ("SCOOTER".equals(mode) ? "🛴 " : "") + "Elerent " + noun + " " + vehName
-                + (walkMin > 0 ? (req.isItalian() ? " a " : " at ") + fmtDist(airM) : "")
+                + (walkMin > 0 ? (req.isItalian() ? " a " : " at ") + fmtDist(walkM) : "")
+                + (lastWalkMin > 0
+                    ? " + " + fmtDist(lastWalkM) + (req.isItalian() ? " a piedi" : " on foot")
+                    : "")
                 + " — " + totalMin + " min (~€" + String.format("%.2f", cost) + ")";
 
         return JourneyOption.builder()
                 .mode(mode).modeLabel(label)
-                .durationMinutes(totalMin).distanceMetres(walkM + rideM)
+                .durationMinutes(totalMin).distanceMetres(walkM + rideM + lastWalkM)
                 .costEuros(cost).greenIndex(100).co2Grams(0.0).etaMinutes(totalMin)
                 .summary(summary)
                 .weatherWarning(weatherService.getModeWarning(weather.condition, mode))
                 .weatherSuggestion(weather.suggestion)
                 .bikeId(v.getBikeId()).bikePlate(v.getPlate())
-                .bikeBatteryPct(v.getBatteryPct()).bikeWalkMetres(airM)
+                .bikeBatteryPct(v.getBatteryPct()).bikeWalkMetres((int) Math.round(walkM))
                 .bikeWarning(zoneWarning)
-                .legs(List.of(JourneyLeg.builder().mode("SCOOTER")
-                        .from(req.getOriginName()).to(req.getDestName())
-                        .durationMinutes(dur).distanceMetres(roadM)
-                        .instruction("Elerent e-scooter · Unlock €" + scooterUnlock
-                                + " + €" + scooterPerMin + "/min · €" + scooterDeposit
-                                + " refundable hold · elerent.it").build()))
+                .legs(legs)
                 .build();
     }
 
     private JourneyOption planWalk(JourneyRequest req, WeatherService.WeatherData weather) {
-        var r = route(req, "walking");
+        var r = googleMapsService.getRoute(req.getOriginLat(), req.getOriginLon(),
+                                           req.getDestLat(),   req.getDestLon(), "walking");
         double roadM = r.map(g -> (double) g.distanceMetres())
                         .orElseGet(() -> {
                             log.warn("WALK: Google non disponibile — uso stima haversine");
@@ -648,8 +683,49 @@ public class JourneyPlannerService {
                 .legs(List.of(JourneyLeg.builder().mode("WALK")
                         .from(req.getOriginName()).to(req.getDestName())
                         .durationMinutes(dur).distanceMetres(roadM)
-                        .instruction("Walk the entire route").build()))
+                        .stopCoords(r.map(GoogleMapsService.RouteResult::points)
+                                .filter(pts -> pts.size() >= 2)
+                                .orElse(List.of(
+                                        new double[]{req.getOriginLat(), req.getOriginLon()},
+                                        new double[]{req.getDestLat(),   req.getDestLon()})))
+                        .instruction("Walk " + fmtDist(roadM) + " to " + req.getDestName())
+                        .build()))
                 .build();
+    }
+
+    /**
+     * A walking stretch: how far, how long, and the shape to draw it with.
+     *
+     * @param points [lat, lon] pairs following the pavement when Google routed
+     *               it, or just the two endpoints when it did not — which is
+     *               what the map used to receive for every walk.
+     */
+    private record WalkStretch(double metres, int minutes, boolean routed,
+                               List<double[]> points) {}
+
+    /**
+     * Fastest walking route from Google, with a haversine estimate when Google
+     * cannot answer (no API key, quota, network). The fallback matters: without
+     * it a missing key left the distance at zero and the caller dropped the leg
+     * entirely, so a trip that starts at your GPS position looked like it began
+     * standing at the bus stop — the walk vanished from the itinerary and from
+     * the total. 1.3x the straight line at 5 km/h is the same estimate
+     * planWalk() already used.
+     */
+    private WalkStretch walkStretch(double fromLat, double fromLon,
+                                    double toLat,   double toLon) {
+        List<double[]> straight = List.of(new double[]{fromLat, fromLon},
+                                          new double[]{toLat,   toLon});
+
+        var g = googleMapsService.getRoute(fromLat, fromLon, toLat, toLon, "walking");
+        if (g.isPresent()) {
+            var pts = g.get().points();
+            return new WalkStretch(g.get().distanceMetres(),
+                    (int) Math.ceil(g.get().durationSeconds() / 60.0), true,
+                    pts.size() >= 2 ? pts : straight);
+        }
+        double metres = haversineMetres(fromLat, fromLon, toLat, toLon) * 1.3;
+        return new WalkStretch(metres, (int) Math.ceil(metres / 1000.0 / 5.0 * 60), false, straight);
     }
 
     private double haversineMetres(double lat1,double lon1,double lat2,double lon2) {
@@ -687,12 +763,6 @@ public class JourneyPlannerService {
     }
 
     /** Percorso reale su strada per la modalità Google data (walking/bicycling/driving). */
-    private Optional<GoogleMapsService.TrafficResult> route(JourneyRequest req, String mode) {
-        return googleMapsService.getTravelTime(
-                req.getOriginLat(), req.getOriginLon(),
-                req.getDestLat(),   req.getDestLon(), mode);
-    }
-
     private String delayLabel(DelayInfo d) {
         if (d == null || d.delayMinutes() == null) return null;
         int m = d.delayMinutes();

@@ -1687,7 +1687,25 @@ const MODE_BTNS  = {
     WALK:    { labelKey:'btn_walk',    cls:'btn-green'  },
 };
 
-const LINE_COLORS     = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#10b981' };
+const LINE_COLORS     = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#6366f1' };
+
+/**
+ * Walking used to be a thin grey dashed line: grey ink on the grey streets of
+ * the basemap, the one leg you actually have to follow and the hardest to see.
+ * This draws it the way Google does — round dots over a white casing — so it
+ * reads over roads, parks and water alike. Returns a LayerGroup so callers can
+ * add and remove it as a single layer, like the polyline it replaces.
+ */
+function walkLine(coords, weight) {
+    const w = weight || 5;
+    return L.layerGroup([
+        L.polyline(coords, { color: '#ffffff', weight: w + 4, opacity: 0.9,
+                             lineCap: 'round', lineJoin: 'round' }),
+        L.polyline(coords, { color: LINE_COLORS.WALK, weight: w, opacity: 1,
+                             dashArray: '1,' + (w + 5),
+                             lineCap: 'round', lineJoin: 'round' })
+    ]);
+}
 
 // A bus leg is drawn in the colour of the line it runs on — the same colour that
 // line has on the network map, in the legend and on its badge. It used to take
@@ -1847,9 +1865,7 @@ function showRoutePreview(mode, legs) {
                 }
             } else if (leg.mode === 'WALK' && leg.stop_coords && leg.stop_coords.length >= 2) {
                 const coords = leg.stop_coords.map(c => [c[0], c[1]]);
-                window._previewLayers.push(
-                    L.polyline(coords, { color: '#94a3b8', weight: 3, opacity: 0.6, dashArray: '5,6' }).addTo(map)
-                );
+                window._previewLayers.push(walkLine(coords, 4).addTo(map));
             } else if ((leg.mode === 'BIKE' || leg.mode === 'SCOOTER')
                     && leg.stop_coords && leg.stop_coords.length >= 2) {
                 const coords = leg.stop_coords.map(c => [c[0], c[1]]);
@@ -1879,14 +1895,20 @@ function showRoutePreview(mode, legs) {
             }
         }
     } else {
+        // A one-leg option (walk the whole way, or a vehicle parked on top of you)
+        // still carries its routed shape when Google gave us one. The straight
+        // line is the fallback, not the default.
+        const only   = (legs || [])[0];
+        const coords = (only && only.stop_coords && only.stop_coords.length > 1)
+            ? only.stop_coords.map(c => [c[0], c[1]])
+            : [[origin.lat, origin.lon], [dest.lat, dest.lon]];
         window._previewLayers.push(
-            L.polyline(
-                [[origin.lat, origin.lon], [dest.lat, dest.lon]],
-                { color, weight: 4, opacity: 0.7, dashArray: mode === 'WALK' ? '8,8' : '8,4' }
-            ).addTo(map)
+            mode === 'WALK'
+                ? walkLine(coords, 4).addTo(map)
+                : L.polyline(coords, { color, weight: 4, opacity: 0.7, dashArray: '8,4' }).addTo(map)
         );
         drawEndpointMarkers(origin, dest, window._previewLayers);
-        map.fitBounds([[origin.lat, origin.lon], [dest.lat, dest.lon]], { padding: [50, 50] });
+        map.fitBounds(coords, { padding: [50, 50] });
     }
 }
 
@@ -2394,7 +2416,8 @@ async function startJourney() {
             placeUserMarker(gpsPos.lat, gpsPos.lon);
             window._routeLineGps = L.polyline(
                 [[gpsPos.lat, gpsPos.lon], [origin.lat, origin.lon]],
-                { color: '#94a3b8', weight: 3, opacity: 0.7, dashArray: '6,6' }
+                { color: LINE_COLORS.WALK, weight: 4, opacity: 0.9, dashArray: '1,9',
+                  lineCap: 'round', lineJoin: 'round' }
             ).addTo(map);
         } else if (gpsPos) {
             placeUserMarker(gpsPos.lat, gpsPos.lon);
@@ -2437,8 +2460,7 @@ async function startJourney() {
                     });
                 } else if (leg.mode === 'WALK' && leg.stop_coords && leg.stop_coords.length >= 2) {
                     const coords = leg.stop_coords.map(c => [c[0], c[1]]);
-                    const line = L.polyline(coords, { color: '#94a3b8', weight: 3, opacity: 0.7, dashArray: '6,6' }).addTo(map);
-                    window._busRouteLines.push(line);
+                    window._busRouteLines.push(walkLine(coords, 5).addTo(map));
                 } else if ((leg.mode === 'BIKE' || leg.mode === 'SCOOTER')
                         && leg.stop_coords && leg.stop_coords.length >= 2) {
                     const coords = leg.stop_coords.map(c => [c[0], c[1]]);
@@ -2447,22 +2469,28 @@ async function startJourney() {
                 }
             });
 
-            const allBusCoords = selectedJourney.legs
-                .filter(l => l.stop_coords)
-                .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
-            if (allBusCoords.length > 0) map.fitBounds(allBusCoords, { padding: [50, 50] });
-
         } else {
-            window._routeLine = L.polyline(
-                [[origin.lat, origin.lon], [dest.lat, dest.lon]],
-                { color, weight: 5, opacity: 0.85, dashArray: mode === 'WALK' ? '8,8' : null }
+            // One-leg option (walk the whole way, or a vehicle parked on top of
+            // you): it still carries the routed shape when Google gave us one.
+            const only   = (selectedJourney.legs || [])[0];
+            const coords = (only && only.stop_coords && only.stop_coords.length > 1)
+                ? only.stop_coords.map(c => [c[0], c[1]])
+                : [[origin.lat, origin.lon], [dest.lat, dest.lon]];
+            window._routeLine = (mode === 'WALK'
+                ? walkLine(coords, 5)
+                : L.polyline(coords, { color, weight: 5, opacity: 0.85 })
             ).addTo(map);
         }
 
-        // 9) Fit bounds
-        const allPoints = (gpsPos && origin.isGPS)
-            ? [[gpsPos.lat, gpsPos.lon], [origin.lat, origin.lon], [dest.lat, dest.lon]]
+        // 9) Fit bounds — on the geometry actually drawn, not on the endpoints:
+        // a routed path that swings wide used to fall outside the viewport.
+        const drawn = (selectedJourney.legs || [])
+            .filter(l => l.stop_coords)
+            .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
+        const allPoints = drawn.length > 1
+            ? drawn
             : [[origin.lat, origin.lon], [dest.lat, dest.lon]];
+        if (gpsPos && origin.isGPS) allPoints.push([gpsPos.lat, gpsPos.lon]);
         map.fitBounds(allPoints, { padding: [50, 50] });
 
         // 10) Pannello "in progress"
