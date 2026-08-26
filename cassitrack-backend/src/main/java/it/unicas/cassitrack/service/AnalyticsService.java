@@ -183,7 +183,7 @@ public class AnalyticsService {
 
     // ── Busiest hours (GET /api/v1/analytics/busiest-hours) ───────────────────
 
-    public Map<String, Object> getBusiestHours() {
+    public Map<String, Object> getBusiestHours(String startTime, String endTime, String busId) {
         List<Map<String, Object>> hourlyData = new ArrayList<>();
         for (int h = 0; h < 24; h++) {
             Map<String, Object> p = new LinkedHashMap<>();
@@ -194,23 +194,38 @@ public class AnalyticsService {
 
         String fluxBusiest = String.format(
                 "from(bucket: \"%s\") " +
-                        "|> range(start: today()) " +
+                        "|> range(%s) " +
                         "|> filter(fn: (r) => r[\"_measurement\"] == \"vehicle_position\") " +
-                        "|> filter(fn: (r) => r[\"_field\"] == \"ble_device_count\") " +
-                        "|> aggregateWindow(every: 1h, fn: mean, createEmpty: false)", bucket);
+                        "|> filter(fn: (r) => r[\"_field\"] == \"ble_device_count\")%s " +
+                        "|> aggregateWindow(every: 1h, fn: mean, createEmpty: false)",
+                bucket, buildFluxRange(startTime, endTime), buildVehicleFilter(busId));
+
+        // A range wider than one day yields several windows per hour-of-day, so the
+        // buckets are averaged rather than overwritten: the chart answers "what does
+        // a typical 08:00 look like over this period", not "what did the last 08:00 do".
+        double[] sums    = new double[24];
+        int[]    samples = new int[24];
         try {
             List<FluxTable> tables = influxDBClient.getQueryApi().query(fluxBusiest);
-            if (!tables.isEmpty())
-                for (FluxRecord record : tables.get(0).getRecords()) {
+            for (FluxTable table : tables)
+                for (FluxRecord record : table.getRecords()) {
                     Instant time = record.getTime();
                     Number  val  = (Number) record.getValue();
                     if (time != null && val != null) {
                         int hour = time.atZone(ZoneId.systemDefault()).getHour();
-                        if (hour >= 0 && hour < 24) hourlyData.get(hour).put("count", val.intValue());
+                        if (hour >= 0 && hour < 24) {
+                            sums[hour] += val.doubleValue();
+                            samples[hour]++;
+                        }
                     }
                 }
         } catch (Exception e) {
             log.error("Error querying busiest hours from InfluxDB", e);
+        }
+
+        for (int h = 0; h < 24; h++) {
+            if (samples[h] > 0)
+                hourlyData.get(h).put("count", (int) Math.round(sums[h] / samples[h]));
         }
 
         String peakHour = "N/A";

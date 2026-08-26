@@ -149,37 +149,10 @@
 
             <div class="filter-sep"></div>
 
-            <!-- Route multi-select -->
-            <span class="filter-label">ROUTES</span>
-            <div class="route-dropdown-wrap" id="routeDropdownWrap">
-                <button class="preset-btn" id="routeDropdownBtn">All Routes ▾</button>
-                <div class="route-dropdown" id="routeDropdown">
-                    <div class="rdrop-header">
-                        <span>LINES</span>
-                        <span id="clearRoutesBtn">Clear all</span>
-                    </div>
-                    <div id="routeCheckList">
-                        <div class="rdrop-item-empty">Loading routes...</div>
-                    </div>
-                </div>
-            </div>
-            <div class="route-pills" id="selectedRoutePills"></div>
-
-            <div class="filter-sep"></div>
-
             <!-- Bus select -->
             <span class="filter-label">BUS</span>
             <select class="filter-select" id="filterBus" title="Filter by bus">
                 <option value="">All Buses</option>
-            </select>
-
-            <div class="filter-sep"></div>
-
-            <!-- Group by -->
-            <span class="filter-label">GROUP</span>
-            <select class="filter-select filter-select-narrow" id="filterGroupBy" title="Group by hour or day">
-                <option value="hour">By Hour</option>
-                <option value="day">By Day</option>
             </select>
 
             <!-- Apply -->
@@ -189,95 +162,63 @@
 
         <div class="analytics-dashboard">
 
-            <!-- LEFT COLUMN -->
+            <!-- LEFT COLUMN — headline numbers.
+                 These come from /analytics/summary, which is live-and-today by
+                 design: the filter bar above does not reach them. The NOW chip
+                 on each panel header marks those — everything without one moves
+                 with the period filter. -->
             <div class="analytics-left">
 
-                <!-- KPI GRID -->
                 <div class="kpi-grid compact-kpis">
 
-
-
                     <div class="kpi-card">
-                        <div class="kpi-label">Average Delay</div>
+                        <div class="kpi-label">Active buses</div>
                         <div class="kpi-row">
-                            <div class="kpi-value" id="kpiDelay">—</div>
+                            <div class="kpi-value" id="kpiActiveBuses">—</div>
                         </div>
-                        <div class="kpi-sub" id="kpiDelaySub">mean across selected period</div>
+                        <div class="kpi-sub">right now on the network</div>
                     </div>
 
                     <div class="kpi-card">
-                        <div class="kpi-label">Average Occupancy</div>
+                        <div class="kpi-label">On-time rate</div>
                         <div class="kpi-row">
-                            <div class="kpi-value" id="kpiPassengers">—</div>
+                            <div class="kpi-value green" id="kpiOnTimePct">—</div>
                         </div>
-                        <div class="kpi-sub" id="kpiPaxSub">mean passengers per slot</div>
+                        <div class="kpi-sub" id="kpiOnTimeSub">across active buses</div>
                     </div>
 
                     <div class="kpi-card">
-                        <div class="kpi-label">CO₂ Saved</div>
+                        <div class="kpi-label">Buses today</div>
                         <div class="kpi-row">
-                            <div class="kpi-value" id="kpiCo2">—</div>
+                            <div class="kpi-value cyan" id="kpiBusesToday">—</div>
                         </div>
-                        <div class="kpi-sub" id="kpiCo2Sub">vs private cars</div>
+                        <div class="kpi-sub">distinct vehicles seen</div>
                     </div>
 
                     <div class="kpi-card">
-                        <div class="kpi-label">On-Time Performance</div>
+                        <div class="kpi-label">GPS reports</div>
                         <div class="kpi-row">
-                            <div class="kpi-value" id="kpiOnTimePct">—</div>
+                            <div class="kpi-value purple" id="kpiReports">—</div>
                         </div>
-                        <div class="kpi-sub" id="kpiOnTimeSub">% buses on schedule (live)</div>
+                        <div class="kpi-sub">received today</div>
                     </div>
 
-                </div>
-
-                <!-- DONUT -->
-                <div class="chart-card small-chart">
-
-                    <div class="chart-header">
-                        <div>
-                            <div class="chart-title">Fleet Status</div>
-
-                            <div class="chart-subtitle">
-                                Real-time operational state
-                            </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Delayed buses</div>
+                        <div class="kpi-row">
+                            <div class="kpi-value amber" id="kpiLate">—</div>
                         </div>
+                        <div class="kpi-sub" id="kpiLateSub">—</div>
                     </div>
 
-                    <div class="fleet-status">
-
-                        <div class="donut-wrapper">
-                            <div class="fake-donut">
-                                <span id="kpiOnTime">—</span>
-                            </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Running early</div>
+                        <div class="kpi-row">
+                            <div class="kpi-value cyan" id="kpiEarly">—</div>
                         </div>
-
-                        <div class="status-legend">
-
-                            <div class="legend-item">
-                                <span class="legend-dot green"></span>
-                                ON TIME
-                            </div>
-
-                            <div class="legend-item">
-                                <span class="legend-dot amber"></span>
-                                SLIGHT DELAY
-                            </div>
-
-                            <div class="legend-item">
-                                <span class="legend-dot red"></span>
-                                LATE
-                            </div>
-
-                            <!-- CSP FIX (A05): .legend-dot.amber, never style="background:#F59E0B" -->
-                            <div class="legend-item">
-                                <span class="legend-dot amber"></span>
-                                NO TRIP
-                            </div>
-
-                        </div>
-
+                        <div class="kpi-sub">ahead of schedule</div>
                     </div>
+
                 </div>
 
             </div>
@@ -285,55 +226,106 @@
             <!-- RIGHT COLUMN -->
             <div class="analytics-right">
 
-                <!-- MAIN CHART -->
-                <div class="chart-card big-chart">
+                <!-- FLEET STATUS — real doughnut, counts in the legend -->
+                <div class="chart-card small-chart">
 
                     <div class="chart-header">
                         <div>
-                            <div class="chart-title">
-                                Network Punctuality
-                            </div>
-
-                            <div class="chart-subtitle" id="delayChartSub">
-                                Delay by line · per hour
-                            </div>
+                            <div class="chart-title">Fleet Status</div>
+                            <div class="chart-subtitle">Schedule adherence across active buses</div>
                         </div>
+                        <span class="chip chip-green">NOW</span>
                     </div>
 
-                    <div id="delay-chart-wrap" class="chart-wrap">
-                        <canvas id="delayChart" class="chart-canvas"></canvas>
-                    </div>
-                    <div id="delayChartEmpty" class="chart-empty">
-                        No data for the selected filters — try a different period or route.
+                    <div class="fleet-status">
+                        <div class="donut-wrapper">
+                            <canvas id="adherenceChart"></canvas>
+                        </div>
+                        <div class="status-legend" id="adherenceLegend">
+                            <div class="legend-item">Loading…</div>
+                        </div>
                     </div>
 
                 </div>
 
-                <!-- BOTTOM GRID -->
-                <div class="bottom-grid">
+                <!-- NETWORK ACTIVITY — the one panel the period filter drives -->
+                <div class="chart-card big-chart">
 
-                    <!-- MOST USED ROUTES -->
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">Network Activity</div>
+                            <div class="chart-subtitle" id="hoursChartSub">Average onboard devices by hour · Today</div>
+                        </div>
+                        <span class="chip chip-blue" id="peakLbl">Peak hour: —</span>
+                    </div>
+
+                    <div id="hours-chart-wrap" class="chart-wrap">
+                        <canvas id="hoursChart" class="chart-canvas"></canvas>
+                    </div>
+                    <div id="hoursChartEmpty" class="chart-empty">
+                        No activity recorded for the selected period — try a wider range or another bus.
+                    </div>
+
+                </div>
+
+                <!-- DELAY PER BUS + FLEET SNAPSHOT -->
+                <div class="bottom-grid an-split">
+
                     <div class="chart-card">
-
                         <div class="chart-header">
                             <div>
-                                <div class="chart-title">
-                                    Network Occupancy
-                                </div>
-
-                                <div class="chart-subtitle" id="paxChartSub">
-                                    Passenger demand by line · per hour
-                                </div>
+                                <div class="chart-title">Delay by Bus</div>
+                                <div class="chart-subtitle">Worst offenders first</div>
                             </div>
+                            <span class="chip chip-green">NOW</span>
                         </div>
+                        <div class="an-bars" id="delayList">
+                            <div class="chart-empty an-shown">Loading…</div>
+                        </div>
+                    </div>
 
-                        <div id="routes-chart-wrap" class="chart-wrap">
-                            <canvas id="routesChart" class="chart-canvas"></canvas>
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <div>
+                                <div class="chart-title">Fleet Snapshot</div>
+                                <div class="chart-subtitle">Status distribution</div>
+                            </div>
+                            <span class="chip chip-green">NOW</span>
                         </div>
-                        <div id="routesChartEmpty" class="chart-empty">
-                            No data for the selected filters — try a different period or route.
+                        <div class="an-bars" id="snapshotList">
+                            <div class="chart-empty an-shown">Loading…</div>
                         </div>
+                    </div>
 
+                </div>
+
+                <!-- VEHICLE TABLE -->
+                <div class="chart-card">
+
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">Active Buses</div>
+                            <div class="chart-subtitle">One row per bus currently transmitting</div>
+                        </div>
+                        <button type="button" class="dm-btn dm-btn-ghost" id="anExportBtn"
+                                title="Download this table as CSV">Export CSV</button>
+                    </div>
+
+                    <div class="dm-table-wrap">
+                        <table class="dm-table">
+                            <thead>
+                            <tr>
+                                <th>Bus</th>
+                                <th>Status</th>
+                                <th>Speed</th>
+                                <th>Delay</th>
+                                <th>Crowding</th>
+                            </tr>
+                            </thead>
+                            <tbody id="vehicleTable">
+                            <tr><td colspan="5" class="an-cell-empty">Loading…</td></tr>
+                            </tbody>
+                        </table>
                     </div>
 
                 </div>

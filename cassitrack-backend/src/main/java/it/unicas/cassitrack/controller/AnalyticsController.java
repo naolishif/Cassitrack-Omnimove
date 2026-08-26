@@ -53,9 +53,14 @@ public class AnalyticsController {
     }
 
     @GetMapping("/busiest-hours")
-    @Operation(summary = "Busiest hours of the day")
-    public ResponseEntity<Map<String, Object>> getBusiestHours() {
-        return ResponseEntity.ok(analyticsService.getBusiestHours());
+    @Operation(summary = "Busiest hours of the day",
+        description = "Average onboard devices per hour of day; filter by startTime/endTime/busId")
+    public ResponseEntity<Map<String, Object>> getBusiestHours(
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime,
+            @RequestParam(required = false) String busId) {
+        validateAnalyticsParams(startTime, endTime, busId, null, Collections.emptyList());
+        return ResponseEntity.ok(analyticsService.getBusiestHours(startTime, endTime, busId));
     }
 
     @GetMapping("/passengers-by-route")

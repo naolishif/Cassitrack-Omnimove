@@ -928,7 +928,8 @@ let rtEditId = null;   // null = adding a new route, otherwise the route id bein
 let rtSearch = '';     // free-text query (id / short name / long name)
 let rtActiveOnly = ''; // '' = any, 'true' = active only, 'false' = inactive only
 
-// NOTE: named *Admin to avoid colliding with the analytics-filter loadRoutes()
+// NOTE: named *Admin since the Fleet Monitor keeps its own route state; this
+// one owns the Data Management CRUD list.
 // defined further down (a duplicate `function` name silently overwrites the
 // earlier one, which is what broke this tab after the merge).
 async function loadRoutesAdmin(){
@@ -1590,22 +1591,38 @@ window.addEventListener('load', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// ANALYTICS FILTER STATE
+// ANALYTICS
+//
+// Two kinds of surface live in this tab and they are not filtered alike:
+//
+//   · Live panels (KPIs, fleet status, delay per bus, active buses) read
+//     /analytics/summary and /analytics/adherence, which describe the fleet
+//     as it is right now. A period has no meaning for them, so the filter
+//     bar does not touch them — the NOW chip in each header says so.
+//   · Network Activity reads /analytics/busiest-hours, which is historical
+//     and does honour startTime/endTime/busId.
+//
+// The line multi-select and the hour/day group-by were dropped along with
+// the per-route charts they used to drive: nothing left on this tab reads
+// them, and a filter that changes nothing is worse than no filter.
 // ═══════════════════════════════════════════════════════════
 
 const activeFilters = {
     preset:    'today',
     startTime: null,
     endTime:   null,
-    routeIds:  [],   // array of route ID strings
-    busId:     '',
-    groupBy:   'hour',
-    status:    ''
+    busId:     ''
 };
 
-// Operating hours from schedule (loaded once)
-let scheduleFirstHour = 6;
-let scheduleLastHour  = 22;
+const PRESET_LABEL = {
+    today:'Today', yesterday:'Yesterday', week:'Last 7 Days',
+    month:'This Month', lastmonth:'Last Month', custom:'Custom Range'
+};
+
+// Last adherence payload, kept so the CSV export writes exactly what is on
+// screen. Distinct from the map's lastVehicles: that one is /vehicles, this
+// one carries the measured delay the adherence endpoint adds on top.
+let lastAdherenceVehicles = [];
 
 // ── Preset logic ──────────────────────────────────────────
 
@@ -1622,31 +1639,14 @@ function setPreset(btn, preset) {
         activeFilters.startTime = null;
         activeFilters.endTime   = null;
     }
-    syncGroupByToPreset(preset);
-}
-
-function syncGroupByToPreset(preset) {
-    const sel = document.getElementById('filterGroupBy');
-    if (preset === 'today' || preset === 'yesterday') {
-        sel.value = 'hour';
-        activeFilters.groupBy = 'hour';
-    } else {
-        sel.value = 'day';
-        activeFilters.groupBy = 'day';
-    }
 }
 
 function presetToRange(preset) {
-    const now  = new Date();
-    const pad  = n => String(n).padStart(2, '0');
-    const iso  = d => d.toISOString();
+    const now = new Date();
+    const iso = d => d.toISOString();
 
-    const startOfDay = d => {
-        const x = new Date(d); x.setHours(0,0,0,0); return x;
-    };
-    const endOfDay = d => {
-        const x = new Date(d); x.setHours(23,59,59,999); return x;
-    };
+    const startOfDay = d => { const x = new Date(d); x.setHours(0,0,0,0);        return x; };
+    const endOfDay   = d => { const x = new Date(d); x.setHours(23,59,59,999);   return x; };
 
     switch (preset) {
         case 'today':
@@ -1682,392 +1682,313 @@ function presetToRange(preset) {
     }
 }
 
-// ── Build URL params from current filter state ─────────────
-
-function buildFilterParams(overrideGroupBy) {
-    const p   = activeFilters.preset;
-    const grp = overrideGroupBy || document.getElementById('filterGroupBy').value || activeFilters.groupBy;
-    const { start, stop } = presetToRange(p);
-
+function buildFilterParams() {
+    const { start, stop } = presetToRange(activeFilters.preset);
     const params = new URLSearchParams();
     if (start) params.set('startTime', start);
     if (stop)  params.set('endTime',   stop);
-    if (activeFilters.routeIds.length > 0)
-        params.set('routeIds', activeFilters.routeIds.join(','));
-    if (activeFilters.busId)
-        params.set('busId', activeFilters.busId);
-    params.set('groupBy', grp);
+    if (activeFilters.busId) params.set('busId', activeFilters.busId);
     return params.toString();
 }
 
-// ── Route dropdown ─────────────────────────────────────────
-
-let allRoutes = [];
-
-async function loadRoutes() {
-    try {
-        // BUGFIX (auth): dead localStorage-token header removed — auth is
-        // via the httpOnly cookie, sent automatically on same-origin fetches.
-        const r = await fetch(`${API}/analytics/routes`);
-        if (!r.ok) return;
-        allRoutes = await r.json();
-        renderRouteDropdown();
-    } catch(e) {
-        console.warn('Could not load routes', e);
-    }
-}
-
-function renderRouteDropdown() {
-    const list = document.getElementById('routeCheckList');
-    if (!allRoutes.length) {
-        // CSP FIX (A05): purely static styling -> reuse the .rdrop-item-empty class.
-        list.innerHTML = '<div class="rdrop-item-empty">No routes found</div>';
-        return;
-    }
-    // CSP FIX (A05): per-route checkbox count is unbounded/runtime-determined,
-    // so the onchange="" handler is replaced with a data-route-id attribute and
-    // a single delegated 'change' listener bound once on #routeCheckList (below).
-    list.innerHTML = allRoutes.map(rt => `
-            <div class="rdrop-item">
-                <input type="checkbox" id="rc_${escHtml(rt.id)}" value="${escHtml(rt.id)}" data-route-id="${escHtml(rt.id)}"
-                    ${activeFilters.routeIds.includes(rt.id) ? 'checked' : ''}>
-                <label for="rc_${escHtml(rt.id)}">${escHtml(rt.shortName || rt.id)}${rt.longName ? ' — ' + escHtml(rt.longName) : ''}</label>
-            </div>`).join('');
-}
-
-function toggleRouteDropdown() {
-    document.getElementById('routeDropdown').classList.toggle('open');
-}
-
-// Close dropdown when clicking outside
-document.addEventListener('click', e => {
-    const wrap = document.getElementById('routeDropdownWrap');
-    if (wrap && !wrap.contains(e.target))
-        document.getElementById('routeDropdown').classList.remove('open');
-});
-
-function toggleRoute(routeId, checked) {
-    if (checked) {
-        if (!activeFilters.routeIds.includes(routeId)) activeFilters.routeIds.push(routeId);
-    } else {
-        activeFilters.routeIds = activeFilters.routeIds.filter(id => id !== routeId);
-    }
-    renderSelectedPills();
-    updateRouteDropdownBtn();
-}
-
-function clearRoutes() {
-    activeFilters.routeIds = [];
-    renderSelectedPills();
-    updateRouteDropdownBtn();
-    renderRouteDropdown();
-}
-
-function renderSelectedPills() {
-    // CSP FIX (A05): pill count is unbounded/runtime-determined, so the
-    // onclick="" handler is replaced with a data-route-id attribute and a
-    // single delegated 'click' listener bound once on #selectedRoutePills.
-    const container = document.getElementById('selectedRoutePills');
-    container.innerHTML = activeFilters.routeIds.map(id => {
-        const rt = allRoutes.find(r => r.id === id);
-        const label = rt ? (rt.shortName || rt.id) : id;
-        return `<div class="route-pill" data-route-id="${escHtml(id)}">
-                        ${escHtml(label)}<span class="rpx">✕</span>
-                    </div>`;
-    }).join('');
-}
-
-function updateRouteDropdownBtn() {
-    const btn = document.getElementById('routeDropdownBtn');
-    const n   = activeFilters.routeIds.length;
-    btn.textContent = n === 0 ? 'All Routes ▾' : `${n} Route${n > 1 ? 's' : ''} ▾`;
-}
-
-// Populate bus dropdown from live vehicle list
+// Filled from the live vehicle poll (fetchVehicles), not from a call of its own
 function populateBusDropdown(vehicles) {
     const sel  = document.getElementById('filterBus');
     const prev = sel.value;
     const ids  = [...new Set(vehicles.map(v => v.vehicle_id))].sort();
     sel.innerHTML = '<option value="">All Buses</option>' +
-        ids.map(id => `<option value="${id}" ${prev === id ? 'selected' : ''}>${id}</option>`).join('');
+        ids.map(id => `<option value="${escHtml(id)}" ${prev === id ? 'selected' : ''}>${escHtml(id)}</option>`).join('');
 }
 
-// ── Operating hours from schedule ──────────────────────────
+// ── 1) SUMMARY → the KPI column ────────────────────────────
 
-async function loadOperatingHours() {
+async function loadSummary() {
     try {
-        // BUGFIX (auth): dead localStorage-token header removed — auth is
-        // via the httpOnly cookie, sent automatically on same-origin fetches.
-        const r = await fetch(`${API}/analytics/operating-hours`);
-        if (!r.ok) return;
-        const data = await r.json();
-        if (data._global) {
-            scheduleFirstHour = data._global.firstHour ?? 6;
-            scheduleLastHour  = data._global.lastHour  ?? 22;
-        }
-    } catch(e) {
-        console.warn('Could not load operating hours', e);
+        const r = await fetch(`${API}/analytics/summary`);
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json();
+
+        const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+        set('kpiActiveBuses', d.active_buses_now ?? '—');
+        set('kpiOnTimePct',   d.on_time_percentage != null ? `${d.on_time_percentage}%` : '—');
+        set('kpiOnTimeSub',   `${d.on_time_count ?? 0} on time · ${d.late_count ?? 0} late`);
+        set('kpiBusesToday',  d.buses_today ?? '—');
+        set('kpiReports',     d.position_reports_today ?? '—');
+        set('kpiLate',        d.late_count ?? '—');
+        set('kpiLateSub',     d.late_count > 0 ? 'attention needed' : 'all running well');
+        set('kpiEarly',       d.early_count ?? '—');
+    } catch (e) {
+        console.error('Failed to load analytics summary', e);
     }
 }
 
-// ── Build chart labels (hours or dates) ────────────────────
+// ── 2) ADHERENCE → doughnut, legend, delay bars, snapshot, table ──
 
-function buildChartLabels(groupBy, data) {
-    if (groupBy === 'day') {
-        // Collect all unique date keys across all routes, sorted
-        const days = new Set();
-        Object.values(data).forEach(bySlot => Object.keys(bySlot).forEach(k => days.add(k)));
-        return [...days].sort();
+let adherenceChartInstance = null;
+
+// Order is deliberate: best status first, so the doughnut reads clockwise
+// from "fine" to "we should look at this".
+const ADHERENCE_ORDER = ['ON_TIME', 'EARLY', 'SLIGHTLY_LATE', 'SIGNIFICANTLY_LATE', 'UNKNOWN'];
+
+async function loadAdherence() {
+    try {
+        const r = await fetch(`${API}/analytics/adherence`);
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json();
+
+        const counts   = d.status_counts || {};
+        const total    = d.total_active  || 0;
+        const vehicles = d.vehicles      || [];
+        lastAdherenceVehicles = vehicles;
+
+        renderAdherenceDonut(counts);
+        renderAdherenceLegend(counts);
+        renderSnapshot(counts, total);
+        renderDelayBars(vehicles);
+        renderVehicleTable(vehicles);
+    } catch (e) {
+        console.error('Failed to load adherence', e);
     }
-    // Hour labels from actual schedule
-    const labels = [];
-    for (let h = scheduleFirstHour; h < scheduleLastHour; h++)
-        labels.push(`${String(h).padStart(2,'0')}:00`);
-    return labels;
 }
 
-// ── Chart rendering ────────────────────────────────────────
+function renderAdherenceDonut(counts) {
+    const canvas = document.getElementById('adherenceChart');
+    if (!canvas) return;
 
-let routesChartInstance = null;
-let delayChartInstance  = null;
+    const keys = ADHERENCE_ORDER.filter(k => (counts[k] || 0) > 0);
+    if (adherenceChartInstance) adherenceChartInstance.destroy();
+    if (!keys.length) { adherenceChartInstance = null; return; }
 
-const CHART_COLORS = ['#3B82F6','#06B6D4','#8B5CF6','#22C55E','#F59E0B','#EF4444'];
-
-function renderBarChart(canvasId, instanceRef, data, tooltipUnit) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return instanceRef;
-
-    // ID convention: delayChart → delayChartEmpty, routesChart → routesChartEmpty
-    const emptyEl = document.getElementById(canvasId + 'Empty');
-    const wrap    = canvas.parentElement;
-
-    const groupBy   = document.getElementById('filterGroupBy').value || 'hour';
-    const routeKeys = Object.keys(data).sort();
-
-    if (routeKeys.length === 0) {
-        canvas.style.display = 'none';
-        if (emptyEl) emptyEl.style.display = 'block';
-        if (instanceRef) instanceRef.destroy();
-        return null;
-    }
-
-    // Show canvas (wrap is always visible — hiding the wrap causes Chart.js to lose its size reference)
-    canvas.style.display = '';
-    if (emptyEl) emptyEl.style.display = 'none';
-
-    const labels   = buildChartLabels(groupBy, data);
-    const datasets = routeKeys.sort().map((key, i) => ({
-        label: key,
-        data: labels.map(slot => data[key][slot] ?? null),
-        backgroundColor: chartColor(key, i),
-        borderRadius: 4,
-        maxBarThickness: groupBy === 'day' ? 18 : 14
-    }));
-
-    if (instanceRef) instanceRef.destroy();
-
-    return new Chart(canvas, {
-        type: 'bar',
-        data: { labels, datasets },
+    adherenceChartInstance = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+            labels:   keys.map(k => SL[k] || k),
+            datasets: [{
+                data:            keys.map(k => counts[k]),
+                backgroundColor: keys.map(k => SC[k] || SC.UNKNOWN),
+                // Same ink as the card gradient's top stop, so the ring reads
+                // as separated slices rather than one continuous band
+                borderColor: '#081120',
+                borderWidth: 2
+            }]
+        },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { labels: { color: '#E2E8F0', font: { family: 'DM Mono', size: 10 } } },
-                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y ?? 0} ${tooltipUnit}` } }
-            },
-            scales: {
-                x: {
-                    ticks: { color: '#4B5563', font: { family: 'DM Mono', size: 9 },
-                        maxRotation: groupBy === 'day' ? 45 : 0 },
-                    grid: { color: 'rgba(255,255,255,.04)' }
-                },
-                y: {
-                    beginAtZero: true,
-                    title: { display: true, text: tooltipUnit === 'pax' ? 'Passengers' : 'Delay (min)',
-                        color: '#4B5563', font: { family: 'DM Mono', size: 10 } },
-                    ticks: { color: '#4B5563', font: { family: 'DM Mono', size: 9 } },
-                    grid: { color: 'rgba(255,255,255,.04)' }
-                }
-            }
+            cutout: '62%',
+            plugins: { legend: { display: false } }   // the legend lives in the markup, with counts
         }
     });
 }
 
-async function loadPassengersByRoute() {
-    try {
-        // BUGFIX (auth): dead localStorage-token header removed — auth is
-        // via the httpOnly cookie, sent automatically on same-origin fetches.
-        const qs    = buildFilterParams();
-        const r = await fetch(`${API}/analytics/passengers-by-route?${qs}`);
-        if (!r.ok) throw new Error(r.status);
-        const data = await r.json();
-        routesChartInstance = renderBarChart('routesChart', routesChartInstance, data, 'pax');
+function renderAdherenceLegend(counts) {
+    const el = document.getElementById('adherenceLegend');
+    if (!el) return;
 
-        // Update average occupancy KPI
-        const allVals = [];
-        Object.values(data).forEach(s => Object.values(s).forEach(v => { if (v != null) allVals.push(v); }));
-        const avg = allVals.length > 0 ? Math.round(allVals.reduce((a,b)=>a+b,0)/allVals.length) : null;
-        document.getElementById('kpiPassengers').textContent = avg != null ? avg : '—';
-    } catch(e) {
-        console.error('Failed to load passengers by route', e);
-        // NOTE: `canvas` is not defined in this scope (pre-existing bug, kept
-        // as-is — only the inline style="" string is swapped for a CSS class,
-        // per CSP-fix scope; this catch block would already throw a
-        // ReferenceError before reaching here, exactly as it did before).
-        canvas.parentElement.innerHTML = `<div class="chart-msg">Error loading data.</div>`;
-    }
+    el.innerHTML = ADHERENCE_ORDER.map(k => `
+        <div class="legend-item">
+            <span class="legend-dot" data-bg="${SC[k] || SC.UNKNOWN}"></span>
+            ${escHtml(SL[k] || k)}
+            <span class="legend-count">${counts[k] || 0}</span>
+        </div>`).join('');
+    applyDynStyles(el);
 }
 
-async function loadDelayByRoute() {
-    try {
-        // BUGFIX (auth): dead localStorage-token header removed — auth is
-        // via the httpOnly cookie, sent automatically on same-origin fetches.
-        const qs    = buildFilterParams();
-        const r = await fetch(`${API}/analytics/delay-by-route?${qs}`);
-        if (!r.ok) throw new Error(r.status);
-        const data = await r.json();
-        delayChartInstance = renderBarChart('delayChart', delayChartInstance, data, 'min');
+function renderSnapshot(counts, total) {
+    const el = document.getElementById('snapshotList');
+    if (!el) return;
 
-        const routeKeys = Object.keys(data);
-        if (routeKeys.length === 0) {
-            canvas.parentElement.innerHTML = `<div class="chart-msg">No data yet — run the simulator.</div>`;
+    if (!total) {
+        el.innerHTML = `<div class="chart-empty an-shown">No buses running.</div>`;
+        return;
+    }
+
+    el.innerHTML = ADHERENCE_ORDER.map(k => {
+        const c   = counts[k] || 0;
+        const pct = Math.round(c / total * 100);
+        const col = SC[k] || SC.UNKNOWN;
+        return `
+        <div class="an-bar-row">
+            <div class="an-bar-top">
+                <span class="an-bar-name">${escHtml(SL[k] || k)}</span>
+                <span class="an-bar-val" data-fg="${col}">${c} · ${pct}%</span>
+            </div>
+            <div class="an-bar-track">
+                <div class="an-bar-fill" data-bg="${col}" data-width-pct="${pct}"></div>
+            </div>
+        </div>`;
+    }).join('');
+    applyDynStyles(el);
+}
+
+function renderDelayBars(vehicles) {
+    const el = document.getElementById('delayList');
+    if (!el) return;
+
+    const withDelay = vehicles
+        .filter(v => v.delay_minutes != null)
+        .sort((a, b) => (b.delay_minutes || 0) - (a.delay_minutes || 0));
+
+    if (!withDelay.length) {
+        el.innerHTML = `<div class="chart-empty an-shown">No measured delays yet — a bus reports one once it passes its first stop.</div>`;
+        return;
+    }
+
+    // Scale against the worst bus, with a floor of 6 minutes so a fleet that
+    // is barely late does not render as if it were falling apart
+    const maxDelay = Math.max(6, ...withDelay.map(v => Math.abs(v.delay_minutes) || 0));
+    const colourOf = m => m >= 4 ? SC.SIGNIFICANTLY_LATE : (m >= 2 ? SC.SLIGHTLY_LATE : SC.ON_TIME);
+
+    el.innerHTML = withDelay.map(v => {
+        const val = v.delay_minutes;
+        const col = colourOf(val);
+        const pct = Math.min(100, (Math.abs(val) / maxDelay) * 100);
+        const sign = val > 0 ? '+' : '';
+        return `
+        <div class="an-bar-row">
+            <div class="an-bar-top">
+                <span class="an-bar-name">${escHtml(v.vehicle_id)}</span>
+                <span class="an-bar-val" data-fg="${col}">${sign}${val.toFixed(1)} min</span>
+            </div>
+            <div class="an-bar-track">
+                <div class="an-bar-fill" data-bg="${col}" data-width-pct="${pct}"></div>
+            </div>
+        </div>`;
+    }).join('');
+    applyDynStyles(el);
+}
+
+function renderVehicleTable(vehicles) {
+    const tbody = document.getElementById('vehicleTable');
+    if (!tbody) return;
+
+    if (!vehicles.length) {
+        tbody.innerHTML = `<tr><td colspan="5" class="an-cell-empty">No buses transmitting right now.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = vehicles.map(v => {
+        const status = v.status || 'UNKNOWN';
+        const delay  = v.delay_minutes != null
+            ? (v.delay_minutes > 0 ? `+${v.delay_minutes} min` : `${v.delay_minutes} min`)
+            : '—';
+        const delayCol = v.delay_minutes > 0 ? SC.SLIGHTLY_LATE : SC.ON_TIME;
+        return `
+        <tr>
+            <td>${escHtml(v.vehicle_id)}</td>
+            <td><span class="chip" data-status="${escHtml(status)}">${escHtml(SL[status] || status)}</span></td>
+            <td>${v.speed_kmh != null ? v.speed_kmh.toFixed(1) + ' km/h' : '—'}</td>
+            <td data-fg="${delayCol}">${delay}</td>
+            <td>${escHtml(v.crowding) || '—'}</td>
+        </tr>`;
+    }).join('');
+    applyDynStyles(tbody);
+}
+
+// ── 3) BUSIEST HOURS → Network Activity ────────────────────
+
+let hoursChartInstance = null;
+
+async function loadBusiestHours() {
+    const canvas  = document.getElementById('hoursChart');
+    const emptyEl = document.getElementById('hoursChartEmpty');
+    if (!canvas) return;
+
+    try {
+        const qs = buildFilterParams();
+        const r  = await fetch(`${API}/analytics/busiest-hours?${qs}`);
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json();
+
+        const rows   = d.hourly_activity || [];
+        const labels = rows.map(h => h.hour);
+        const values = rows.map(h => h.count);
+        const peak   = values.some(v => v > 0);
+
+        const peakEl = document.getElementById('peakLbl');
+        if (peakEl) peakEl.textContent = `Peak hour: ${d.peak_hour || 'N/A'}`;
+
+        if (hoursChartInstance) hoursChartInstance.destroy();
+
+        if (!peak) {
+            canvas.style.display = 'none';
+            if (emptyEl) emptyEl.style.display = 'block';
+            hoursChartInstance = null;
             return;
         }
 
-        const labels = buildHourlyLabels();
+        canvas.style.display = '';
+        if (emptyEl) emptyEl.style.display = 'none';
 
-        const datasets = routeKeys.sort().map((key, i) => ({
-            label: key,
-            data: labels.map(slot => data[key][slot] ?? null),
-            backgroundColor: chartColor(key, i),
-            borderRadius: 4,
-            maxBarThickness: 14
-        }));
+        // Colour by intensity rather than by series: one bar per hour, so a
+        // legend would say nothing a reader cannot already see
+        const max = Math.max(...values, 1);
+        const barColour = c => {
+            const share = c / max;
+            return share > 0.7 ? SC.SIGNIFICANTLY_LATE
+                 : share > 0.4 ? SC.SLIGHTLY_LATE
+                 : '#3B82F6';
+        };
 
-        canvas.width = Math.max(700, labels.length * 90);
-
-        // Update average delay KPI
-        const allVals = [];
-        Object.values(data).forEach(s => Object.values(s).forEach(v => { if (v != null) allVals.push(v); }));
-        const avg = allVals.length > 0
-            ? (allVals.reduce((a,b)=>a+b,0)/allVals.length).toFixed(1) : 0;
-        document.getElementById('kpiDelay').textContent = avg > 0 ? `+${avg}m` : '0m';
-    } catch(e) {
-        console.error('Failed to load delay by route', e);
-        // NOTE: same pre-existing undefined-`canvas` bug as above, intentionally
-        // preserved — only swapping style="" for the .chart-msg class.
-        canvas.parentElement.innerHTML = `<div class="chart-msg">Error loading data.</div>`;
+        hoursChartInstance = new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    data: values,
+                    backgroundColor: values.map(barColour),
+                    borderRadius: 4,
+                    maxBarThickness: 14
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend:  { display: false },
+                    tooltip: { callbacks: { label: ctx => `${ctx.parsed.y ?? 0} devices` } }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#4B5563', font: { family: 'DM Mono', size: 9 },
+                            maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+                        grid: { display: false }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Devices',
+                            color: '#4B5563', font: { family: 'DM Mono', size: 10 } },
+                        ticks: { color: '#4B5563', font: { family: 'DM Mono', size: 9 } },
+                        grid: { color: 'rgba(255,255,255,.04)' }
+                    }
+                }
+            }
+        });
+    } catch (e) {
+        console.error('Failed to load busiest hours', e);
+        canvas.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = 'block';
     }
 }
 
-async function loadCo2Kpi() {
-    try {
-        // BUGFIX (auth): dead localStorage-token header removed — auth is
-        // via the httpOnly cookie, sent automatically on same-origin fetches.
-        const { start, stop } = presetToRange(activeFilters.preset);
-        const qs = new URLSearchParams();
-        if (start) qs.set('startTime', start);
-        if (stop)  qs.set('endTime',   stop);
-        if (activeFilters.routeIds.length > 0) qs.set('routeIds', activeFilters.routeIds.join(','));
-        if (activeFilters.busId) qs.set('busId', activeFilters.busId);
+// ── CSV export — the table as shown ────────────────────────
 
-        const r = await fetch(`${API}/analytics/co2?${qs}`);
-        if (!r.ok) return;
-        const d = await r.json();
-
-        const kg = d.co2_saved_kg ?? 0;
-        document.getElementById('kpiCo2').textContent = kg >= 1000
-            ? `${(kg/1000).toFixed(1)}t` : `${kg}kg`;
-
-        if (d.passenger_km != null)
-            document.getElementById('kpiCo2Sub').textContent =
-                `${d.passenger_km} pax-km saved`;
-    } catch(e) {
-        console.error('Failed to load CO2 KPI', e);
-    }
+function exportAnalyticsCsv() {
+    downloadCsv(`fleet-analytics-${csvStamp()}.csv`, [
+        {header:'Bus',      get:v=>v.vehicle_id},
+        {header:'Status',   get:v=>SL[v.status] || v.status},
+        {header:'Speed',    get:v=>v.speed_kmh != null ? v.speed_kmh.toFixed(1) : ''},
+        {header:'Delay',    get:v=>v.delay_minutes != null ? v.delay_minutes : ''},
+        {header:'Crowding', get:v=>v.crowding || ''}
+    ], lastAdherenceVehicles);
 }
 
-async function loadSummaryKPIs() {
-    // On-time % from live adherence
-    try {
-        // BUGFIX (auth): dead localStorage-token header removed — auth is
-        // via the httpOnly cookie, sent automatically on same-origin fetches.
-        const r = await fetch(`${API}/analytics/adherence`);
-        if (r.ok) {
-            const d = await r.json();
-            const counts = d.status_counts || {};
-            const total  = d.total_active || 0;
-            const onTime = (counts.ON_TIME || 0) + (counts.EARLY || 0);
-
-            // Punctuality is only meaningful for buses we have actually
-            // measured. A bus is UNKNOWN until it has been observed passing
-            // a stop — there is nothing yet to compare against the
-            // timetable — so counting it in the denominator scores it as
-            // "not on time", which is a claim we have no basis for.
-            const measured = onTime
-                + (counts.SLIGHTLY_LATE || 0)
-                + (counts.SIGNIFICANTLY_LATE || 0);
-            const unmeasured = Math.max(0, total - measured);
-
-            const pct = measured > 0 ? Math.round(onTime / measured * 100) : 0;
-            document.getElementById('kpiOnTimePct').textContent =
-                measured > 0 ? `${pct}%` : '—';
-            document.getElementById('kpiOnTimeSub').textContent =
-                measured > 0
-                    ? `${onTime}/${measured} measured`
-                    + (unmeasured ? ` · ${unmeasured} not yet seen` : '')
-                    : (total ? `${total} buses, none measured yet` : 'no buses running');
-        }
-
-        // Fleet donut from live vehicles
-        const rv = await fetch(`${API}/vehicles`);
-        if (rv.ok) {
-            const vehs = await rv.json();
-            updateFleetDonut(vehs);
-        }
-    } catch(e) {
-        console.error('Error loading summary KPIs', e);
-    }
-}
-
-function updateFleetDonut(vehicles) {
-    const donut   = document.querySelector('.fake-donut');
-    const kpiSpan = document.getElementById('kpiOnTime');
-    if (!donut || !vehicles.length) return;
-
-    kpiSpan.textContent = '';
-
-    const total    = vehicles.length;
-    const onTime   = vehicles.filter(v => v.schedule_status === 'ON_TIME' || v.schedule_status === 'EARLY').length;
-    const slight   = vehicles.filter(v => v.schedule_status === 'SLIGHTLY_LATE').length;
-    const late     = vehicles.filter(v => v.schedule_status === 'SIGNIFICANTLY_LATE').length;
-    const noTrip   = vehicles.filter(v => !v.trip_id).length;
-
-    const onTimePct  = (onTime  / total) * 100;
-    const slightPct  = (slight  / total) * 100;
-    const latePct    = (late    / total) * 100;
-    const noTripPct  = (noTrip  / total) * 100;
-
-    // NOTE: assigning to element.style.background via the CSSOM is a property
-    // mutation, not inline-HTML/CSS-string parsing — already unaffected by
-    // removing 'unsafe-inline' from style-src, no change needed here.
-    donut.style.background = `conic-gradient(
-            #22C55E 0% ${onTimePct}%,
-            #F59E0B ${onTimePct}% ${onTimePct + slightPct}%,
-            #EF4444 ${onTimePct + slightPct}% ${onTimePct + slightPct + latePct}%,
-            #F59E0B ${onTimePct + slightPct + latePct}% ${onTimePct + slightPct + latePct + noTripPct}%,
-            #1A2744 ${onTimePct + slightPct + latePct + noTripPct}% 100%
-        )`;
-}
-
-// ── Apply filters (main refresh) ───────────────────────────
+// ── Orchestration ──────────────────────────────────────────
 
 function applyFilters() {
-    activeFilters.busId   = document.getElementById('filterBus').value;
-    activeFilters.groupBy = document.getElementById('filterGroupBy').value;
+    activeFilters.busId = document.getElementById('filterBus').value;
 
-    // If custom preset, read date inputs
     if (activeFilters.preset === 'custom') {
         const { start, stop } = presetToRange('custom');
         activeFilters.startTime = start;
@@ -2078,22 +1999,15 @@ function applyFilters() {
 }
 
 function loadAllAnalytics() {
-    // Update chart subtitles to reflect active filters
-    const grp       = document.getElementById('filterGroupBy').value || 'hour';
-    const presetLbl = { today:'Today', yesterday:'Yesterday', week:'Last 7 Days',
-        month:'This Month', lastmonth:'Last Month', custom:'Custom Range' };
-    const periodTxt = presetLbl[activeFilters.preset] || '';
-    const slotTxt   = grp === 'day' ? 'per day' : 'per hour';
-    const sub       = `${periodTxt} · ${slotTxt}`;
-    const ds = document.getElementById('delayChartSub');
-    const ps = document.getElementById('paxChartSub');
-    if (ds) ds.textContent = `Delay by line · ${sub}`;
-    if (ps) ps.textContent = `Passenger demand by line · ${sub}`;
+    const sub = document.getElementById('hoursChartSub');
+    if (sub) {
+        const busTxt = activeFilters.busId ? ` · ${activeFilters.busId}` : '';
+        sub.textContent = `Average onboard devices by hour · ${PRESET_LABEL[activeFilters.preset] || ''}${busTxt}`;
+    }
 
-    loadPassengersByRoute();
-    loadDelayByRoute();
-    loadSummaryKPIs();
-    loadCo2Kpi();
+    loadSummary();
+    loadAdherence();
+    loadBusiestHours();
 }
 
 // ── Wire up the Analytics nav button ──────────────────────
@@ -2104,12 +2018,6 @@ document.querySelectorAll('.top-btn').forEach(btn => {
             loadAllAnalytics();
         }
     });
-});
-
-// Load routes + operating hours once on page load
-window.addEventListener('load', () => {
-    loadRoutes();
-    loadOperatingHours();
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -2353,20 +2261,8 @@ document.getElementById('presetBtnMonth').addEventListener('click', e => setPres
 document.getElementById('presetBtnLastMonth').addEventListener('click', e => setPreset(e.currentTarget, 'lastmonth'));
 document.getElementById('presetBtnCustom').addEventListener('click', e => setPreset(e.currentTarget, 'custom'));
 
-document.getElementById('routeDropdownBtn').addEventListener('click', toggleRouteDropdown);
-document.getElementById('clearRoutesBtn').addEventListener('click', clearRoutes);
 document.getElementById('applyFiltersBtn').addEventListener('click', applyFilters);
-
-// Event delegation: route checkboxes/pills are generated for an unknown,
-// runtime-determined number of routes — bind once on the stable parent.
-document.getElementById('routeCheckList').addEventListener('change', e => {
-    const cb = e.target.closest('input[type="checkbox"][data-route-id]');
-    if (cb) toggleRoute(cb.dataset.routeId, cb.checked);
-});
-document.getElementById('selectedRoutePills').addEventListener('click', e => {
-    const pill = e.target.closest('.route-pill[data-route-id]');
-    if (pill) { toggleRoute(pill.dataset.routeId, false); renderRouteDropdown(); }
-});
+document.getElementById('anExportBtn').addEventListener('click', exportAnalyticsCsv);
 
 const dmState = {
     search:     '',

@@ -17,7 +17,7 @@ function pendingTarget(role) {
     if (!next || !/^[A-Za-z0-9._-]+\.html$/.test(next)) return null;
 
     // Never send someone to another role's console: they would land on a 403 instead of
-    // the one they are entitled to. Shared pages (analytics) are left to the server to gate.
+    // the one they are entitled to. Anything else is left to the server to gate.
     const otherConsoles = Object.entries(roleRoutes)
         .filter(([r]) => r !== role)
         .map(([, page]) => page);

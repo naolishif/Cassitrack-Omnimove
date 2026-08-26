@@ -377,42 +377,6 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .fm-filter-range{flex:1;min-width:0;accent-color:var(--accent);cursor:pointer}
 .fm-filter-val{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:34px;text-align:right}
 
-/* Route multi-select pill row */
-.route-pills{display:flex;flex-wrap:wrap;gap:5px;align-items:center;max-width:300px}
-.route-pill{
-    display:flex;align-items:center;gap:4px;
-    padding:3px 8px;border-radius:999px;
-    background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);
-    color:var(--accent);font-family:var(--mono);font-size:9px;cursor:pointer;
-}
-.route-pill .rpx{font-size:11px;line-height:1;margin-left:1px;opacity:.7}
-.route-pill:hover .rpx{opacity:1}
-
-/* Custom multi-select dropdown */
-.route-dropdown-wrap{position:relative}
-.route-dropdown{
-    position:absolute;top:calc(100% + 5px);left:0;
-    background:var(--panel);border:1px solid var(--border);
-    border-radius:10px;min-width:200px;z-index:999;
-    box-shadow:0 8px 24px rgba(0,0,0,.5);
-    display:none;overflow:hidden;
-}
-.route-dropdown.open{display:block}
-.rdrop-header{
-    padding:8px 12px;border-bottom:1px solid var(--border);
-    font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;
-    display:flex;justify-content:space-between;
-}
-.rdrop-header span{cursor:pointer;color:var(--accent)}
-.rdrop-item{
-    padding:7px 12px;display:flex;align-items:center;gap:8px;
-    font-family:var(--mono);font-size:10px;cursor:pointer;
-    transition:background .15s;
-}
-.rdrop-item:hover{background:rgba(255,255,255,.04)}
-.rdrop-item input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
-.rdrop-item label{cursor:pointer;flex:1}
-
 .apply-btn{
     margin-left:auto;
     padding:6px 14px;border-radius:6px;
@@ -633,39 +597,6 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     gap:20px;
 }
 
-.fake-donut{
-    width:140px;
-    height:140px;
-    border-radius:50%;
-    background:
-            conic-gradient(
-                    #22C55E 0% 72%,
-                    #F59E0B 72% 88%,
-                    #EF4444 88% 100%
-            );
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    position:relative;
-}
-
-.fake-donut::before{
-    content:'';
-    position:absolute;
-    width:88px;
-    height:88px;
-    border-radius:50%;
-    background:#081120;
-}
-
-.fake-donut span{
-    position:relative;
-    z-index:2;
-    font-size:24px;
-    font-weight:800;
-    color:white;
-}
-
 .status-legend{
     display:flex;
     flex-direction:column;
@@ -679,6 +610,14 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     font-family:var(--mono);
     font-size:10px;
     color:var(--dim);
+}
+
+/* Count sits hard right so the numbers line up down the legend */
+.legend-count{
+    margin-left:auto;
+    padding-left:12px;
+    color:var(--text);
+    font-weight:500;
 }
 
 .legend-dot{
@@ -837,8 +776,6 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .tab-fleet-col{display:flex;flex-direction:column;flex:1;min-height:0}
 .custom-date-range{display:none;align-items:center;gap:5px}
 .range-arrow{font-family:var(--mono);font-size:10px;color:var(--dim)}
-.rdrop-item-empty{color:var(--dim);font-size:9px}
-.filter-select-narrow{max-width:90px}
 .chart-wrap{overflow-x:auto;height:280px;position:relative}
 .chart-canvas{width:100%;height:100%;display:block}
 .chart-msg{font-family:var(--mono);font-size:10px;color:var(--dim);text-align:center;padding:20px}
@@ -1506,4 +1443,103 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .about-logos img {
     height: 58px; width: auto; max-width: 100%; object-fit: contain;
     background: #fff; border-radius: 8px; padding: 8px 12px;
+}
+
+/* =========================================
+   ANALYTICS PANELS
+   Ported from the standalone analytics page onto the fleet-manager
+   design tokens. No style="" anywhere: per-bar colour and width ride
+   on data-fg / data-bg / data-width-pct and are applied by
+   applyDynStyles() through the CSSOM, because style-src drops
+   'unsafe-inline' (V-13).
+========================================= */
+
+/* KPI accents — .kpi-value is blue by default, these are the variants */
+.kpi-value.green{color:var(--green)}
+.kpi-value.cyan{color:var(--cyan)}
+.kpi-value.amber{color:var(--amber)}
+.kpi-value.purple{color:var(--purple)}
+.kpi-value.red{color:var(--red)}
+
+/* Doughnut: fixed box, or Chart.js keeps growing on every resize */
+.donut-wrapper{
+    width:150px;
+    height:150px;
+    flex-shrink:0;
+}
+
+/* Two panels side by side under the main chart */
+.an-split{
+    grid-template-columns:1fr 1fr;
+}
+
+/* Horizontal bar lists (delay per bus, status distribution) */
+.an-bars{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    max-height:260px;
+    overflow-y:auto;
+}
+
+.an-bar-row{
+    display:flex;
+    flex-direction:column;
+    gap:5px;
+}
+
+.an-bar-top{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:10px;
+    font-family:var(--mono);
+    font-size:10px;
+}
+
+.an-bar-name{
+    color:var(--text);
+    letter-spacing:.5px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.an-bar-val{
+    font-weight:700;
+    white-space:nowrap;
+}
+
+.an-bar-track{
+    height:6px;
+    border-radius:999px;
+    background:rgba(255,255,255,.05);
+    overflow:hidden;
+}
+
+.an-bar-fill{
+    height:100%;
+    border-radius:999px;
+    transition:width .3s ease;
+}
+
+/* .chart-empty is display:none by default — this is the visible variant
+   used for in-panel placeholders that are part of the markup */
+.an-shown{
+    display:block;
+    padding:24px 12px;
+}
+
+.an-cell-empty{
+    text-align:center;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--dim);
+    padding:20px;
+}
+
+@media(max-width:1200px){
+    .an-split{
+        grid-template-columns:1fr;
+    }
 }
