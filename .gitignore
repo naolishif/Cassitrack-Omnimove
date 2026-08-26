@@ -15,6 +15,7 @@ target/
 # Environment / secrets — NEVER commit these files
 .env
 *.env
+.env_server
 env
 .env_server
 **/env

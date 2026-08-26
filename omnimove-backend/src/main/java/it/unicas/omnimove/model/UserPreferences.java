@@ -34,4 +34,7 @@ public class UserPreferences {
 
     @Column(name = "only_bus_when_raining", nullable = false)
     private Boolean onlyBusWhenRaining = true;
+
+    @Column(name = "max_bike_walk_metres", nullable = false)
+    private Integer maxBikeWalkMetres = 500;
 }

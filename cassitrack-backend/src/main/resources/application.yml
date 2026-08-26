@@ -106,7 +106,7 @@ springdoc:
     operationsSorter: method
   info:
     title: CASSITRACK API
-    description: Real-time bus fleet monitoring — Cassino
+    description: Real-time bus fleet monitoring — Cassino MAGNI Autoservizi
     version: v1
 
 # ── Spring Boot Actuator (expose only health + info) ──────────────

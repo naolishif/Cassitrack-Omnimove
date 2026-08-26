@@ -57,6 +57,7 @@ public class JourneyPlannerService {
     private static final double STOP_MATCH_TOLERANCE = 1e-5;
     private final it.unicas.omnimove.repository.UserPreferencesRepository preferencesRepository;
     private final GoogleApiSettingsService googleApiSettings;
+    private final BikeSharingService bikeSharingService;
 
     private static final double SPEED_SCOOTER = 20.0;
     private static final double COST_BUS      = 1.00;
@@ -101,6 +102,7 @@ public class JourneyPlannerService {
         );
 
         boolean preferBike = false;
+        int maxBikeWalk = 500;   // metres — overridden by the user preference
         if (req.getUserId() != null) {
             var prefsOpt = preferencesRepository.findByUserId(req.getUserId());
             if (prefsOpt.isPresent()) {
@@ -109,6 +111,9 @@ public class JourneyPlannerService {
                     modes.remove("WALK");
                 }
                 preferBike = Boolean.TRUE.equals(prefs.getPreferBikeOverBus());
+                if (prefs.getMaxBikeWalkMetres() != null && prefs.getMaxBikeWalkMetres() > 0) {
+                    maxBikeWalk = prefs.getMaxBikeWalkMetres();
+                }
             }
         }
 
@@ -122,8 +127,8 @@ public class JourneyPlannerService {
             try {
                 JourneyOption opt = switch (mode.toUpperCase()) {
                     case "BUS"     -> planBus(req, msgs, weather);
-                    case "BIKE"    -> planBike(req, weather);
-                    case "SCOOTER" -> planScooter(req, weather);
+                    case "BIKE"    -> planBike(req, msgs, weather, maxBikeWalk);
+                    case "SCOOTER" -> planScooter(req, msgs, weather, maxBikeWalk);
                     case "WALK"    -> planWalk(req, weather);
                     default -> null;
                 };
@@ -503,53 +508,116 @@ public class JourneyPlannerService {
                 .legs(legs).build();
     }
 
-    private JourneyOption planBike(JourneyRequest req, WeatherService.WeatherData weather) {
-        var r = route(req, "bicycling");
-        // Fallback to haversine × 1.25 (road factor) when Google is unavailable
-        double roadM = r.map(g -> (double) g.distanceMetres())
-                        .orElseGet(() -> {
-                            log.warn("BIKE: Google non disponibile — uso stima haversine");
-                            return haversineMetres(req.getOriginLat(), req.getOriginLon(),
-                                                   req.getDestLat(),   req.getDestLon()) * 1.25;
-                        });
-        // speed: ~15 km/h cycling
-        int dur = r.map(g -> (int) Math.ceil(g.durationSeconds() / 60.0))
-                   .orElse((int) Math.ceil(roadM / 1000.0 / 15.0 * 60));
-        double cost = Math.round((bikeUnlock + dur * bikePerMin) * 100) / 100.0;
-        return JourneyOption.builder()
-                .mode("BIKE").modeLabel("Elerent Bike Share")
-                .durationMinutes(dur).distanceMetres(roadM)
-                .costEuros(cost).greenIndex(100).co2Grams(0.0).etaMinutes(dur)
-                .summary("Elerent bike " + fmtDist(roadM) + " — " + dur
-                        + " min (~€" + String.format("%.2f", cost) + ")")
-                .weatherWarning(weatherService.getModeWarning(weather.condition, "BIKE"))
-                .weatherSuggestion(weather.suggestion)
-                .legs(List.of(JourneyLeg.builder().mode("BIKE")
-                        .from(req.getOriginName()).to(req.getDestName())
-                        .durationMinutes(dur).distanceMetres(roadM)
-                        .instruction("Elerent bike · Unlock €" + bikeUnlock
-                                + " + €" + bikePerMin + "/min · elerent.it").build()))
-                .build();
+    private JourneyOption planBike(JourneyRequest req, List<String> msgs,
+                                   WeatherService.WeatherData weather, int maxWalkM) {
+        return planSharedVehicle(req, msgs, weather, maxWalkM,
+                "BIKE", "Elerent Bike Share", 15.0, bikeUnlock, bikePerMin, "🚲", "bike");
     }
 
-    private JourneyOption planScooter(JourneyRequest req, WeatherService.WeatherData weather) {
-        var r = route(req, "bicycling");
-        double roadM = r.map(g -> (double) g.distanceMetres())
+    private JourneyOption planScooter(JourneyRequest req, List<String> msgs,
+                                      WeatherService.WeatherData weather, int maxWalkM) {
+        return planSharedVehicle(req, msgs, weather, maxWalkM,
+                "SCOOTER", "Elerent E-Scooter", SPEED_SCOOTER, scooterUnlock, scooterPerMin, "🛴", "e-scooter");
+    }
+
+    /**
+     * Shared-vehicle option grounded in real Elerent availability:
+     * WALK leg to the nearest available vehicle + BIKE/SCOOTER leg to the
+     * destination. Returns null (with a user message) when no vehicle is
+     * within maxWalkM of the origin — plan()'s preferBikeOverBus fallback
+     * then re-plans the bus automatically. Battery never filters a vehicle
+     * out: it travels in bike_battery_pct and is rendered as battery bars.
+     */
+    private JourneyOption planSharedVehicle(JourneyRequest req, List<String> msgs,
+            WeatherService.WeatherData weather, int maxWalkM, String mode, String label,
+            double speedKmh, double unlock, double perMin, String emoji, String noun) {
+
+        var nearest = bikeSharingService.findNearest(
+                req.getOriginLat(), req.getOriginLon(), mode, maxWalkM);
+        if (nearest.isEmpty()) {
+            msgs.add(req.isItalian()
+                    ? emoji + " Nessun mezzo Elerent (" + noun + ") disponibile entro "
+                        + maxWalkM + " m dall'origine."
+                    : emoji + " No Elerent " + noun + " available within "
+                        + maxWalkM + " m of your origin.");
+            return null;
+        }
+        var v = nearest.get().vehicle();
+        int airM = nearest.get().walkMetres();
+        String vehName = v.getPlate() != null ? v.getPlate() : v.getBikeId();
+
+        List<JourneyLeg> legs = new ArrayList<>();
+        int walkMin = 0;
+        double walkM = 0;
+        if (airM >= 40) {   // vehicle basically at the origin → skip the walk leg
+            var w = googleMapsService.getTravelTime(
+                    req.getOriginLat(), req.getOriginLon(), v.getLat(), v.getLon(), "walking");
+            walkM = w.map(g -> (double) g.distanceMetres()).orElse(airM * 1.3);
+            walkMin = w.map(g -> (int) Math.ceil(g.durationSeconds() / 60.0))
+                       .orElse((int) Math.ceil(walkM / 1000.0 / 5.0 * 60));
+            legs.add(JourneyLeg.builder().mode("WALK")
+                    .from(req.getOriginName()).to("Elerent " + vehName)
+                    .durationMinutes(walkMin).distanceMetres(walkM)
+                    .stopCoords(List.of(
+                            new double[]{req.getOriginLat(), req.getOriginLon()},
+                            new double[]{v.getLat(), v.getLon()}))
+                    .instruction("Walk " + fmtDist(walkM) + " to " + noun + " " + vehName)
+                    .build());
+        }
+
+        var r = googleMapsService.getTravelTime(
+                v.getLat(), v.getLon(), req.getDestLat(), req.getDestLon(), "bicycling");
+        double rideM = r.map(g -> (double) g.distanceMetres())
                         .orElseGet(() -> {
-                            log.warn("SCOOTER: Google non disponibile — uso stima haversine");
-                            return haversineMetres(req.getOriginLat(), req.getOriginLon(),
-                                                   req.getDestLat(),   req.getDestLon()) * 1.25;
+                            log.warn("{}: Google non disponibile — uso stima haversine", mode);
+                            return haversineMetres(v.getLat(), v.getLon(),
+                                                   req.getDestLat(), req.getDestLon()) * 1.25;
                         });
-        int dur = (int) Math.ceil(roadM / 1000.0 / SPEED_SCOOTER * 60);
-        double cost = Math.round((scooterUnlock + dur * scooterPerMin) * 100) / 100.0;
+        // Google's "bicycling" duration fits bikes; scooters keep their own speed
+        int rideMin = "BIKE".equals(mode)
+                ? r.map(g -> (int) Math.ceil(g.durationSeconds() / 60.0))
+                   .orElse((int) Math.ceil(rideM / 1000.0 / speedKmh * 60))
+                : (int) Math.ceil(rideM / 1000.0 / speedKmh * 60);
+        double cost = Math.round((unlock + rideMin * perMin) * 100) / 100.0;
+
+        legs.add(JourneyLeg.builder().mode(mode)
+                .from(legs.isEmpty() ? req.getOriginName() : "Elerent " + vehName)
+                .to(req.getDestName())
+                .durationMinutes(rideMin).distanceMetres(rideM)
+                .stopCoords(List.of(
+                        new double[]{v.getLat(), v.getLon()},
+                        new double[]{req.getDestLat(), req.getDestLon()}))
+                .instruction("Elerent " + noun + " " + vehName + " · Unlock €" + unlock
+                        + " + €" + perMin + "/min · elerent.it")
+                .build());
+
+        String zoneWarning = bikeSharingService
+                .checkDestinationZones(req.getDestLat(), req.getDestLon())
+                .map(issue -> switch (issue) {
+                    case OUT_OF_OPERATING_AREA -> req.isItalian()
+                            ? "⚠️ Destinazione fuori dalla zona operativa Elerent: la corsa non può terminare lì."
+                            : "⚠️ Destination outside the Elerent operating area: the ride cannot end there.";
+                    case NO_PARKING -> req.isItalian()
+                            ? "⚠️ Destinazione in zona divieto di sosta Elerent: parcheggia ai margini della zona."
+                            : "⚠️ Destination inside an Elerent no-parking zone: park at the zone edge.";
+                })
+                .orElse(null);
+
+        int totalMin = walkMin + rideMin;
+        String summary = ("SCOOTER".equals(mode) ? "🛴 " : "") + "Elerent " + noun + " " + vehName
+                + (walkMin > 0 ? (req.isItalian() ? " a " : " at ") + fmtDist(airM) : "")
+                + " — " + totalMin + " min (~€" + String.format("%.2f", cost) + ")";
+
         return JourneyOption.builder()
-                .mode("SCOOTER").modeLabel("Elerent E-Scooter")
-                .durationMinutes(dur).distanceMetres(roadM)
-                .costEuros(cost).greenIndex(100).co2Grams(0.0).etaMinutes(dur)
-                .summary("🛴 Elerent e-scooter " + fmtDist(roadM) + " — " + dur
-                        + " min (~€" + String.format("%.2f", cost) + ")")
-                .weatherWarning(weatherService.getModeWarning(weather.condition, "SCOOTER"))
+                .mode(mode).modeLabel(label)
+                .durationMinutes(totalMin).distanceMetres(walkM + rideM)
+                .costEuros(cost).greenIndex(100).co2Grams(0.0).etaMinutes(totalMin)
+                .summary(summary)
+                .weatherWarning(weatherService.getModeWarning(weather.condition, mode))
                 .weatherSuggestion(weather.suggestion)
+                .bikeId(v.getBikeId()).bikePlate(v.getPlate())
+                .bikeBatteryPct(v.getBatteryPct()).bikeWalkMetres(airM)
+                .bikeWarning(zoneWarning)
                 .legs(List.of(JourneyLeg.builder().mode("SCOOTER")
                         .from(req.getOriginName()).to(req.getDestName())
                         .durationMinutes(dur).distanceMetres(roadM)
@@ -585,13 +653,7 @@ public class JourneyPlannerService {
     }
 
     private double haversineMetres(double lat1,double lon1,double lat2,double lon2) {
-        final double R = 6371000;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat/2)*Math.sin(dLat/2)
-                + Math.cos(Math.toRadians(lat1))*Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon/2)*Math.sin(dLon/2);
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return it.unicas.omnimove.util.GeoUtils.haversineMetres(lat1, lon1, lat2, lon2);
     }
 
     /**

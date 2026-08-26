@@ -11,6 +11,9 @@ import it.unicas.omnimove.model.User;
 import it.unicas.omnimove.repository.JourneyLogRepository;
 import it.unicas.omnimove.repository.StopRepository;
 import it.unicas.omnimove.repository.UserRepository;
+import it.unicas.omnimove.dto.BikeVehicleDTO;
+import it.unicas.omnimove.dto.BikeZoneDTO;
+import it.unicas.omnimove.service.BikeSharingService;
 import it.unicas.omnimove.service.GreenIndexService;
 import it.unicas.omnimove.service.JourneyEventService;
 import it.unicas.omnimove.service.JourneyPlannerService;
@@ -74,6 +77,7 @@ public class JourneyController {
     private final it.unicas.omnimove.repository.RouteShapeRepository    routeShapeRepository;
     private final it.unicas.omnimove.repository.ScheduledStopRepository scheduledStopRepository;
     private final it.unicas.omnimove.repository.RouteRepository         routeRepository;
+    private final BikeSharingService    bikeSharingService;
 
     @GetMapping("/stops")
     @Operation(summary = "List active stops for origin/destination pickers")
@@ -503,5 +507,38 @@ public class JourneyController {
             if (c != 0) return c;
         }
         return x.compareToIgnoreCase(y);
+    }
+
+    /**
+     * GET /api/v1/journeys/bikes
+     *
+     * Available Elerent shared bikes/scooters around Cassino, for the
+     * traveller map. Data comes from BikeSharingService (60 s cache over
+     * the RideAtom API, or the mock provider when no key is configured).
+     * Read-only: never errors, at worst returns [].
+     */
+    @GetMapping("/bikes")
+    @Operation(summary = "Available shared bikes/scooters (Elerent) around Cassino")
+    public ResponseEntity<List<BikeVehicleDTO>> bikes() {
+        try {
+            return ResponseEntity.ok(bikeSharingService.getAvailableBikes());
+        } catch (Exception e) {
+            return ResponseEntity.ok(Collections.emptyList());
+        }
+    }
+
+    /**
+     * GET /api/v1/journeys/bikes/zones
+     *
+     * Operating / no-parking zones of the bike-sharing service.
+     */
+    @GetMapping("/bikes/zones")
+    @Operation(summary = "Bike-sharing operating and parking zones")
+    public ResponseEntity<List<BikeZoneDTO>> bikeZones() {
+        try {
+            return ResponseEntity.ok(bikeSharingService.getZones());
+        } catch (Exception e) {
+            return ResponseEntity.ok(Collections.emptyList());
+        }
     }
 }

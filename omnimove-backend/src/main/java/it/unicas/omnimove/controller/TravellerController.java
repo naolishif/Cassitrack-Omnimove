@@ -123,6 +123,7 @@ public class TravellerController {
                         .notifyDelays(true)
                         .notifyTicketExpiry(true)
                         .notifyEcoTip(false)
+                        .maxBikeWalkMetres(500)
                         .build());
 
         return ResponseEntity.ok(prefs);

@@ -110,7 +110,14 @@ elerent:
     # Trattenuta temporanea di 5.00 EUR: non entra nel costo del viaggio
     # perche' viene restituita a fine corsa. E' dichiarata nel listino.
     deposit: 5.00
-
+  # ── Elerent live availability (ATOM Mobility / RideAtom API) ──
+  # All Sharing endpoints are POST + App-Public-Key header.
+  # No key yet → mock=true serves simulated bikes around Cassino.
+  api:
+    base-url: ${ELERENT_API_URL:https://app.rideatom.com/openapi/v1.0/sharing}
+    public-key: ${ELERENT_PUBLIC_KEY:}
+    mock: ${ELERENT_API_MOCK:true}
+    radius-km: 5
 # ── OpenAPI ───────────────────────────────────────────────────
 springdoc:
   api-docs:

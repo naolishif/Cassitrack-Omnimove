@@ -143,6 +143,10 @@ services:
       # Set MQTT_OBU_ENABLED=true in .env to activate the second connection.
       MQTT_OBU_ENABLED: ${MQTT_OBU_ENABLED:-false}
       MQTT_OBU_URL: ${MQTT_OBU_URL:-}
+      # Identity of THIS instance on the shared OBU broker. Must be forwarded:
+      # without it the container never sees the value set in .env and falls back
+      # to the default client id, silently ignoring the per-environment setting.
+      MQTT_OBU_CLIENT_ID: ${MQTT_OBU_CLIENT_ID:-cassitrack-obu-bridge}
       MQTT_OBU_USERNAME: ${MQTT_OBU_USERNAME:-}
       MQTT_OBU_PASSWORD: ${MQTT_OBU_PASSWORD:-}
       MQTT_OBU_TOPIC: ${MQTT_OBU_TOPIC:-cassitrack/obu/+/pos}
@@ -159,6 +163,12 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Context path — must match the Nginx location prefix
       SERVER_SERVLET_CONTEXT_PATH: ${SERVER_SERVLET_CONTEXT_PATH:-/cassitrack}
+      # Both of these are set in .env but were NOT being forwarded, so the
+      # container silently fell back to the application.yml defaults
+      # (secure=false, connect-src=http://localhost:8180) whichever values the
+      # deployment had configured.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      CSP_CONNECT_EXTRA: ${CSP_CONNECT_EXTRA:-http://localhost:8180}
     ports:
       - "127.0.0.1:8280:8280"
     # NOTE: comment out the 'build' block and use 'image' below
