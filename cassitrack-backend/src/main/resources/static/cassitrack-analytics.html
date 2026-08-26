@@ -1,79 +1,513 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="it">
 <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-    <title>CASSITRACK — Fleet Analytics</title>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="cassitrack-analytics.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CASSITRACK — Analytics</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        :root{
+            --bg:#0a0e17;
+            --panel:#0f1621;
+            --panel-2:#111a27;
+            --border:#1b2634;
+            --border-soft:#161f2c;
+            --teal:#2dd4bf;
+            --green:#4ade80;
+            --blue:#4a7fd6;
+            --cyan:#22c3e6;
+            --amber:#e0a83e;
+            --red:#ef4757;
+            --pink:#f43f5e;
+            --orange:#f5a623;
+            --purple:#a78bfa;
+            --txt:#e8eef5;
+            --muted:#5d6b7d;
+            --muted-2:#7d8da0;
+            --grid:#18222f;
+        }
+        *{box-sizing:border-box;}
+        html,body{margin:0;padding:0;}
+        body{
+            background:var(--bg);
+            color:var(--txt);
+            font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+            font-size:13px;
+            -webkit-font-smoothing:antialiased;
+            padding:14px;
+        }
+        .shell{max-width:1480px;margin:0 auto;}
+
+        /* ---------- Top bar ---------- */
+        .topbar{
+            display:flex;align-items:center;justify-content:space-between;
+            padding:6px 4px 14px;
+        }
+        .logo{font-weight:800;font-size:18px;letter-spacing:2px;}
+        .logo .a{color:#f2f6fb;}
+        .logo .b{color:var(--teal);}
+        .top-center{
+            color:var(--green);
+            font-weight:700;font-size:12px;letter-spacing:4px;text-transform:uppercase;
+            display:flex;align-items:center;gap:8px;
+        }
+        .top-center .dot{
+            width:7px;height:7px;border-radius:50%;background:var(--green);
+            box-shadow:0 0 8px var(--green);transition:.2s;
+        }
+        .top-center.offline{color:var(--red);}
+        .top-center.offline .dot{background:var(--red);box-shadow:0 0 8px var(--red);}
+        .top-right{color:var(--muted);font-size:11px;letter-spacing:1px;text-align:right;}
+        .top-right .time{color:#aeb9c7;}
+        .top-right .status{color:var(--muted-2);display:block;margin-top:3px;letter-spacing:.5px;}
+        .refresh-btn{
+            font-family:inherit;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+            padding:6px 12px;margin-left:12px;border-radius:4px;border:1px solid var(--border);
+            background:#0d151f;color:#aeb9c7;cursor:pointer;transition:.15s;vertical-align:middle;
+        }
+        .refresh-btn:hover{border-color:var(--teal);color:var(--teal);}
+
+        /* ---------- Cards / grid ---------- */
+        .grid{display:grid;gap:12px;}
+        .kpis{grid-template-columns:repeat(6,1fr);}
+        .two-col{grid-template-columns:1.15fr 1fr;}
+        .card{
+            background:var(--panel);
+            border:1px solid var(--border);
+            border-radius:6px;
+            padding:14px 16px;
+        }
+        .grid + .grid{margin-top:12px;}
+
+        .eyebrow{
+            color:var(--muted);
+            font-size:10px;letter-spacing:2px;text-transform:uppercase;font-weight:500;
+            margin-bottom:8px;
+        }
+        .panel-title{
+            display:flex;align-items:center;gap:8px;
+            font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;
+            color:#c3ccd8;margin-bottom:14px;
+        }
+        .panel-title::before{
+            content:"";width:3px;height:13px;background:var(--teal);border-radius:2px;
+        }
+
+        .kpi .val{font-size:24px;font-weight:800;letter-spacing:1px;line-height:1;margin-bottom:9px;}
+        .kpi .val.teal{color:var(--teal);}
+        .kpi .val.green{color:var(--green);}
+        .kpi .val.cyan{color:var(--cyan);}
+        .kpi .val.purple{color:var(--purple);}
+        .kpi .val.amber{color:var(--amber);}
+        .kpi .val .unit{font-size:13px;font-weight:500;color:var(--muted-2);margin-left:3px;}
+        .kpi .sub{font-size:10px;color:var(--muted);letter-spacing:.5px;line-height:1.4;}
+        .kpi .sub.up{color:var(--green);}
+        .kpi .sub.warn{color:var(--amber);}
+
+        .chart-wrap{position:relative;width:100%;}
+        .h-hours{height:240px;}
+        .h-donut{height:240px;}
+
+        /* ---------- Horizontal delay bars ---------- */
+        .delay-list{display:flex;flex-direction:column;gap:15px;padding-top:2px;}
+        .delay-row .drow-top{
+            display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;
+        }
+        .delay-row .dname{font-size:12px;color:#c9d2de;letter-spacing:.5px;}
+        .delay-row .dval{font-size:12px;font-weight:700;letter-spacing:1px;}
+        .delay-track{height:5px;background:#141d29;border-radius:3px;overflow:hidden;}
+        .delay-fill{height:100%;border-radius:3px;transition:width .4s;}
+
+        /* ---------- Donut legend ---------- */
+        .donut-block{display:flex;align-items:center;gap:20px;}
+        .donut-block .chart-wrap{flex:1;}
+        .legend{display:flex;flex-direction:column;gap:9px;min-width:130px;}
+        .legend .li{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted-2);letter-spacing:.5px;}
+        .legend .li .cnt{margin-left:auto;color:#c9d2de;font-weight:700;}
+        .legend .sw{width:9px;height:9px;border-radius:2px;flex:none;}
+
+        /* ---------- Vehicle table ---------- */
+        .table-card{margin-top:12px;}
+        table{width:100%;border-collapse:collapse;}
+        thead th{
+            font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:500;
+            padding:8px 14px;text-align:left;border-bottom:1px solid var(--border);
+        }
+        tbody td{font-size:12px;padding:11px 14px;border-bottom:1px solid var(--border-soft);letter-spacing:.5px;}
+        tbody tr:last-child td{border-bottom:none;}
+        tbody tr:hover td{background:rgba(255,255,255,.02);}
+        .badge{padding:2px 8px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.8px;}
+        .empty,.loading{text-align:center;padding:26px;color:var(--muted);font-size:11px;letter-spacing:.5px;}
+        .loading{animation:pulse 1.5s infinite;}
+        @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+
+        /* ---------- Footer ---------- */
+        .footer{
+            display:flex;align-items:center;justify-content:space-between;
+            margin-top:12px;background:var(--panel);border:1px solid var(--border);
+            border-radius:6px;padding:12px 16px;
+        }
+        .footer .lbl{font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;}
+        .footer .lbl b{color:#c9d2de;font-weight:700;}
+        .btns{display:flex;gap:8px;}
+        .btn{
+            font-family:inherit;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+            padding:8px 14px;border-radius:4px;border:1px solid var(--border);
+            background:#0d151f;color:#aeb9c7;cursor:pointer;transition:.15s;
+        }
+        .btn:hover{border-color:var(--teal);color:var(--teal);}
+        .btn.pdf{background:var(--orange);border-color:var(--orange);color:#1a1204;}
+        .btn.pdf:hover{background:#ffb733;color:#1a1204;}
+
+        @media(max-width:1100px){ .kpis{grid-template-columns:repeat(3,1fr);} }
+        @media(max-width:900px){
+            .kpis{grid-template-columns:repeat(2,1fr);}
+            .two-col{grid-template-columns:1fr;}
+            .top-center{display:none;}
+        }
+        @media print{
+            body{background:#fff;color:#000;}
+            .refresh-btn,.btns{display:none;}
+        }
+    </style>
+    <script src="cassitrack-session.js"></script>
 </head>
 <body>
+<div class="shell">
 
-<header>
-    <div class="logo">CASSI<span>TRACK</span></div>
-    <div class="chip chip-blue">ANALYTICS</div>
-    <div class="chip chip-green">FLEET MANAGER</div>
-    <div class="header-right">
-        <div class="dot dot-green" id="statusDot"></div>
-        <span class="htext" id="statusText">Loading...</span>
-        <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
-        <button class="logout-btn-sm" id="logoutBtn">Log Out</button>
-    </div>
-</header>
-
-<div class="main">
-    <div class="page-title">Fleet Analytics Dashboard</div>
-    <div class="page-sub" id="lastUpdate">Linea 16 · Cassino · Loading...</div>
-
-    <!-- Summary Stats -->
-    <div class="stats-grid" id="statsGrid">
-        <div class="stat-card"><div class="loading">Loading...</div></div>
-    </div>
-
-    <!-- Charts -->
-    <div class="charts-grid">
-        <div class="chart-card">
-            <div class="chart-title">Schedule Adherence</div>
-            <div class="chart-sub">Current status of all active buses</div>
-            <div class="status-list" id="adherenceChart">
-                <div class="loading">Loading...</div>
-            </div>
+    <!-- TOP BAR -->
+    <div class="topbar">
+        <div class="logo"><span class="a">CASSI</span><span class="b">TRACK</span></div>
+        <div class="top-center" id="liveBadge"><span class="dot"></span> Analytics</div>
+        <div class="top-right">
+            <span class="time" id="clock">--:--:--</span> | <span id="dateLbl"></span>
+            <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+            <button class="refresh-btn" onclick="CassiSession.endSession()">Log Out</button>
+            <span class="status" id="statusText">Loading…</span>
         </div>
-        <div class="chart-card">
-            <div class="chart-title">Activity by Hour</div>
-            <div class="chart-sub">GPS reports received per hour (last 24h)</div>
-            <div class="bar-chart" id="hoursChart">
-                <div class="loading">Loading...</div>
+    </div>
+
+    <!-- KPI ROW (real data from /analytics/summary) -->
+    <div class="grid kpis" id="statsGrid">
+        <div class="card kpi"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- ROW 2 -->
+    <div class="grid two-col">
+        <div class="card">
+            <div class="panel-title">Activity by hour — GPS reports (last 24h)</div>
+            <div class="chart-wrap h-hours"><canvas id="hoursChart"></canvas></div>
+            <div class="eyebrow" id="peakLbl" style="margin-top:10px;margin-bottom:0;"></div>
+        </div>
+        <div class="card">
+            <div class="panel-title">Schedule adherence — right now</div>
+            <div class="donut-block">
+                <div class="chart-wrap h-donut"><canvas id="adherenceChart"></canvas></div>
+                <div class="legend" id="adherenceLegend"></div>
             </div>
         </div>
     </div>
 
-    <!-- Vehicle Table -->
-    <div class="table-card">
-        <div class="table-header">
-            <div>
-                <div class="table-title">Active Vehicles</div>
-                <div class="table-sub">Live status of all buses on Linea 16</div>
-            </div>
+    <!-- ROW 3 -->
+    <div class="grid two-col">
+        <div class="card">
+            <div class="panel-title">Delay by vehicle (min)</div>
+            <div class="delay-list" id="delayList"><div class="loading">Loading…</div></div>
         </div>
+        <div class="card">
+            <div class="panel-title">Fleet snapshot</div>
+            <div class="delay-list" id="snapshotList"><div class="loading">Loading…</div></div>
+        </div>
+    </div>
+
+    <!-- VEHICLE TABLE -->
+    <div class="card table-card">
+        <div class="panel-title">Active vehicles — Linea 16</div>
         <table>
             <thead>
-                <tr>
-                    <th>Bus ID</th>
-                    <th>Status</th>
-                    <th>Speed</th>
-                    <th>Delay</th>
-                    <th>Crowding</th>
-                </tr>
+            <tr><th>Bus ID</th><th>Status</th><th>Speed</th><th>Delay</th><th>Crowding</th></tr>
             </thead>
             <tbody id="vehicleTable">
-                <tr><td colspan="5" class="loading">Loading...</td></tr>
+            <tr><td colspan="5" class="loading">Loading…</td></tr>
             </tbody>
         </table>
     </div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+        <div class="lbl">Export statistics report: <b id="reportName">CASSITRACK Analytics</b></div>
+        <div class="btns">
+            <button class="btn" onclick="exportCSV()">↓ CSV</button>
+            <button class="btn" onclick="exportCSV()" title="Opens as spreadsheet in Excel">↓ XLSX</button>
+            <button class="btn pdf" onclick="window.print()">↓ PDF REPORT</button>
+        </div>
+    </div>
+
 </div>
 
-<script src="cassitrack-session.js"></script>
-<script src="cassitrack-analytics.js"></script>
+<script>
+    /* ============================================================
+       DATA WIRING — same-origin, relative to the servlet context-path
+       (/cassitrack, set via SERVER_SERVLET_CONTEXT_PATH in every env).
+       It has to stay relative: an absolute host makes these calls
+       cross-origin and the httpOnly session cookie stops riding along.
+       ============================================================ */
+    const API = '/cassitrack/api/v1';
+
+    // A 401 from any call sends us back to login; Back out of a dead session
+    // re-checks with the server instead of showing a stale console
+    CassiSession.installFetchGuard();
+    CassiSession.bindSessionGuard();
+
+    // XSS defense: escape any API-supplied string before inserting into innerHTML
+    function escHtml(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    /* ---------- palette ---------- */
+    const C = {
+        teal:'#2dd4bf', blue:'#4a7fd6', cyan:'#22c3e6', amber:'#e0a83e',
+        red:'#ef4757', orange:'#f5a623', green:'#4ade80', purple:'#a78bfa',
+        grid:'#18222f', muted:'#5d6b7d'
+    };
+    Chart.defaults.font.family = "'JetBrains Mono', monospace";
+    Chart.defaults.font.size = 10;
+    Chart.defaults.color = C.muted;
+    const gridX = { grid:{display:false}, ticks:{color:C.muted} };
+    const gridY = { grid:{color:C.grid}, ticks:{color:C.muted}, border:{display:false} };
+
+    /* ---------- status maps (same semantics as before) ---------- */
+    const STATUS_COL = {
+        ON_TIME:'#4ade80', SLIGHTLY_LATE:'#e0a83e',
+        SIGNIFICANTLY_LATE:'#ef4757', EARLY:'#22c3e6', UNKNOWN:'#5d6b7d'
+    };
+    const STATUS_LBL = {
+        ON_TIME:'ON TIME', SLIGHTLY_LATE:'SLIGHTLY LATE',
+        SIGNIFICANTLY_LATE:'LATE', EARLY:'EARLY', UNKNOWN:'UNKNOWN'
+    };
+
+    /* keep chart instances so 30s refresh updates instead of stacking */
+    let hoursChartRef = null, adherenceChartRef = null;
+    let lastVehicles = [], lastSummary = null;
+
+    /* ============================================================
+       1) SUMMARY  →  KPI row
+       ============================================================ */
+    async function loadSummary(){
+        const r = await fetch(`${API}/analytics/summary`);
+        const d = await r.json();
+        lastSummary = d;
+
+        document.getElementById('statsGrid').innerHTML = `
+    <div class="card kpi">
+      <div class="eyebrow">Active buses</div>
+      <div class="val teal">${escHtml(d.active_buses_now)}</div>
+      <div class="sub">Right now on Linea 16</div>
+    </div>
+    <div class="card kpi">
+      <div class="eyebrow">On-time rate</div>
+      <div class="val green">${escHtml(d.on_time_percentage)}<span class="unit">%</span></div>
+      <div class="sub">${escHtml(d.on_time_count)} on time · ${escHtml(d.late_count)} late</div>
+    </div>
+    <div class="card kpi">
+      <div class="eyebrow">Buses today</div>
+      <div class="val cyan">${escHtml(d.buses_today)}</div>
+      <div class="sub">Distinct vehicles seen</div>
+    </div>
+    <div class="card kpi">
+      <div class="eyebrow">GPS reports</div>
+      <div class="val purple">${escHtml(d.position_reports_today)}</div>
+      <div class="sub">Received today</div>
+    </div>
+    <div class="card kpi">
+      <div class="eyebrow">Delayed buses</div>
+      <div class="val amber">${escHtml(d.late_count)}</div>
+      <div class="sub ${d.late_count>0?'warn':'up'}">${d.late_count>0?'Attention needed':'All running well'}</div>
+    </div>
+    <div class="card kpi">
+      <div class="eyebrow">Running early</div>
+      <div class="val cyan">${escHtml(d.early_count)}</div>
+      <div class="sub">Ahead of schedule</div>
+    </div>`;
+
+        const t = new Date().toLocaleTimeString('it-IT');
+        document.getElementById('statusText').textContent = `${d.active_buses_now} buses live · updated ${t}`;
+        document.getElementById('reportName').textContent =
+            `CASSITRACK Analytics — Linea 16 · ${new Date().toLocaleDateString('it-IT')}`;
+        setOnline(true);
+    }
+
+    /* ============================================================
+       2) ADHERENCE  →  donut + legend + vehicle table + delay bars + snapshot
+       ============================================================ */
+    async function loadAdherence(){
+        const r = await fetch(`${API}/analytics/adherence`);
+        const d = await r.json();
+        const total = d.total_active || 1;
+        const counts = d.status_counts || {};
+
+        const order = [
+            {key:'ON_TIME',            label:'On Time'},
+            {key:'SLIGHTLY_LATE',      label:'Slightly Late'},
+            {key:'SIGNIFICANTLY_LATE', label:'Significantly Late'},
+            {key:'EARLY',              label:'Early'},
+            {key:'UNKNOWN',            label:'Unknown'},
+        ];
+        const present = order.filter(s => (counts[s.key]||0) > 0);
+        const donutSet = present.length ? present : order.filter(s=>s.key==='UNKNOWN');
+        const labels = donutSet.map(s=>s.label);
+        const data   = donutSet.map(s=>counts[s.key]||0);
+        const cols   = donutSet.map(s=>STATUS_COL[s.key]);
+
+        /* donut (Chart.js) */
+        if (adherenceChartRef) adherenceChartRef.destroy();
+        adherenceChartRef = new Chart(document.getElementById('adherenceChart'), {
+            type:'doughnut',
+            data:{ labels, datasets:[{ data, backgroundColor:cols, borderColor:'#0f1621', borderWidth:2 }] },
+            options:{ responsive:true, maintainAspectRatio:false, cutout:'62%',
+                plugins:{ legend:{display:false} } }
+        });
+
+        /* custom legend with counts */
+        document.getElementById('adherenceLegend').innerHTML = order.map(s=>{
+            const c = counts[s.key]||0;
+            return `<div class="li"><span class="sw" style="background:${STATUS_COL[s.key]}"></span>${s.label}<span class="cnt">${c}</span></div>`;
+        }).join('');
+
+        /* delay-by-vehicle horizontal bars (mockup style) */
+        const vehicles = d.vehicles || [];
+        lastVehicles = vehicles;
+        const withDelay = vehicles
+            .filter(v => v.delay_minutes != null)
+            .sort((a,b)=> (b.delay_minutes||0) - (a.delay_minutes||0));
+        const MAXD = Math.max(6, ...withDelay.map(v=>Math.abs(v.delay_minutes)||0));
+        const dColor = v => v>=4 ? C.red : (v>=2 ? C.amber : C.green);
+        document.getElementById('delayList').innerHTML = withDelay.length
+            ? withDelay.map(v=>{
+                const val=v.delay_minutes, c=dColor(val), w=Math.min(100,(Math.abs(val)/MAXD)*100);
+                const sign = val>0?'+':'';
+                return `<div class="delay-row">
+          <div class="drow-top">
+            <span class="dname">${escHtml(v.vehicle_id)}</span>
+            <span class="dval" style="color:${c}">${sign}${val.toFixed(1)} min</span>
+          </div>
+          <div class="delay-track"><div class="delay-fill" style="width:${w}%;background:${c}"></div></div>
+        </div>`;
+            }).join('')
+            : `<div class="empty">No active buses. Start the GPS simulator.</div>`;
+
+        /* fleet snapshot bars (status distribution %) */
+        document.getElementById('snapshotList').innerHTML = order.map(s=>{
+            const c = counts[s.key]||0, pct = Math.round(c/total*100);
+            const col = STATUS_COL[s.key];
+            return `<div class="delay-row">
+      <div class="drow-top">
+        <span class="dname">${s.label}</span>
+        <span class="dval" style="color:${col}">${c} · ${pct}%</span>
+      </div>
+      <div class="delay-track"><div class="delay-fill" style="width:${pct}%;background:${col}"></div></div>
+    </div>`;
+        }).join('');
+
+        /* vehicle table */
+        const tbody = document.getElementById('vehicleTable');
+        tbody.innerHTML = vehicles.length
+            ? vehicles.map(v=>{
+                const col=STATUS_COL[v.status]||'#5d6b7d', lbl=STATUS_LBL[v.status]||escHtml(v.status);
+                const delay=v.delay_minutes!=null ? (v.delay_minutes>0?`+${v.delay_minutes} min`:`${v.delay_minutes} min`) : '—';
+                return `<tr>
+          <td style="font-weight:700;color:${col}">${escHtml(v.vehicle_id)}</td>
+          <td><span class="badge" style="background:${col}22;color:${col};border:1px solid ${col}44">${lbl}</span></td>
+          <td>${v.speed_kmh!=null ? v.speed_kmh.toFixed(1)+' km/h' : '—'}</td>
+          <td style="color:${v.delay_minutes>0?'var(--amber)':'var(--green)'}">${delay}</td>
+          <td>${escHtml(v.crowding) || '—'}</td>
+        </tr>`;
+            }).join('')
+            : `<tr><td colspan="5" class="empty">No active buses. Start the GPS simulator.</td></tr>`;
+    }
+
+    /* ============================================================
+       3) BUSIEST HOURS  →  Chart.js bar (replaces old HTML bars)
+       ============================================================ */
+    async function loadBusiestHours(){
+        const r = await fetch(`${API}/analytics/busiest-hours`);
+        const d = await r.json();
+        const rows = (d.hourly_activity || []).filter((_,i)=> i%1===0);
+        const labels = rows.map(h=>h.hour);
+        const vals   = rows.map(h=>h.count);
+        const max    = Math.max(...vals, 1);
+        const colOf  = c => { const p=c/max; return p>0.7?C.red : p>0.4?C.amber : C.teal; };
+
+        if (hoursChartRef) hoursChartRef.destroy();
+        hoursChartRef = new Chart(document.getElementById('hoursChart'), {
+            type:'bar',
+            data:{ labels, datasets:[{ data:vals, backgroundColor:vals.map(colOf),
+                    borderRadius:3, barPercentage:0.72, categoryPercentage:0.82 }] },
+            options:{ responsive:true, maintainAspectRatio:false,
+                plugins:{ legend:{display:false} },
+                scales:{ x:{...gridX, ticks:{color:C.muted, maxRotation:0, autoSkip:true, maxTicksLimit:12}},
+                    y:{...gridY, beginAtZero:true} } }
+        });
+        document.getElementById('peakLbl').textContent = `Peak hour: ${d.peak_hour || 'N/A'}`;
+    }
+
+    /* ============================================================
+       Orchestration — same as before (30s refresh)
+       ============================================================ */
+    function setOnline(ok){
+        const b = document.getElementById('liveBadge');
+        b.classList.toggle('offline', !ok);
+        b.firstChild.nextSibling.textContent = ok ? ' Analytics' : ' Offline';
+    }
+    async function loadAll(){
+        try{
+            await Promise.all([loadSummary(), loadAdherence(), loadBusiestHours()]);
+        }catch(e){
+            setOnline(false);
+            document.getElementById('statusText').textContent = 'Backend offline';
+            console.error(e);
+        }
+    }
+
+    /* ---------- CSV export (real, from loaded data) ---------- */
+    function exportCSV(){
+        const lines = [];
+        if (lastSummary){
+            lines.push('SUMMARY');
+            Object.entries(lastSummary).forEach(([k,v])=>lines.push(`${k},${v}`));
+            lines.push('');
+        }
+        lines.push('VEHICLES');
+        lines.push('vehicle_id,status,speed_kmh,delay_minutes,crowding');
+        lastVehicles.forEach(v=>lines.push(
+            `${v.vehicle_id},${v.status||''},${v.speed_kmh??''},${v.delay_minutes??''},${v.crowding||''}`));
+        const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `cassitrack-analytics-${new Date().toISOString().slice(0,10)}.csv`;
+        a.click(); URL.revokeObjectURL(a.href);
+    }
+
+    /* ---------- live clock ---------- */
+    function tick(){
+        const n=new Date(), p=x=>String(x).padStart(2,'0');
+        document.getElementById('clock').textContent=`${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+        document.getElementById('dateLbl').textContent =
+            n.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    }
+    tick(); setInterval(tick,1000);
+
+    /* boot + 30s refresh (unchanged) */
+    loadAll();
+    setInterval(loadAll, 30000);
+</script>
 </body>
 </html>
