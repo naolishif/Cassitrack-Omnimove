@@ -88,6 +88,9 @@ const OMNI_T = {
     msg_no_email:'Cannot determine email address.',
     msg_reset_resent:'Reset link resent. Check your inbox (and spam folder).',
     msg_server_short:'Cannot reach server.',
+    // Sign in with Google
+    or_continue:'or',
+    err_google_failed:'Google sign-in failed. Please try again.',
     msg_check_email:'Check your email (and spam folder).',
     msg_pwd_updated:'Password updated! You can now sign in.',
     msg_reset_failed:'Reset failed. The link may have expired.',
@@ -396,6 +399,9 @@ const OMNI_T = {
     msg_no_email:"Impossibile determinare l'indirizzo email.",
     msg_reset_resent:'Link di reset reinviato. Controlla la posta in arrivo (e spam).',
     msg_server_short:'Impossibile raggiungere il server.',
+    // Accesso con Google
+    or_continue:'oppure',
+    err_google_failed:'Accesso con Google non riuscito. Riprova.',
     msg_check_email:'Controlla la tua email (e la cartella spam).',
     msg_pwd_updated:'Password aggiornata! Puoi ora accedere.',
     msg_reset_failed:'Reset fallito. Il link potrebbe essere scaduto.',

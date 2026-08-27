@@ -85,6 +85,28 @@ public class SecurityAuditService {
         persist("LOGIN_SUCCESS", email, ip, null);
     }
 
+    public void googleLoginSuccess(String email, String ip) {
+        log.info("GOOGLE_LOGIN_SUCCESS email={} ip={}", maskEmail(email), maskIp(ip));
+        persist("GOOGLE_LOGIN_SUCCESS", email, ip, null);
+    }
+
+    /** A rejected Google credential: forged, expired, or minted for another app. */
+    public void googleLoginFailure(String reason, String ip) {
+        log.warn("GOOGLE_LOGIN_FAILURE reason={} ip={}", reason, maskIp(ip));
+        persist("GOOGLE_LOGIN_FAILURE", null, ip, "reason=" + reason);
+    }
+
+    /** First Google sign-in on an address that already had a local account. */
+    public void googleAccountLinked(String email, String ip) {
+        log.warn("GOOGLE_ACCOUNT_LINKED email={} ip={}", maskEmail(email), maskIp(ip));
+        persist("GOOGLE_ACCOUNT_LINKED", email, ip, null);
+    }
+
+    public void googleRegistration(String email, String ip) {
+        log.info("GOOGLE_REGISTRATION email={} ip={}", maskEmail(email), maskIp(ip));
+        persist("GOOGLE_REGISTRATION", email, ip, null);
+    }
+
     public void loginFailure(String email, String ip) {
         log.warn("LOGIN_FAILURE email={} ip={}", maskEmail(email), maskIp(ip));
         persist("LOGIN_FAILURE", email, ip, null);

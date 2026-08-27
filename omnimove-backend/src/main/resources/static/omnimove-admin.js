@@ -259,6 +259,19 @@ async function openProfile(id) {
     }
 }
 
+/**
+ * How the account was created. Worth surfacing: a Google sign-up has no
+ * password at all, so "no password set" is expected there and suspicious
+ * anywhere else.
+ */
+function signUpBadge(account) {
+    if (account.authProvider === 'GOOGLE') {
+        const also = account.hasPassword ? ' + password' : '';
+        return `<span class="signup-tag signup-google">Signed up with Google${escHtml(also)}</span>`;
+    }
+    return `<span class="signup-tag signup-local">Signed up with email</span>`;
+}
+
 function renderProfile(data) {
     const a = data.account;
 
@@ -270,6 +283,7 @@ function renderProfile(data) {
         `<span><span class="badge ${roles[a.role] || 'badge-user'}">${escHtml(a.role)}</span></span>` +
         `<span>${a.verified ? '<span class="text-green">verified</span>'
                             : '<span class="text-amber">not verified</span>'}</span>` +
+        `<span>${signUpBadge(a)}</span>` +
         `<span>Registered <strong>${escHtml(fmtDateTime(a.registeredAt))}</strong></span>` +
         `<span>Last login <strong>${a.lastLoginAt ? escHtml(fmtDateTime(a.lastLoginAt)) : 'never'}</strong></span>` +
         `<span>Accesses <strong>${escHtml(a.loginCount)}</strong></span>`;

@@ -6,6 +6,7 @@ import it.unicas.omnimove.model.User;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.security.JwtUtil;
 import it.unicas.omnimove.service.ActiveSessionService;
+import it.unicas.omnimove.service.GoogleTokenVerifier;
 import it.unicas.omnimove.service.LoginHistoryService;
 import it.unicas.omnimove.service.SecurityAuditService;
 import it.unicas.omnimove.service.TokenBlacklistService;
@@ -50,6 +51,7 @@ public class AuthController {
     private final SecurityAuditService securityAuditService;
     private final LoginHistoryService  loginHistoryService;
     private final ActiveSessionService activeSessionService;
+    private final GoogleTokenVerifier  googleTokenVerifier;
 
     // false = HTTP (dev + public server without TLS); true = HTTPS only
     // Controlled via COOKIE_SECURE env var — set to true once Nginx+TLS is in place
@@ -137,6 +139,15 @@ public class AuthController {
                             .build());
         }
 
+        // A Google-only account has no hash to compare against. Saying so beats a
+        // generic failure the traveller could never act on — and it is not a
+        // disclosure: whoever holds that address can see it from Google's side.
+        if (!user.hasPassword())
+            return ResponseEntity.status(401)
+                    .body(AuthResponse.builder()
+                            .message("This account signs in with Google. Use the Google button, or request a password to add one.")
+                            .build());
+
         if (!passwordEncoder.matches(req.getPassword(), user.getPassword())) {
             user.setFailedLoginAttempts(user.getFailedLoginAttempts() + 1);
             userRepo.save(user);
@@ -168,13 +179,7 @@ public class AuthController {
         securityAuditService.loginSuccess(req.getEmail(), getClientIp(httpReq));
         activeSessionService.open(token, user.getEmail(), expiresInMs);
 
-        // V-04 FIX: Deliver token as httpOnly cookie.
-        // cookieSecure=false allows the cookie over plain HTTP (dev + server without TLS).
-        // Set COOKIE_SECURE=true in .env once Nginx+TLS is in place.
-        String secureFlag = cookieSecure ? "; Secure" : "";
-        httpResp.setHeader("Set-Cookie",
-            String.format("%s=%s; Path=/; Max-Age=%d; HttpOnly%s; SameSite=Strict",
-                JWT_COOKIE_NAME, token, (int) (expiresInMs / 1000), secureFlag));
+        setJwtCookie(httpResp, token, expiresInMs);
 
         return ResponseEntity.ok(AuthResponse.builder()
                 .token(token)       // kept for API clients using Authorization header
@@ -185,6 +190,123 @@ public class AuthController {
                 .expiresInMs(expiresInMs)
                 .message("Login successful")
                 .build());
+    }
+
+    // ── SIGN IN WITH GOOGLE ──────────────────────────────────────────
+
+    @GetMapping("/google/config")
+    @Operation(summary = "Whether Google sign-in is available, and under which client id")
+    public ResponseEntity<?> googleConfig() {
+        // The client id is public by design — it travels in every Google button.
+        // A deployment with no Google project reports disabled and the login page
+        // simply does not draw the button.
+        return ResponseEntity.ok(java.util.Map.of(
+                "enabled",  googleTokenVerifier.isEnabled(),
+                "clientId", googleTokenVerifier.isEnabled() ? googleTokenVerifier.clientId() : ""
+        ));
+    }
+
+    @PostMapping("/google")
+    @Operation(summary = "Sign in with a Google ID token")
+    public ResponseEntity<AuthResponse> googleLogin(@RequestBody GoogleAuthRequest req,
+                                                    HttpServletRequest httpReq,
+                                                    HttpServletResponse httpResp) {
+
+        String ip = getClientIp(httpReq);
+
+        if (!googleTokenVerifier.isEnabled())
+            return ResponseEntity.status(503)
+                    .body(AuthResponse.builder().message("Google sign-in is not available.").build());
+
+        if (!rateLimiter.allowGoogleLogin(ip))
+            return tooManyRequests("Too many sign-in attempts. Please try again later.");
+
+        GoogleTokenVerifier.GoogleIdentity identity;
+        try {
+            identity = googleTokenVerifier.verify(req.getCredential());
+        } catch (GoogleTokenVerifier.InvalidGoogleTokenException e) {
+            // The reason is logged for the operator, never returned: a caller
+            // probing with forged tokens learns nothing from a generic answer.
+            securityAuditService.googleLoginFailure(e.getMessage(), ip);
+            return ResponseEntity.status(401)
+                    .body(AuthResponse.builder().message("Google sign-in failed. Please try again.").build());
+        }
+
+        User user = resolveGoogleUser(identity, ip, langFrom(httpReq));
+
+        if (user.getFailedLoginAttempts() != 0) user.setFailedLoginAttempts(0);
+        loginHistoryService.recordLogin(user, ip, httpReq.getHeader("User-Agent"));
+
+        String token = jwtUtil.generateToken(user.getEmail());
+        long expiresInMs = jwtUtil.getExpirationMs();
+        securityAuditService.googleLoginSuccess(user.getEmail(), ip);
+        activeSessionService.open(token, user.getEmail(), expiresInMs);
+        setJwtCookie(httpResp, token, expiresInMs);
+
+        return ResponseEntity.ok(AuthResponse.builder()
+                .token(token)
+                .email(user.getEmail())
+                .name(user.getName())
+                .id(user.getId())
+                .role(user.getRole())
+                .expiresInMs(expiresInMs)
+                .message("Login successful")
+                .build());
+    }
+
+    /**
+     * Finds the account behind a verified Google identity, creating or linking
+     * one where needed.
+     *
+     * Matching is by Google's subject first and by address only as a fallback:
+     * the subject is the account, the address is a label Google lets its owner
+     * change. Linking on the address is safe here — and only here — because
+     * verify() has already refused any token whose email Google has not itself
+     * confirmed, so whoever presented it does own that mailbox.
+     */
+    private User resolveGoogleUser(GoogleTokenVerifier.GoogleIdentity identity, String ip, String lang) {
+
+        var bySub = userRepo.findByGoogleSub(identity.subject());
+        if (bySub.isPresent()) {
+            User user = bySub.get();
+            // Google is the authority on this address; follow it if it moved
+            if (!user.getEmail().equalsIgnoreCase(identity.email())
+                    && !userRepo.existsByEmail(identity.email())) {
+                securityAuditService.profileEmailChanged(user.getEmail(), identity.email());
+                user.setEmail(identity.email());
+                userRepo.save(user);
+            }
+            return user;
+        }
+
+        var byEmail = userRepo.findByEmail(identity.email());
+        if (byEmail.isPresent()) {
+            User user = byEmail.get();
+            user.setGoogleSub(identity.subject());
+            // The address is now proven, whatever state the local account was in
+            user.setVerified(true);
+            user.setVerificationToken(null);
+            user.setVerificationTokenExpiry(null);
+            userRepo.save(user);
+            securityAuditService.googleAccountLinked(user.getEmail(), ip);
+            return user;
+        }
+
+        User user = User.builder()
+                .name(identity.name())
+                .email(identity.email())
+                .password(null)               // nothing to store until they set one
+                .role("TRAVELLER")
+                .verified(true)               // Google has already proven the address
+                .googleSub(identity.subject())
+                .authProvider("GOOGLE")
+                .failedLoginAttempts(0)
+                .build();
+        userRepo.save(user);
+        securityAuditService.googleRegistration(user.getEmail(), ip);
+        // No verification step to wait for: Google has already proven the address
+        emailService.sendWelcomeEmail(user.getEmail(), user.getName(), lang);
+        return user;
     }
 
     // ── EMAIL VERIFICATION ───────────────────────────────────────────
@@ -215,6 +337,11 @@ public class AuthController {
         userRepo.save(user);
 
         securityAuditService.emailVerified(user.getEmail());
+        // The account only becomes usable now, so this is the moment to welcome
+        // them — sending it next to the verification mail would deliver two
+        // messages at once, one of them premature
+        emailService.sendWelcomeEmail(user.getEmail(), user.getName(), langFrom(request));
+
         response.sendRedirect(ctx + "/omnimove-login.html?verified=true");
     }
 
@@ -456,6 +583,18 @@ public class AuthController {
         return password.matches("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^a-zA-Z0-9]).{8,}$");
     }
 
+    /**
+     * V-04 FIX: the token travels as an httpOnly cookie, unreadable by JavaScript.
+     * cookieSecure=false allows it over plain HTTP (dev + server without TLS);
+     * set COOKIE_SECURE=true once Nginx+TLS is in place.
+     */
+    private void setJwtCookie(HttpServletResponse response, String token, long expiresInMs) {
+        String secureFlag = cookieSecure ? "; Secure" : "";
+        response.setHeader("Set-Cookie",
+            String.format("%s=%s; Path=/; Max-Age=%d; HttpOnly%s; SameSite=Strict",
+                JWT_COOKIE_NAME, token, (int) (expiresInMs / 1000), secureFlag));
+    }
+
     private String getClientIp(HttpServletRequest request) {
         return request.getRemoteAddr();
     }
@@ -465,9 +604,18 @@ public class AuthController {
                 .body(AuthResponse.builder().message(message).build());
     }
 
-    /** Reads X-Omnimove-Lang header set by the login page; defaults to "en". */
+    /**
+     * Reads the X-Omnimove-Lang header set by the login page.
+     *
+     * Falls back to Accept-Language because not every path carries the custom
+     * header: the verification link is a plain GET from the mail client, and a
+     * user who registered in Italian should not be welcomed in English.
+     */
     private String langFrom(HttpServletRequest request) {
         String lang = request.getHeader("X-Omnimove-Lang");
-        return (lang != null && lang.equalsIgnoreCase("it")) ? "it" : "en";
+        if (lang != null) return lang.equalsIgnoreCase("it") ? "it" : "en";
+
+        String accept = request.getHeader("Accept-Language");
+        return (accept != null && accept.toLowerCase().startsWith("it")) ? "it" : "en";
     }
 }

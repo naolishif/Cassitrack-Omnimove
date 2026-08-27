@@ -164,6 +164,15 @@ influx:
 google:
   maps:
     api-key: ${GOOGLE_MAPS_API_KEY}
+  # ── Sign in with Google ───────────────────────────────────────
+  # OAuth 2.0 Client ID of type "Web application", from Google Cloud Console
+  # → APIs & Services → Credentials. Add the app's origin to "Authorised
+  # JavaScript origins" (e.g. http://localhost:8180).
+  # Leave unset and the feature turns itself off: the login page does not
+  # draw the button and /api/v1/auth/google answers 503.
+  oauth:
+    client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+    certs-url: https://www.googleapis.com/oauth2/v3/certs
 
 # ── OMNIMOVE App Config ───────────────────────────────────────
 omnimove:
@@ -172,5 +181,8 @@ omnimove:
   cookie:
     secure: ${COOKIE_SECURE:false}   # set to true when running behind Nginx+TLS
   mail:
-    from: "OMNIMOVE <${MAIL_USERNAME:omnimove.noreply@gmail.com}>"
+    # Derived from the SMTP account rather than declared again: Gmail rejects or
+    # rewrites a From it does not own, and two copies of the address drift the
+    # moment one of them is edited.
+    from: "OMNIMOVE <${spring.mail.username}>"
     base-url: ${APP_BASE_URL:http://localhost:8180}

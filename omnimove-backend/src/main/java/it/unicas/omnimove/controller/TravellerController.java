@@ -79,6 +79,14 @@ public class TravellerController {
         }
 
         if (req.getPassword() != null && !req.getPassword().isBlank()) {
+            // A Google account has no current password to confirm against, so the
+            // generic "incorrect" would be a dead end. Adding one is done through
+            // the reset-by-email flow, which proves the address independently.
+            if (!user.hasPassword())
+                return ResponseEntity.badRequest()
+                        .body(Map.of("message", "This account signs in with Google and has no password. "
+                                              + "Use \"Forgot password\" to set one."));
+
             if (req.getCurrentPassword() == null || req.getCurrentPassword().isBlank()
                     || !passwordEncoder.matches(req.getCurrentPassword(), user.getPassword()))
                 return ResponseEntity.badRequest()

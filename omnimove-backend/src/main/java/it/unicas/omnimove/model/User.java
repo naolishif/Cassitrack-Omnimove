@@ -40,6 +40,25 @@ public class User {
     @Builder.Default
     private int failedLoginAttempts = 0;
 
+    // ── Sign-in provider ────────────────────────────────────────────
+    /**
+     * Google's "sub" claim — the stable id of the Google account. Null for an
+     * account that has never signed in with Google. Not the email: Google lets
+     * a user change that, the sub never moves.
+     */
+    @Column(name = "google_sub", length = 64)
+    private String googleSub;
+
+    /** How the account was created: LOCAL or GOOGLE. */
+    @Column(name = "auth_provider", nullable = false, length = 20)
+    @Builder.Default
+    private String authProvider = "LOCAL";
+
+    /** An account created through Google has no password until it sets one. */
+    public boolean hasPassword() {
+        return password != null && !password.isBlank();
+    }
+
     // ── Activity tracking ───────────────────────────────────────────
     /** First registration: set once, on insert, and never touched again. */
     @Column(name = "created_at", nullable = false, updatable = false)

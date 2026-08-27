@@ -198,6 +198,10 @@ public class AdminController {
             account.put("email",        user.getEmail());
             account.put("role",         user.getRole());
             account.put("verified",     user.isVerified());
+            // How the account came into being — a Google sign-up never had a
+            // password, so the operator needs to know before offering one
+            account.put("authProvider", user.getAuthProvider());
+            account.put("hasPassword",  user.hasPassword());
             account.put("registeredAt", user.getCreatedAt());
             account.put("lastLoginAt",  user.getLastLoginAt());
             account.put("loginCount",   loginHistoryService.count(user.getId()));

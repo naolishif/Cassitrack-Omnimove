@@ -104,3 +104,36 @@ body{background:var(--bg);color:var(--text);font-family:var(--display);
 /* Below the card the margin belongs on top, not underneath: the base rule was
    written for the old position above the form. */
 .lang-toggle--below { margin-bottom: 0; margin-top: 18px; }
+
+/* ── SIGN IN WITH GOOGLE ── */
+.google-block { margin-top: 18px; }
+
+/* Rule either side of the word, drawn with borders so it needs no extra markup */
+.or-sep {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.or-sep::before,
+.or-sep::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(255,255,255,.14);
+}
+.or-sep span {
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    opacity: .55;
+}
+
+/* Google renders its own button and forbids restyling it — all we do is
+   centre it and let it take the card's width. */
+#googleBtn {
+    display: flex;
+    justify-content: center;
+    min-height: 40px;
+}
+#err-google { display: block; text-align: center; margin-top: 8px; }

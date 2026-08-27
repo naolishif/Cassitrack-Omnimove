@@ -106,6 +106,17 @@
             </button>
         </form>
 
+        <!-- ══ Sign in with Google ═══════════════════════════════════
+             Outside the forms on purpose: with Google, signing in and
+             registering are the same action, so one button serves both tabs.
+             Stays hidden until /auth/google/config says the server has a
+             client id — a deployment without one shows no dead button. -->
+        <div class="google-block" id="googleBlock" style="display:none">
+            <div class="or-sep"><span data-i18n="or_continue">or</span></div>
+            <div id="googleBtn"></div>
+            <div class="field-err" id="err-google"></div>
+        </div>
+
         <!-- ══ PANEL: Reset Password ══════════════════════════════════ -->
         <form class="form" id="resetForm" onsubmit="handleReset(event)">
             <p class="note" data-i18n="note_reset">Choose a new password for your OMNIMOVE account.</p>
@@ -134,6 +145,7 @@
     </div>
 </div>
 
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="omnimove-i18n.js"></script>
 <script src="omnimove-login.js"></script>
 </body>

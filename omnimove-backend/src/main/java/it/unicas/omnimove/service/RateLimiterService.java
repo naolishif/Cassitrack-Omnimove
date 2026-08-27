@@ -24,6 +24,7 @@ import java.time.Duration;
  *   /register           → 5 attempts per IP  per hour
  *   /resend-verification → 3 attempts per email per hour
  *   /forgot-password    → 3 attempts per email per hour
+ *   /google             → 20 attempts per IP    per hour
  */
 @Service
 @Slf4j
@@ -74,6 +75,15 @@ public class RateLimiterService {
     /** 3 resend-verification requests per email per hour */
     public boolean allowResendVerification(String email) {
         return isAllowed("rl:resend:" + email, 3, Duration.ofHours(1));
+    }
+
+    /**
+     * 20 Google sign-ins per IP per hour. Looser than the email-keyed limits:
+     * a whole university NAT can share one address, and every attempt here is
+     * already a token Google itself had to mint.
+     */
+    public boolean allowGoogleLogin(String ip) {
+        return isAllowed("rl:google:" + ip, 20, Duration.ofHours(1));
     }
 
     /** 3 forgot-password requests per email per hour */

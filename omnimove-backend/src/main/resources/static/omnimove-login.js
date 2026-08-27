@@ -108,8 +108,10 @@ function switchTab(tab) {
     if (tab === 'login') syncForgotButton();
 }
 
-function hideTabs()        { document.getElementById('tabBar').style.display = 'none'; }
-function showTabs()        { document.getElementById('tabBar').style.display = 'flex'; }
+function hideTabs()        { document.getElementById('tabBar').style.display = 'none';
+                             setGoogleVisible(false); }
+function showTabs()        { document.getElementById('tabBar').style.display = 'flex';
+                             setGoogleVisible(true); }
 function hideGuestSection(){ }
 function showGuestSection(){ }
 
@@ -444,3 +446,119 @@ async function handleReset(e) {
         btn.disabled = false; btn.textContent = t('btn_set_pass');
     }
 }
+
+// ════════════════════════════════════════════════════════════
+// SIGN IN WITH GOOGLE
+// ════════════════════════════════════════════════════════════
+// Google Identity Services hands the browser a signed ID token; the server
+// verifies that signature itself and answers with our own session cookie, the
+// same one the password form gets. Nothing about the Google account is trusted
+// here — this file only carries the token across.
+
+async function initGoogle() {
+    let cfg;
+    try {
+        const r = await fetch(`${OMNIMOVE}/auth/google/config`);
+        if (!r.ok) return;
+        cfg = await r.json();
+    } catch { return; }
+
+    // No client id configured on this deployment: leave the block hidden rather
+    // than draw a button that could only fail
+    if (!cfg.enabled || !cfg.clientId) return;
+
+    // The GIS script is async: it may not have run yet when this resolves
+    const ready = await waitForGis();
+    if (!ready) { console.warn('Google Identity Services did not load'); return; }
+
+    google.accounts.id.initialize({
+        client_id: cfg.clientId,
+        callback: handleGoogleCredential,
+        cancel_on_tap_outside: true
+    });
+    renderGoogleButton();
+
+    // Only reveal it once there is a real button inside, and only if the panel
+    // showing is one the button belongs to
+    document.getElementById('googleBlock').dataset.ready = '1';
+    setGoogleVisible(document.getElementById('tabBar').style.display !== 'none');
+}
+
+/**
+ * Google writes the button's own label ("Continue with" / "Continua con"), and
+ * it picks the wording from the locale it is given — not from our page. Without
+ * this it falls back to the browser's language and the button stayed in Italian
+ * while the rest of the page was in English. Google draws the button once, so
+ * changing language means drawing it again.
+ */
+function renderGoogleButton() {
+    const target = document.getElementById('googleBtn');
+    if (!target || !window.google?.accounts?.id) return;
+
+    target.innerHTML = '';
+    google.accounts.id.renderButton(target, {
+        theme: 'filled_black',
+        size: 'large',
+        shape: 'pill',
+        text: 'continue_with',
+        width: 280,
+        locale: getLang()
+    });
+}
+
+// i18n.js calls this after every language switch
+window._onLangChange = () => renderGoogleButton();
+
+/** The GIS script carries async+defer, so poll briefly instead of assuming. */
+function waitForGis(timeoutMs = 5000) {
+    return new Promise(resolve => {
+        const started = Date.now();
+        (function poll() {
+            if (window.google?.accounts?.id) return resolve(true);
+            if (Date.now() - started > timeoutMs) return resolve(false);
+            setTimeout(poll, 100);
+        })();
+    });
+}
+
+// Readiness is kept on the element rather than in a variable: init() runs
+// hideTabs() while this script is still being evaluated, so any `let` declared
+// down here would still be in its temporal dead zone and would throw.
+function setGoogleVisible(visible) {
+    const block = document.getElementById('googleBlock');
+    if (!block) return;
+    block.style.display = (visible && block.dataset.ready === '1') ? 'block' : 'none';
+}
+
+async function handleGoogleCredential(response) {
+    const err = document.getElementById('err-google');
+    err.textContent = '';
+    hideMsg();
+
+    if (!response || !response.credential) {
+        err.textContent = t('err_google_failed');
+        return;
+    }
+
+    try {
+        const r = await fetch(`${OMNIMOVE}/auth/google`, {
+            method: 'POST',
+            headers: langHeaders(),
+            body: JSON.stringify({ credential: response.credential })
+        });
+        const data = await r.json();
+
+        if (r.ok && data.token) {
+            _failedAttempts = 0; syncForgotButton();
+            saveSession(data);
+            showMsg(t('msg_welcome_back').replace('{name}', data.name || 'user'), 'ok');
+            secureRedirect(data.role || 'TRAVELLER');
+        } else {
+            showMsg(data.message || t('err_google_failed'), 'err');
+        }
+    } catch (e) {
+        showMsg(t('msg_server_short'), 'err');
+    }
+}
+
+initGoogle();

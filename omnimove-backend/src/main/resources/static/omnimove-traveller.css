@@ -1533,7 +1533,7 @@ body {
 
 /* ── Step 6b: long emails wrap to the next line instead of overflowing ── */
 @media (max-width: 768px) {
-    #sidebarEmail, #profileEmail, #paymentEmail, #accountEmail {
+    #profileEmail, #paymentEmail, #accountEmail {
         min-width: 0;
         max-width: 100%;
         white-space: normal;

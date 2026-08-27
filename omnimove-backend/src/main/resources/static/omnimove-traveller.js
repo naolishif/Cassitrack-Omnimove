@@ -18,7 +18,6 @@ if (!_user.name && !_user.email) {
 OmniSession.bindSessionGuard(LOGIN_PAGE);
 
 document.getElementById('sidebarName').textContent  = _user.name || _user.username || 'Utente';
-document.getElementById('sidebarEmail').textContent = _user.email || '';
 document.getElementById('profileName').textContent  = _user.name  || _user.username || 'Utente';
 document.getElementById('profileEmail').textContent = _user.email || '';
 document.getElementById('paymentEmail').textContent = _user.email || '';
