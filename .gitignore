@@ -13,6 +13,11 @@ target/
 .mvn/wrapper/maven-wrapper.jar
 
 # Environment / secrets — NEVER commit these files
+# The mosquitto password file holds one hash per broker user, and each developer
+# generates their own (see cassitrack-backend/mosquitto/config/mosquitto.conf).
+# Versioning it meant the committed hashes could only ever match one person's
+# .env — everyone else was silently refused by the broker.
+cassitrack-backend/mosquitto/config/passwd
 .env
 *.env
 .env_server
