@@ -719,3 +719,94 @@ body {
 }
 .fav-row .fav-green { font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
 .fav-star { color: var(--accent-amber); font-size: 13px; }
+
+/* ── FILTER BAR ── */
+.filter-control {
+    background: var(--bg-deep);
+    border: 1px solid var(--border-bright);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-family: var(--font-main);
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+}
+.filter-control:focus { border-color: var(--accent-cyan); }
+.filter-control option { background: var(--bg-panel); }
+/* The native date picker draws a black glyph on our dark ground without this */
+.filter-date { font-family: var(--font-mono); font-size: 12px; color-scheme: dark; }
+.filter-date.set { border-color: var(--accent-cyan); }
+
+.filter-label { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.filter-count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* ── COLLAPSIBLE SECTIONS ── */
+/* A user with hundreds of journeys must not produce a modal hundreds of rows
+   long: each list collapses to a one-line header carrying its count, and opens
+   onto a fixed-size page. Height is bounded by the page size, not by the data. */
+.collapse { border-top: 1px solid var(--border); }
+.collapse:first-of-type { border-top: none; }
+
+.collapse-head {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 12px 2px;
+    text-align: left;
+}
+.collapse-head:hover .collapse-title { color: var(--accent-cyan); }
+
+.collapse-caret {
+    color: var(--text-dim);
+    font-size: 10px;
+    transition: transform .15s;
+    display: inline-block;
+}
+.collapse.open .collapse-caret { transform: rotate(90deg); color: var(--accent-cyan); }
+
+.collapse-title {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.collapse-body { display: none; padding-bottom: 12px; }
+.collapse.open .collapse-body { display: block; }
+
+/* ── PAGER ── */
+.pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 10px;
+}
+.pager:empty { display: none; }
+.pager .pg-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.pager .pg {
+    background: var(--bg-card);
+    border: 1px solid var(--border-bright);
+    border-radius: 3px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    padding: 4px 9px;
+}
+.pager .pg:hover:not(:disabled) { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+.pager .pg:disabled { color: var(--text-dim); cursor: default; opacity: .5; }

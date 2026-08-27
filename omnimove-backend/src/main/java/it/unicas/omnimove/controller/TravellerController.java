@@ -262,7 +262,11 @@ public class TravellerController {
         if (mode == null || origin == null || dest == null)
             return ResponseEntity.badRequest().body(Map.of("message", "mode, originName and destName are required"));
 
-        if (!java.util.Set.of("BUS", "WALK", "BIKE", "SCOOTER").contains(mode.toUpperCase()))
+        // Normalised before both the lookup and the insert, so starring and
+        // un-starring the same card always land on the same row
+        mode = mode.trim().toUpperCase();
+
+        if (!isFavouritableMode(mode))
             return ResponseEntity.badRequest().body(Map.of("message", "Invalid transport mode"));
 
         if (origin.length() > 200 || dest.length() > 200)
@@ -284,6 +288,28 @@ public class TravellerController {
                     .build());
             return ResponseEntity.ok(Map.of("favorited", true));
         }
+    }
+
+    private static final Set<String> SIMPLE_MODES = Set.of("BUS", "WALK", "BIKE", "SCOOTER");
+
+    /** favorite_route.mode is VARCHAR(20) — a longer chain is rejected here
+     *  rather than blowing up on the insert. */
+    private static final int MODE_MAX = 20;
+
+    /**
+     * A combined option does not arrive as a single word: JourneyPlannerService
+     * names it after the chain it stitched — BUS_BIKE, SCOOTER_BUS — so each
+     * link has to be checked, not the whole name. Matching the full string
+     * against the simple modes is what used to make every combined route
+     * impossible to star.
+     */
+    private boolean isFavouritableMode(String mode) {
+        if (mode.isEmpty() || mode.length() > MODE_MAX) return false;
+        // -1 keeps trailing empties, so "BUS_" is rejected instead of read as "BUS"
+        for (String leg : mode.split("_", -1)) {
+            if (!SIMPLE_MODES.contains(leg)) return false;
+        }
+        return true;
     }
 
 }

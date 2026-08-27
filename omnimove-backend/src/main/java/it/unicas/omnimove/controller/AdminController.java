@@ -202,17 +202,25 @@ public class AdminController {
             account.put("lastLoginAt",  user.getLastLoginAt());
             account.put("loginCount",   loginHistoryService.count(user.getId()));
 
-            List<Map<String, Object>> history = travellerProfileService.history(user.getId(), limit);
-            int totalTrips = travellerProfileService.tripCount(user.getId());
-
             Map<String, Object> body = new LinkedHashMap<>();
-            body.put("account",        account);
-            body.put("stats",          travellerProfileService.stats(user.getId()));
-            body.put("history",        history);
-            body.put("totalTrips",     totalTrips);
-            body.put("truncated",      totalTrips > history.size());
-            body.put("favoriteRoutes", travellerProfileService.favoriteRoutes(user.getId()));
-            body.put("favoriteStops",  travellerProfileService.favoriteStops(user.getId()));
+            body.put("account", account);
+
+            // An operator account never travels: the figures would all read zero
+            // and the queries behind them are pure waste, so they are not run.
+            boolean travels = !"ADMIN".equalsIgnoreCase(user.getRole());
+            body.put("travelData", travels);
+
+            if (travels) {
+                List<Map<String, Object>> history = travellerProfileService.history(user.getId(), limit);
+                int totalTrips = travellerProfileService.tripCount(user.getId());
+
+                body.put("stats",          travellerProfileService.stats(user.getId()));
+                body.put("history",        history);
+                body.put("totalTrips",     totalTrips);
+                body.put("truncated",      totalTrips > history.size());
+                body.put("favoriteRoutes", travellerProfileService.favoriteRoutes(user.getId()));
+                body.put("favoriteStops",  travellerProfileService.favoriteStops(user.getId()));
+            }
 
             securityAuditService.adminViewedUserProfile(
                     principal.getUsername(), user.getEmail());

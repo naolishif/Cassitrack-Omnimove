@@ -208,13 +208,32 @@
             <div class="sep" style="margin:14px 0"></div>
 
             <div class="search-row">
-                <input class="search-input" id="searchInput" type="text" placeholder="Search by name, email or ID…" oninput="filterTable(this.value)">
-                <select id="roleFilter" oninput="filterTable(document.getElementById('searchInput').value)" style="background:var(--bg-deep);border:1px solid var(--border-bright);border-radius:3px;color:var(--text-primary);font-family:var(--font-main);font-size:13px;padding:8px 10px;outline:none;">
+                <input class="search-input" id="searchInput" type="text" placeholder="Search by name, email or ID…" oninput="applyFilter()">
+                <select class="filter-control" id="roleFilter" onchange="applyFilter()">
                     <option value="">All roles</option>
                     <option value="ADMIN">Admin</option>
                     <option value="TRAVELLER">Traveller</option>
                 </select>
+                <select class="filter-control" id="sortSelect" onchange="applyFilter()">
+                    <option value="id-asc">ID ↑</option>
+                    <option value="id-desc">ID ↓</option>
+                    <option value="name-asc">Name A→Z</option>
+                    <option value="name-desc">Name Z→A</option>
+                    <option value="registered-desc">Registered — newest</option>
+                    <option value="registered-asc">Registered — oldest</option>
+                    <option value="login-desc">Last login — newest</option>
+                    <option value="login-asc">Last login — oldest</option>
+                </select>
                 <button class="btn btn-ghost">EXPORT CSV</button>
+            </div>
+
+            <div class="search-row" id="dateFilterRow">
+                <span class="filter-label">Registered between</span>
+                <input class="filter-control filter-date" id="fromDate" type="date" onchange="applyFilter()" title="From this day, included">
+                <span class="filter-label">and</span>
+                <input class="filter-control filter-date" id="toDate" type="date" onchange="applyFilter()" title="Up to this day, included">
+                <button class="btn btn-ghost" id="clearFiltersBtn" onclick="clearFilters()">CLEAR FILTERS</button>
+                <span class="filter-count" id="filterCount"></span>
             </div>
 
             <table class="user-table" id="userTable">
@@ -334,18 +353,6 @@
         <div class="profile-scroll" id="profileScroll">
             <div class="profile-id" id="profileId"></div>
 
-            <div class="profile-section">Travel figures — as the user sees them</div>
-            <div class="kpi-grid" id="profileKpis"></div>
-
-            <div class="profile-section" id="profileTripsTitle">Journeys</div>
-            <div id="profileTrips"></div>
-
-            <div class="profile-section" id="profileFavRoutesTitle">Favourite routes</div>
-            <div id="profileFavRoutes"></div>
-
-            <div class="profile-section" id="profileFavStopsTitle">Favourite stops</div>
-            <div id="profileFavStops"></div>
-
             <div class="profile-section">Edit details</div>
             <div class="form-row">
                 <div class="form-group">
@@ -366,6 +373,45 @@
             <div class="edit-note" id="editNote">
                 Changing the email changes what this user signs in with — their
                 current session ends and they must use the new address.
+            </div>
+
+            <!-- Hidden for admins: an operator account has no travel story -->
+            <div id="travelBlock">
+                <div class="profile-section">Travel figures — as the user sees them</div>
+                <div class="kpi-grid" id="profileKpis"></div>
+
+                <div class="collapse" id="secTrips">
+                    <button class="collapse-head" onclick="toggleSection('secTrips')">
+                        <span class="collapse-caret">▸</span>
+                        <span class="collapse-title" id="profileTripsTitle">Journeys</span>
+                    </button>
+                    <div class="collapse-body">
+                        <div id="profileTrips"></div>
+                        <div class="pager" id="tripsPager"></div>
+                    </div>
+                </div>
+
+                <div class="collapse" id="secFavRoutes">
+                    <button class="collapse-head" onclick="toggleSection('secFavRoutes')">
+                        <span class="collapse-caret">▸</span>
+                        <span class="collapse-title" id="profileFavRoutesTitle">Favourite routes</span>
+                    </button>
+                    <div class="collapse-body">
+                        <div id="profileFavRoutes"></div>
+                        <div class="pager" id="favRoutesPager"></div>
+                    </div>
+                </div>
+
+                <div class="collapse" id="secFavStops">
+                    <button class="collapse-head" onclick="toggleSection('secFavStops')">
+                        <span class="collapse-caret">▸</span>
+                        <span class="collapse-title" id="profileFavStopsTitle">Favourite stops</span>
+                    </button>
+                    <div class="collapse-body">
+                        <div id="profileFavStops"></div>
+                        <div class="pager" id="favStopsPager"></div>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="modal-footer">

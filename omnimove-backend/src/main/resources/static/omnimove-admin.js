@@ -170,7 +170,63 @@ function renderTable(data) {
 // implementation feeds both), plus the identity fields an admin may correct.
 let _profileUserId = null;
 
-const MODE_LABEL = { BUS:'🚌 BUS', WALK:'🚶 WALK', BIKE:'🚲 BIKE', SCOOTER:'🛴 SCOOTER' };
+// ── Transport modes ──
+// A combined journey reaches us as the chain the planner stitched — BUS_BIKE,
+// SCOOTER_BUS, BUS_SCOOTER_BUS. Wherever the operator reads it, it has to say
+// what the traveller app says: one category, "Combined". The test is the
+// underscore rather than a list of names, so a chain the planner learns to
+// build tomorrow lands in the right bucket without a change here.
+const MODE_COLOR = {
+    BUS:'#00cfff', BIKE:'#00e5a0', SCOOTER:'#3a8eff',
+    WALK:'#7a90a8', TRAIN:'#a855f7', COMBINED:'#fbbf24'
+};
+const MODE_NAME = {
+    BUS:'Bus', BIKE:'Shared Bike', SCOOTER:'E-Scooter',
+    WALK:'Walking', TRAIN:'Train', COMBINED:'Combined'
+};
+const MODE_EMOJI = {
+    BUS:'🚌', BIKE:'🚲', SCOOTER:'🛴', WALK:'🚶', TRAIN:'🚆', COMBINED:'🔀'
+};
+
+/** Collapses a stitched chain onto the single COMBINED category. */
+function modeKey(mode) {
+    if (!mode) return 'UNKNOWN';
+    const m = String(mode).toUpperCase();
+    return m.includes('_') ? 'COMBINED' : m;
+}
+
+function modeName(mode)  { const k = modeKey(mode); return MODE_NAME[k] || k; }
+function modeColor(mode) { return MODE_COLOR[modeKey(mode)] || '#7a90a8'; }
+
+/** Emoji + name, for the inline tags in the user card. */
+function modeTag(mode) {
+    const k = modeKey(mode);
+    return `${MODE_EMOJI[k] || ''} ${MODE_NAME[k] || k}`.trim();
+}
+
+/**
+ * Charts must not draw one slice per chain, all of them labelled "Combined".
+ * These fold every key that maps to the same category into a single series
+ * before anything is plotted.
+ */
+function foldModeCounts(dist) {
+    const out = {};
+    for (const [mode, v] of Object.entries(dist || {})) {
+        const k = modeKey(mode);
+        out[k] = (out[k] || 0) + Number(v);
+    }
+    return out;
+}
+
+function foldModeHours(byHour) {
+    const out = {};
+    for (const [mode, hours] of Object.entries(byHour || {})) {
+        const k = modeKey(mode);
+        if (!out[k]) out[k] = new Array(24).fill(0);
+        Array.from(hours).forEach((n, i) => { out[k][i] += Number(n) || 0; });
+    }
+    return out;
+}
 
 async function openProfile(id) {
     _profileUserId = id;
@@ -183,10 +239,14 @@ async function openProfile(id) {
     document.getElementById('profileTrips').innerHTML     = `<div class="history-empty">Loading…</div>`;
     document.getElementById('profileFavRoutes').innerHTML = '';
     document.getElementById('profileFavStops').innerHTML  = '';
+    ['secTrips','secFavRoutes','secFavStops'].forEach(k =>
+        document.getElementById(k).classList.remove('open'));
     modal.classList.add('open');
 
     try {
-        const r = await apiFetch(`/admin/users/${id}/profile`);
+        // Deeper slice than the app's own panel: the operator pages through it
+        // locally, so one request beats a round trip per page
+        const r = await apiFetch(`/admin/users/${id}/profile?trips=${TRIPS_FETCHED}`);
         if (!r.ok) {
             document.getElementById('profileTrips').innerHTML =
                 `<div class="history-empty">Could not load the profile.</div>`;
@@ -201,7 +261,6 @@ async function openProfile(id) {
 
 function renderProfile(data) {
     const a = data.account;
-    const s = data.stats;
 
     document.getElementById('profileTitle').textContent = a.name;
 
@@ -215,48 +274,34 @@ function renderProfile(data) {
         `<span>Last login <strong>${a.lastLoginAt ? escHtml(fmtDateTime(a.lastLoginAt)) : 'never'}</strong></span>` +
         `<span>Accesses <strong>${escHtml(a.loginCount)}</strong></span>`;
 
-    document.getElementById('profileKpis').innerHTML = `
-      <div class="kpi"><div class="kpi-label">Eco points</div>
-        <div class="kpi-value">${Number(s.ecoPoints).toLocaleString('it-IT')}</div></div>
-      <div class="kpi"><div class="kpi-label">CO₂ saved</div>
-        <div class="kpi-value">${escHtml(s.co2SavedKg)} kg</div>
-        <div class="kpi-sub">vs the same trips by car</div></div>
-      <div class="kpi"><div class="kpi-label">Trips</div>
-        <div class="kpi-value">${escHtml(s.trips)}</div></div>
-      <div class="kpi"><div class="kpi-label">Spent</div>
-        <div class="kpi-value">€${escHtml(s.spent30d)}</div>
-        <div class="kpi-sub">last 30 days</div></div>`;
+    // Admin accounts carry no travel story — the server does not even compute it
+    const travelBlock = document.getElementById('travelBlock');
+    travelBlock.style.display = data.travelData === false ? 'none' : '';
 
-    document.getElementById('profileTripsTitle').textContent =
-        data.truncated ? `Journeys — latest ${data.history.length} of ${data.totalTrips}`
-                       : `Journeys (${data.totalTrips})`;
+    if (data.travelData !== false) {
+        const s = data.stats;
+        document.getElementById('profileKpis').innerHTML = `
+          <div class="kpi"><div class="kpi-label">Eco points</div>
+            <div class="kpi-value">${Number(s.ecoPoints).toLocaleString('it-IT')}</div></div>
+          <div class="kpi"><div class="kpi-label">CO₂ saved</div>
+            <div class="kpi-value">${escHtml(s.co2SavedKg)} kg</div>
+            <div class="kpi-sub">vs the same trips by car</div></div>
+          <div class="kpi"><div class="kpi-label">Trips</div>
+            <div class="kpi-value">${escHtml(s.trips)}</div></div>
+          <div class="kpi"><div class="kpi-label">Spent</div>
+            <div class="kpi-value">€${escHtml(s.spent30d)}</div>
+            <div class="kpi-sub">last 30 days</div></div>`;
 
-    const trips = document.getElementById('profileTrips');
-    if (!data.history.length) {
-        trips.innerHTML = `<div class="history-empty">This user has not travelled yet.</div>`;
-    } else {
-        trips.innerHTML = `
-        <table class="trip-table">
-          <thead>
-            <tr><th>Date</th><th>Mode</th><th>Route</th><th>Distance</th><th>Cost</th><th>Green</th></tr>
-          </thead>
-          <tbody>
-            ${data.history.map(j => `
-            <tr>
-              <td class="num">${escHtml(fmtDateTime(j.createdAt))}</td>
-              <td><span class="mode-tag">${escHtml(MODE_LABEL[j.mode] || j.mode)}</span></td>
-              <td class="route">${escHtml(j.originName || '—')} → ${escHtml(j.destName || '—')}
-                  ${j.isFavorite ? '<span class="text-amber" title="Starred by the user">★</span>' : ''}</td>
-              <td class="num">${j.distanceKm != null ? Number(j.distanceKm).toFixed(1) + ' km' : '—'}</td>
-              <td class="num">${j.costEuros != null ? '€' + Number(j.costEuros).toFixed(2) : '—'}</td>
-              <td class="num" style="color:${greenColor(j.greenIndex)}">${escHtml(j.greenIndex ?? '—')}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>`;
+        setSectionTitle('profileTripsTitle',
+            data.truncated ? `Journeys — latest ${data.history.length} of ${data.totalTrips}`
+                           : `Journeys (${data.totalTrips})`);
+        setSectionTitle('profileFavRoutesTitle', `Favourite routes (${(data.favoriteRoutes || []).length})`);
+        setSectionTitle('profileFavStopsTitle',  `Favourite stops (${(data.favoriteStops  || []).length})`);
+
+        loadPaged('trips',     data.history        || [], 'secTrips');
+        loadPaged('favRoutes', data.favoriteRoutes || [], 'secFavRoutes');
+        loadPaged('favStops',  data.favoriteStops  || [], 'secFavStops');
     }
-
-    renderFavRoutes(data.favoriteRoutes || []);
-    renderFavStops(data.favoriteStops || []);
 
     // "Marco De Luca" → first "Marco", last "De Luca" — mirrors how the add-user
     // form joins the two halves back together.
@@ -266,36 +311,122 @@ function renderProfile(data) {
     document.getElementById('editEmail').value = a.email;
 }
 
-function renderFavRoutes(items) {
-    document.getElementById('profileFavRoutesTitle').textContent =
-        `Favourite routes (${items.length})`;
+// ── Collapsible, paged lists ──
+// A traveller with hundreds of journeys used to stretch this modal past any
+// screen. Each list now collapses behind a header that carries its count, and
+// opens onto one fixed-size page — so the panel's height follows the page size,
+// never the size of the data. Lists that already fit open on their own, because
+// hiding two rows behind a click helps nobody.
 
-    const box = document.getElementById('profileFavRoutes');
+/** Journeys pulled per profile — the server caps this at 100. */
+const TRIPS_FETCHED = 100;
+const PAGE_SIZE = 10;
+
+const PAGED = {
+    trips: {
+        body: 'profileTrips', pager: 'tripsPager',
+        empty: 'This user has not travelled yet.',
+        render: tripsHtml
+    },
+    favRoutes: {
+        body: 'profileFavRoutes', pager: 'favRoutesPager',
+        empty: 'No starred route.',
+        render: favRoutesHtml
+    },
+    favStops: {
+        body: 'profileFavStops', pager: 'favStopsPager',
+        empty: 'No starred stop.',
+        render: favStopsHtml
+    }
+};
+
+const PAGED_DATA = { trips: [], favRoutes: [], favStops: [] };
+const PAGED_PAGE = { trips: 0,  favRoutes: 0,  favStops: 0  };
+
+function setSectionTitle(id, text) {
+    document.getElementById(id).textContent = text;
+}
+
+function toggleSection(id) {
+    document.getElementById(id).classList.toggle('open');
+}
+
+function loadPaged(key, items, sectionId) {
+    PAGED_DATA[key] = items;
+    PAGED_PAGE[key] = 0;
+    // One page or less is not worth a click
+    document.getElementById(sectionId)
+            .classList.toggle('open', items.length > 0 && items.length <= PAGE_SIZE);
+    drawPaged(key);
+}
+
+function drawPaged(key) {
+    const cfg   = PAGED[key];
+    const items = PAGED_DATA[key];
+    const body  = document.getElementById(cfg.body);
+    const pager = document.getElementById(cfg.pager);
+
     if (!items.length) {
-        box.innerHTML = `<div class="history-empty">No starred route.</div>`;
+        body.innerHTML  = `<div class="history-empty">${cfg.empty}</div>`;
+        pager.innerHTML = '';
         return;
     }
-    box.innerHTML = `<div class="fav-list">${items.map(f => `
+
+    const pages = Math.ceil(items.length / PAGE_SIZE);
+    const page  = Math.min(Math.max(PAGED_PAGE[key], 0), pages - 1);
+    PAGED_PAGE[key] = page;
+
+    const from = page * PAGE_SIZE;
+    body.innerHTML = cfg.render(items.slice(from, from + PAGE_SIZE));
+
+    pager.innerHTML = pages <= 1 ? '' : `
+      <span class="pg-label">${from + 1}–${Math.min(from + PAGE_SIZE, items.length)} of ${items.length}</span>
+      <button class="pg" onclick="pagedGo('${key}',-1)" ${page === 0 ? 'disabled' : ''}>‹</button>
+      <button class="pg" onclick="pagedGo('${key}',1)" ${page >= pages - 1 ? 'disabled' : ''}>›</button>`;
+}
+
+function pagedGo(key, delta) {
+    PAGED_PAGE[key] += delta;
+    drawPaged(key);
+}
+
+// ── Row builders: pure, one page of items in, HTML out ──
+
+function tripsHtml(rows) {
+    return `
+    <table class="trip-table">
+      <thead>
+        <tr><th>Date</th><th>Mode</th><th>Route</th><th>Distance</th><th>Cost</th><th>Green</th></tr>
+      </thead>
+      <tbody>
+        ${rows.map(j => `
+        <tr>
+          <td class="num">${escHtml(fmtDateTime(j.createdAt))}</td>
+          <td><span class="mode-tag">${escHtml(modeTag(j.mode))}</span></td>
+          <td class="route">${escHtml(j.originName || '—')} → ${escHtml(j.destName || '—')}
+              ${j.isFavorite ? '<span class="text-amber" title="Starred by the user">★</span>' : ''}</td>
+          <td class="num">${j.distanceKm != null ? Number(j.distanceKm).toFixed(1) + ' km' : '—'}</td>
+          <td class="num">${j.costEuros != null ? '€' + Number(j.costEuros).toFixed(2) : '—'}</td>
+          <td class="num" style="color:${greenColor(j.greenIndex)}">${escHtml(j.greenIndex ?? '—')}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function favRoutesHtml(rows) {
+    return `<div class="fav-list">${rows.map(f => `
       <div class="fav-row">
         <span class="fav-star">★</span>
         <div class="fav-main">
           ${escHtml(f.originName)} → ${escHtml(f.destName)}
-          <div class="fav-sub">${escHtml(MODE_LABEL[f.mode] || f.mode)} · ~€${Number(f.avgCost).toFixed(2)} · used ${escHtml(f.usedCount)}×</div>
+          <div class="fav-sub">${escHtml(modeTag(f.mode))} · ~€${Number(f.avgCost).toFixed(2)} · used ${escHtml(f.usedCount)}×</div>
         </div>
         <div class="fav-green" style="color:${greenColor(f.greenIndex)}">🌱 ${escHtml(f.greenIndex)}</div>
       </div>`).join('')}</div>`;
 }
 
-function renderFavStops(items) {
-    document.getElementById('profileFavStopsTitle').textContent =
-        `Favourite stops (${items.length})`;
-
-    const box = document.getElementById('profileFavStops');
-    if (!items.length) {
-        box.innerHTML = `<div class="history-empty">No starred stop.</div>`;
-        return;
-    }
-    box.innerHTML = `<div class="fav-list">${items.map(st => `
+function favStopsHtml(rows) {
+    return `<div class="fav-list">${rows.map(st => `
       <div class="fav-row">
         <span class="fav-star">★</span>
         <div class="fav-main">
@@ -447,10 +578,6 @@ async function loadStats() {
 // refreshes immediately rather than waiting for the next tick.
 const REFRESH_MS = 30000;
 
-function applyFilter() {
-    filterTable(document.getElementById('searchInput').value);
-}
-
 function stampRefresh(ok) {
     const el = document.getElementById('refreshStamp');
     if (!el) return;
@@ -488,17 +615,109 @@ document.addEventListener('visibilitychange', () => {
         refreshAll({ silent: true });
 });
 
-function filterTable(q) {
-    const role = document.getElementById('roleFilter').value;
-    const f = users.filter(u => {
+// ── Filtering & sorting ──
+// All client-side: the registry is already in memory, so re-querying the server
+// on every keystroke would buy nothing. Every control funnels through
+// applyFilter(), which is also what a background refresh calls — that is what
+// keeps a poll from resetting the operator's view.
+
+/** Start of the given day, local time. Empty input → no bound. */
+function dayStart(value) {
+    if (!value) return null;
+    const [y, m, d] = value.split('-').map(Number);
+    return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+/** End of the given day, local time, so a single-day window is not empty. */
+function dayEnd(value) {
+    if (!value) return null;
+    const [y, m, d] = value.split('-').map(Number);
+    return new Date(y, m - 1, d, 23, 59, 59, 999);
+}
+
+const SORTERS = {
+    'id-asc':          (a, b) => a.id - b.id,
+    'id-desc':         (a, b) => b.id - a.id,
+    // Locale-aware so accents and case do not scatter the alphabet
+    'name-asc':        (a, b) => (a.name || '').localeCompare(b.name || '', 'it', { sensitivity: 'base' }),
+    'name-desc':       (a, b) => (b.name || '').localeCompare(a.name || '', 'it', { sensitivity: 'base' }),
+    'registered-desc': (a, b) => byDateDesc(a.registeredAt, b.registeredAt),
+    'registered-asc':  (a, b) => byDateAsc(a.registeredAt,  b.registeredAt),
+    'login-desc':      (a, b) => byDateDesc(a.lastLoginAt,  b.lastLoginAt),
+    'login-asc':       (a, b) => byDateAsc(a.lastLoginAt,   b.lastLoginAt)
+};
+
+// Missing dates sort last in BOTH directions — "never logged in" belongs at the
+// bottom of the list, not at the top of the ascending one. That rules out
+// flipping the arguments of a single comparator, which would carry the nulls
+// along with the reversal.
+function byDateDesc(x, y) {
+    const dx = toDate(x), dy = toDate(y);
+    if (!dx && !dy) return 0;
+    if (!dx) return 1;
+    if (!dy) return -1;
+    return dy - dx;
+}
+
+function byDateAsc(x, y) {
+    const dx = toDate(x), dy = toDate(y);
+    if (!dx && !dy) return 0;
+    if (!dx) return 1;
+    if (!dy) return -1;
+    return dx - dy;
+}
+
+function applyFilter() {
+    const q     = document.getElementById('searchInput').value.trim().toLowerCase();
+    const role  = document.getElementById('roleFilter').value;
+    const sort  = document.getElementById('sortSelect').value;
+    const fromV = document.getElementById('fromDate').value;
+    const toV   = document.getElementById('toDate').value;
+
+    const from = dayStart(fromV);
+    const to   = dayEnd(toV);
+
+    // Cyan border marks a bound that is actually narrowing the list
+    document.getElementById('fromDate').classList.toggle('set', !!fromV);
+    document.getElementById('toDate').classList.toggle('set', !!toV);
+
+    const rows = users.filter(u => {
         const matchText = !q ||
-            u.name.toLowerCase().includes(q.toLowerCase()) ||
-            u.email.toLowerCase().includes(q.toLowerCase()) ||
+            (u.name  || '').toLowerCase().includes(q) ||
+            (u.email || '').toLowerCase().includes(q) ||
             String(u.id).includes(q);
-        const matchRole = !role || u.role === role;
-        return matchText && matchRole;
+        if (!matchText) return false;
+
+        if (role && u.role !== role) return false;
+
+        if (from || to) {
+            const reg = toDate(u.registeredAt);
+            // An account with no registration date cannot satisfy a window
+            if (!reg) return false;
+            if (from && reg < from) return false;
+            if (to   && reg > to)   return false;
+        }
+        return true;
     });
-    renderTable(f);
+
+    rows.sort(SORTERS[sort] || SORTERS['id-asc']);
+    renderTable(rows);
+
+    const count = document.getElementById('filterCount');
+    count.textContent = rows.length === users.length
+        ? `${users.length} user${users.length === 1 ? '' : 's'}`
+        : `${rows.length} of ${users.length}`;
+    count.style.color = rows.length === users.length
+        ? 'var(--text-secondary)' : 'var(--accent-cyan)';
+}
+
+function clearFilters() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('roleFilter').value  = '';
+    document.getElementById('sortSelect').value  = 'id-asc';
+    document.getElementById('fromDate').value    = '';
+    document.getElementById('toDate').value      = '';
+    applyFilter();
 }
 let _pendingDeleteId = null;
 
@@ -740,20 +959,12 @@ function updateKpis(kpis, range) {
 function updateModeChart(dist) {
     if (!dist || Object.keys(dist).length === 0) return;
 
-    const colorMap = {
-        BUS:'#00cfff', BIKE:'#00e5a0',
-        SCOOTER:'#3a8eff', WALK:'#7a90a8', TRAIN:'#a855f7'
-    };
-    const labelMap = {
-        BUS:'Bus', BIKE:'Shared Bike',
-        SCOOTER:'E-Scooter', WALK:'Walking', TRAIN:'Train'
-    };
-
-    const total = Object.values(dist).reduce((a,b) => a + Number(b), 0) || 1;
-    const entries = Object.entries(dist).sort((a,b) => b[1]-a[1]);
-    const labels  = entries.map(([k]) => labelMap[k] || k);
-    const values  = entries.map(([,v]) => Number(v));
-    const colors  = entries.map(([k]) => colorMap[k] || '#7a90a8');
+    const folded  = foldModeCounts(dist);
+    const total   = Object.values(folded).reduce((a,b) => a + b, 0) || 1;
+    const entries = Object.entries(folded).sort((a,b) => b[1]-a[1]);
+    const labels  = entries.map(([k]) => modeName(k));
+    const values  = entries.map(([,v]) => v);
+    const colors  = entries.map(([k]) => modeColor(k));
     const pcts    = values.map(v => Math.round(v/total*100));
 
     if (modeChart) modeChart.destroy();
@@ -788,18 +999,11 @@ let hourChart = null;
 function updateModeByHourChart(modeByHour) {
     if (!modeByHour) return;
 
-    const colorMap = {
-        BUS:'#00cfff', BIKE:'#00e5a0', SCOOTER:'#3a8eff', WALK:'#7a90a8'
-    };
-    const labelMap = {
-        BUS:'Bus', BIKE:'Shared Bike', SCOOTER:'E-Scooter', WALK:'Walking'
-    };
-
     const labels = Array.from({length:24}, (_,i) => `${i}h`);
-    const datasets = Object.entries(modeByHour).map(([mode, hours]) => ({
-        label: labelMap[mode] || mode,
-        data: Array.from(hours),
-        backgroundColor: colorMap[mode] || '#7a90a8',
+    const datasets = Object.entries(foldModeHours(modeByHour)).map(([mode, hours]) => ({
+        label: modeName(mode),
+        data: hours,
+        backgroundColor: modeColor(mode),
         stack: 'modes'
     }));
 
