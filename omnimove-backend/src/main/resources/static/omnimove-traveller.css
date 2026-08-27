@@ -750,6 +750,7 @@ body {
 .ri-bike   { background: #d1fae5; }
 .ri-scooter{ background: #ede9fe; }
 .ri-walk   { background: #fef9c3; }
+.ri-combined { background: #e0e7ff; }   /* viaggi multimodali */
 
 .route-hist-info { flex: 1; min-width: 0; }
 .route-hist-name { font-size: 13px; font-weight: 700; color: var(--text-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

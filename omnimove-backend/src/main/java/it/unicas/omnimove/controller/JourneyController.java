@@ -228,6 +228,28 @@ public class JourneyController {
         return ResponseEntity.ok(out);
     }
 
+    private static final java.util.Set<String> SIMPLE_MODES =
+            java.util.Set.of("BUS", "WALK", "BIKE", "SCOOTER");
+
+    /**
+     * A combined journey arrives as its pieces joined by underscores — BUS_BIKE,
+     * SCOOTER_BUS — so every piece has to be a mode we know. Checking the whole
+     * string against a fixed list rejected exactly the trips the planner had just
+     * worked hardest to find: the traveller pressed Start Journey, the server
+     * answered 400, and the eco score and the route history never moved.
+     */
+    private static boolean isKnownMode(String mode) {
+        if (mode == null || mode.isBlank()) return false;
+        // A string of nothing but separators splits into no parts at all, and a
+        // loop over nothing would report it valid.
+        String[] parts = mode.toUpperCase().split("_");
+        if (parts.length == 0) return false;
+        for (String part : parts) {
+            if (!SIMPLE_MODES.contains(part)) return false;
+        }
+        return true;
+    }
+
     @PostMapping("/select")
     @Operation(summary = "Record a journey mode selection")
     public ResponseEntity<?> select(
@@ -244,7 +266,7 @@ public class JourneyController {
         String originName = (String) body.get("origin_name");
         String destName   = (String) body.get("dest_name");
 
-        if (mode == null || !java.util.Set.of("BUS", "WALK", "BIKE", "SCOOTER").contains(mode.toUpperCase()))
+        if (!isKnownMode(mode))
             return ResponseEntity.badRequest().body(Map.of("message", "Invalid transport mode"));
 
         double distanceKm = body.get("distance_km") != null ? ((Number) body.get("distance_km")).doubleValue() : 0.0;

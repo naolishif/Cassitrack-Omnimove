@@ -63,17 +63,40 @@ public class GreenIndexService {
      * @param distanceKm    Distance in kilometres
      * @return              CO₂ in grams
      */
+    /**
+     * The Green Index of a journey whose emissions are already known.
+     *
+     * <p>A combined trip cannot be scored by mode: its bus kilometres pollute and
+     * its bike or scooter kilometres do not, and only the itinerary knows the
+     * split. Scoring it by the bus leg alone left the clean kilometres out of the
+     * denominator and made the journey look dirtier than it was.
+     */
+    public int greenIndexFor(double co2Grams, double distanceKm) {
+        double maxCo2 = CO2_CAR * distanceKm;
+        if (maxCo2 <= 0) return 100;
+        double index = 100.0 - (co2Grams / maxCo2 * 100.0);
+        return (int) Math.max(0, Math.min(100, index));
+    }
+
     public double computeCo2Grams(
             String mode, double distanceKm) {
 
-        double factor = switch (mode.toUpperCase()) {
-            case "WALK"    -> CO2_WALK;
-            case "BIKE"    -> CO2_BIKE;
-            case "BUS"     -> CO2_BUS;
-            case "SCOOTER" -> CO2_SCOOTER;
-            case "CAR"     -> CO2_CAR;
-            default        -> CO2_BUS;
-        };
+        // A combined journey arrives as BUS_BIKE or SCOOTER_BUS, and how its
+        // kilometres split between the pieces does not travel with the request.
+        // It is scored on its most polluting leg: crediting the greener half of a
+        // chain we cannot measure would let a bus ride dressed as a combination
+        // outscore the same bus ride taken plainly.
+        double factor = 0;
+        for (String part : mode.toUpperCase().split("_")) {
+            factor = Math.max(factor, switch (part) {
+                case "WALK"    -> CO2_WALK;
+                case "BIKE"    -> CO2_BIKE;
+                case "BUS"     -> CO2_BUS;
+                case "SCOOTER" -> CO2_SCOOTER;
+                case "CAR"     -> CO2_CAR;
+                default        -> CO2_BUS;
+            });
+        }
 
         return factor * distanceKm;
     }

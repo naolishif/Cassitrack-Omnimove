@@ -245,6 +245,9 @@ const OMNI_T = {
     // Route cards
     // Mode labels on route cards (opt.mode → display name)
     mode_bus:'Bus', mode_bike:'Bike', mode_scooter:'Scooter', mode_walk:'Walking',
+    mode_bus_bike:'Combined', mode_bus_scooter:'Combined',
+    mode_bike_bus:'Combined', mode_scooter_bus:'Combined',
+    mode_bus_bike_bus:'Combined', mode_bus_scooter_bus:'Combined',
     metric_cost:'Cost', metric_green:'Green',
     badge_available:'✓ Available',
     btn_start_journey:'Start Journey',
@@ -545,6 +548,9 @@ const OMNI_T = {
     // Route cards
     // Mode labels
     mode_bus:'Bus', mode_bike:'Bici', mode_scooter:'Monopattino', mode_walk:'A piedi',
+    mode_bus_bike:'Combinata', mode_bus_scooter:'Combinata',
+    mode_bike_bus:'Combinata', mode_scooter_bus:'Combinata',
+    mode_bus_bike_bus:'Combinata', mode_bus_scooter_bus:'Combinata',
     metric_cost:'Costo', metric_green:'Eco',
     badge_available:'✓ Disponibile',
     btn_start_journey:'Inizia percorso',

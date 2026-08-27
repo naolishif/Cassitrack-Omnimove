@@ -153,7 +153,13 @@ function timeAgoLabel(dateStr) {
     return { date: label, sub: `${label}, ${hh}:${mm}` };
 }
 
-const MODE_ICON = { BUS: ['ri-bus', '🚌'], BIKE: ['ri-bike', '🚲'], SCOOTER: ['ri-scooter', '🛴'], WALK: ['ri-walk', '🚶'] };
+// Chip icon for a saved trip. Kept in step with MODE_ICONS further down: a
+// combined journey that shows a bus in the history is telling the traveller
+// they took something other than what the card offered them.
+const MODE_ICON = { BUS: ['ri-bus', '🚌'], BIKE: ['ri-bike', '🚲'], SCOOTER: ['ri-scooter', '🛴'], WALK: ['ri-walk', '🚶'],
+                    BUS_BIKE:        ['ri-combined', '🔀'], BUS_SCOOTER:     ['ri-combined', '🔀'],
+                    BIKE_BUS:        ['ri-combined', '🔀'], SCOOTER_BUS:     ['ri-combined', '🔀'],
+                    BUS_BIKE_BUS:    ['ri-combined', '🔀'], BUS_SCOOTER_BUS: ['ri-combined', '🔀'] };
 
 function renderHistory(items) {
     const container = document.getElementById('history-list');
@@ -784,6 +790,17 @@ function setNetworkLinesVisible(visible) {
     Object.values(window._networkLayers).forEach(l => {
         try { visible ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
     });
+    // The parked vehicles and their zones belong to the same background as the
+    // lines: once a journey owns the map they are scenery on top of the very
+    // legs the traveller is reading. Removing them once was not enough — the
+    // 60-second poll drew them straight back — so the flag gates the redraw too.
+    (window._bikeMarkers || []).forEach(l => {
+        const keep = !visible && l._bikeId && l._bikeId === window._keepBikeId;
+        try { (visible || keep) ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
+    });
+    (window._bikeZoneLayers || []).forEach(l => {
+        try { visible ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
+    });
     const legend = document.getElementById('networkLegend');
     if (legend) legend.classList.toggle('network-legend--hidden', !visible);
 }
@@ -891,6 +908,10 @@ function renderBikeMarkers(list) {
     clearBikeMarkers();
     (list || []).forEach(b => {
         if (b.lat == null || b.lon == null) return;
+        // A journey owns the map: the poll keeps the list fresh, but the only pin
+        // worth drawing is the vehicle this journey actually rides. Without it the
+        // traveller is told to walk 400 m to a bike and shown nothing to walk to.
+        if (_networkHidden && b.bike_id !== window._keepBikeId) return;
         const type = b.vehicle_type === 'SCOOTER' ? 'SCOOTER' : 'BIKE';
         if (!_bikeTypeVisible(type)) return;
         const batteryTxt = b.battery_pct != null
@@ -904,8 +925,11 @@ function renderBikeMarkers(list) {
             html: makeBikeMarkerHtml(type),
             className: '', iconSize: [28, 28], iconAnchor: [14, 14]
         });
-        window._bikeMarkers.push(
-            L.marker([b.lat, b.lon], { icon }).addTo(map).bindPopup(popup));
+        const marker = L.marker([b.lat, b.lon], { icon }).addTo(map).bindPopup(popup);
+        // Which vehicle this pin is: the one a chosen journey rides stays on the
+        // map when the rest of the layer is put away.
+        marker._bikeId = b.bike_id;
+        window._bikeMarkers.push(marker);
     });
 }
 
@@ -1680,9 +1704,11 @@ async function doSearch() {
 
 // ── Route rendering ───────────────────────────────────────────────
 const MODE_ICONS = { BUS:'🚌', BIKE:'🚲', SCOOTER:'🛴', WALK:'🚶',
-                     // Combined trips: the glyph shows what starts the journey
-                     BUS_BIKE:'🚌', BUS_SCOOTER:'🚌', BIKE_BUS:'🚲', SCOOTER_BUS:'🛴',
-                     BUS_BIKE_BUS:'🚌', BUS_SCOOTER_BUS:'🚌' };
+                     // Combined trips get their own glyph rather than the one of
+                     // whichever mode happens to start: the point of the card is
+                     // that it mixes them, and a lone bus icon hid exactly that.
+                     BUS_BIKE:'🔀', BUS_SCOOTER:'🔀', BIKE_BUS:'🔀', SCOOTER_BUS:'🔀',
+                     BUS_BIKE_BUS:'🔀', BUS_SCOOTER_BUS:'🔀' };
 const MODE_BTNS  = {
     BUS:     { labelKey:'btn_bus',     cls:'btn-dark'   },
     BIKE:    { labelKey:'btn_bike',    cls:'btn-blue'   },
@@ -1840,7 +1866,7 @@ function showRoutePreview(mode, legs) {
     const dest   = window._currentDest;
     if (!origin || !dest) return;
 
-    // Hide all generic stop markers — we'll show only relevant ones for BUS
+    // Hide the generic stop markers — only the ones this journey uses come back.
     (window._stopMarkers || []).forEach(m => map.removeLayer(m));
     // …and the base network too, so the journey legs are the only lines drawn
     setNetworkLinesVisible(false);
@@ -1980,6 +2006,11 @@ function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
     const card = document.getElementById('card-' + mode);
     if (card) { card.style.border = '2px solid var(--primary)'; card.style.opacity = '1'; }
 
+    // The vehicle this journey rides, if any: showRoutePreview puts the rest of
+    // the Elerent layer away, and this is the one pin that has to survive — the
+    // itinerary sends the traveller walking to it.
+    window._keepBikeId = window._routeOptions?.[mode]?.bike_id || null;
+
     // Show dashed preview on map immediately
     showRoutePreview(mode, selectedJourney.legs || []);
 
@@ -2060,6 +2091,7 @@ function clearJourneySelection() {
     }
 
     // Restore bus-stop markers and the base network underneath them
+    window._keepBikeId = null;
     if (window._stopMarkers) window._stopMarkers.forEach(m => m.addTo(map));
     setNetworkLinesVisible(true);
 
@@ -2523,7 +2555,7 @@ async function startJourney() {
                   <div style="width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,#10b981,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${modeEmoji}</div>
                   <div style="flex:1;min-width:0">
                     <div style="font-size:10px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:0.5px">${t('journey_in_progress')}</div>
-                    <div style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isBusMode ? fmtRouteLabel(label) : label}</div>
+                    <div style="font-size:14px;font-weight:700;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${/ → | \+ /.test(label || '') ? fmtRouteLabel(label) : label}</div>
                   </div>
                   <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:20px;padding:6px 14px;text-align:center;flex-shrink:0">
                     <div style="font-size:18px;font-weight:900;color:#059669;line-height:1"><span id="etaCounter">${durationMin}</span></div>

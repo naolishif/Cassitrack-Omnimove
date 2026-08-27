@@ -46,6 +46,32 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     """)
     List<String> findStopsConnectingTo(@Param("dest") String dest);
 
+    /**
+     * Every pair of stops a single run connects, with the quickest ride between
+     * them. One query builds the whole bus layer of the combined search: asking
+     * pair by pair would be hundreds of round trips for a graph that fits in a
+     * few hundred rows.
+     */
+    @Query("""
+    SELECT so.stopId AS origin, sd.stopId AS dest,
+           min(sd.arrivalSeconds - so.arrivalSeconds) AS seconds
+    FROM ScheduledStop so
+         JOIN so.trip t
+         JOIN t.route r,
+         ScheduledStop sd
+    WHERE sd.trip = t
+      AND so.stopSequence < sd.stopSequence
+      AND r.active = true
+    GROUP BY so.stopId, sd.stopId
+    """)
+    List<StopHop> findAllDirectHops();
+
+    interface StopHop {
+        String getOrigin();
+        String getDest();
+        Integer getSeconds();
+    }
+
     // ── Linea diretta origine → dest ───────────────────────────────
     @Query("""
     SELECT r.shortName AS shortName, r.longName AS longName,
