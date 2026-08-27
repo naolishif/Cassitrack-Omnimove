@@ -1679,15 +1679,27 @@ async function doSearch() {
 }
 
 // ── Route rendering ───────────────────────────────────────────────
-const MODE_ICONS = { BUS:'🚌', BIKE:'🚲', SCOOTER:'🛴', WALK:'🚶' };
+const MODE_ICONS = { BUS:'🚌', BIKE:'🚲', SCOOTER:'🛴', WALK:'🚶',
+                     // Combined trips: the glyph shows what starts the journey
+                     BUS_BIKE:'🚌', BUS_SCOOTER:'🚌', BIKE_BUS:'🚲', SCOOTER_BUS:'🛴',
+                     BUS_BIKE_BUS:'🚌', BUS_SCOOTER_BUS:'🚌' };
 const MODE_BTNS  = {
     BUS:     { labelKey:'btn_bus',     cls:'btn-dark'   },
     BIKE:    { labelKey:'btn_bike',    cls:'btn-blue'   },
     SCOOTER: { labelKey:'btn_scooter', cls:'btn-purple' },
     WALK:    { labelKey:'btn_walk',    cls:'btn-green'  },
+    BUS_BIKE:    { labelKey:'btn_bus_bike',    cls:'btn-blue'   },
+    BUS_SCOOTER: { labelKey:'btn_bus_scooter', cls:'btn-purple' },
+    BIKE_BUS:    { labelKey:'btn_bike_bus',    cls:'btn-blue'   },
+    SCOOTER_BUS: { labelKey:'btn_scooter_bus', cls:'btn-purple' },
+    BUS_BIKE_BUS:    { labelKey:'btn_bus_bike_bus',    cls:'btn-blue'   },
+    BUS_SCOOTER_BUS: { labelKey:'btn_bus_scooter_bus', cls:'btn-purple' },
 };
 
-const LINE_COLORS     = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#6366f1' };
+const LINE_COLORS     = { BUS:'#0f172a', BIKE:'#3b82f6', SCOOTER:'#7c3aed', WALK:'#6366f1',
+                          BUS_BIKE:'#3b82f6', BUS_SCOOTER:'#7c3aed',
+                          BIKE_BUS:'#3b82f6', SCOOTER_BUS:'#7c3aed',
+                          BUS_BIKE_BUS:'#3b82f6', BUS_SCOOTER_BUS:'#7c3aed' };
 
 /**
  * Walking used to be a thin grey dashed line: grey ink on the grey streets of
@@ -2496,7 +2508,7 @@ async function startJourney() {
         // 10) Pannello "in progress"
         const durationMin = selectedJourney.durationMinutes
             || Math.ceil(distanceKm / (mode==='WALK'?5:mode==='BIKE'?15:mode==='SCOOTER'?20:25) * 60);
-        const modeEmoji = MODE_ICONS[mode];
+        const modeEmoji = MODE_ICONS[mode] || '🚗';
         const isBusMode  = mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0;
         const isMultiLeg = isBusMode || (selectedJourney.legs && selectedJourney.legs.length > 1);
         const timelineHtml = isMultiLeg

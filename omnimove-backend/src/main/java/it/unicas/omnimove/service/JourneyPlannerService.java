@@ -117,7 +117,14 @@ public class JourneyPlannerService {
             }
         }
 
-        boolean busDeferred = preferBike && modes.contains("BIKE") && modes.contains("BUS");
+        // Whether the traveller asked for the bus at all, remembered before the
+        // preference below prunes the list. The combined options are built from
+        // this rather than from `modes`: deferring the *plain* bus is the point of
+        // preferBikeOverBus, but a mixed bus-and-vehicle trip is precisely what
+        // that traveller wants, and reading the pruned list hid it from them.
+        boolean busRequested = modes.contains("BUS");
+
+        boolean busDeferred = preferBike && modes.contains("BIKE") && busRequested;
         if (busDeferred) modes.remove("BUS");
 
         List<JourneyOption> options = new ArrayList<>();
@@ -147,6 +154,15 @@ public class JourneyPlannerService {
                 }
             }
         }
+        // Always try to put one genuinely multimodal proposal on the table: bus
+        // plus a shared vehicle, in whichever order this particular trip allows.
+        if (busRequested && (modes.contains("BIKE") || modes.contains("SCOOTER"))) {
+            JourneyOption combined = planMultiModal(req, weather, maxBikeWalk);
+            if (combined != null) options.add(combined);
+            else log.debug("Nessuna combinazione possibile: entrambi gli estremi sono su una fermata, "
+                    + "oppure non c'e' un mezzo Elerent raggiungibile.");
+        }
+
         if (busDeferred) {
             boolean bikeAvailable = options.stream().anyMatch(o -> "BIKE".equals(o.getMode()));
             if (!bikeAvailable) {
@@ -167,7 +183,7 @@ public class JourneyPlannerService {
 
         options.sort(
                 Comparator.comparingInt((JourneyOption o) ->
-                                raining && !"BUS".equals(o.getMode()) ? 1 : 0)   // bus prima se piove
+                                raining && exposedToRain(o.getMode()) ? 1 : 0)   // bus prima se piove
                         .thenComparingInt(JourneyOption::getDurationMinutes));
 
         boolean onlyBusWhenRaining = true; // default
@@ -177,9 +193,7 @@ public class JourneyPlannerService {
                     .orElse(true);
         }
         if (raining && onlyBusWhenRaining) {
-            options.removeIf(o -> "BIKE".equals(o.getMode())
-                    || "SCOOTER".equals(o.getMode())
-                    || "WALK".equals(o.getMode()));
+            options.removeIf(o -> exposedToRain(o.getMode()));
         }
 
         // Punteggio multi-criterio: si calcola sull'insieme DEFINITIVO delle
@@ -661,6 +675,374 @@ public class JourneyPlannerService {
                 .build();
     }
 
+    /**
+     * The multimodal proposal: at least one option that puts a shared vehicle
+     * and the bus in the same trip, whichever way round suits this journey.
+     *
+     * Four shapes are tried — bike or scooter, before the bus or after it — and
+     * the quickest that holds together is the one offered. Which shapes are even
+     * possible depends on the endpoints: a vehicle can only replace a walk that
+     * exists, so the ride-then-bus shape needs an origin away from the stops,
+     * and the bus-then-ride shape a destination away from them.
+     *
+     * None of the two planners is duplicated here. Both take a JourneyRequest,
+     * so a combined trip is two sub-requests meeting at a stop, with their legs
+     * stitched into one option.
+     */
+    private JourneyOption planMultiModal(JourneyRequest req, WeatherService.WeatherData weather,
+                                         int maxWalkM) {
+        // The two ends' own stops: needed to ask whether a bus even connects the
+        // interchange to the other side. Straight-line, deliberately — this is a
+        // filter, and findNearestStopId() spends Google calls refining a choice
+        // that only has to be roughly right here.
+        String originStop = firstOrNull(nearestStopIds(req.getOriginLat(), req.getOriginLon(), 1));
+        String destStop   = firstOrNull(nearestStopIds(req.getDestLat(),   req.getDestLon(),   1));
+
+        // secondStop non nullo = catena bus → mezzo → bus
+        record Candidate(boolean busFirst, String vehicleMode, String stopId,
+                         double proxyMetres, String secondStop) {}
+        List<Candidate> viable = new ArrayList<>();
+
+        for (String vehicleMode : List.of("BIKE", "SCOOTER")) {
+            if (!hasMode(req, vehicleMode)) continue;
+
+            // Bus first: the interchange sits near the destination
+            if (originStop != null) {
+                for (String stopId : nearestStopIds(req.getDestLat(), req.getDestLon(), INTERCHANGE_CANDIDATES)) {
+                    double sLat = getStopLat(stopId), sLon = getStopLon(stopId);
+                    if (stopId.equals(originStop)) continue;
+                    if (haversineMetres(sLat, sLon, req.getDestLat(), req.getDestLon()) < MIN_VEHICLE_LEG_M) continue;
+                    if (bikeSharingService.findNearest(sLat, sLon, vehicleMode, maxWalkM).isEmpty()) continue;
+                    if (scheduledStopRepository.findLinesConnecting(originStop, stopId).isEmpty()) continue;
+                    viable.add(new Candidate(true, vehicleMode, stopId,
+                            haversineMetres(req.getOriginLat(), req.getOriginLon(), sLat, sLon)
+                          + haversineMetres(sLat, sLon, req.getDestLat(), req.getDestLon()), null));
+                }
+            }
+
+            // Vehicle first: the interchange sits near the origin
+            if (destStop != null
+                    && !bikeSharingService.findNearest(req.getOriginLat(), req.getOriginLon(),
+                                                       vehicleMode, maxWalkM).isEmpty()) {
+                for (String stopId : nearestStopIds(req.getOriginLat(), req.getOriginLon(), INTERCHANGE_CANDIDATES)) {
+                    double sLat = getStopLat(stopId), sLon = getStopLon(stopId);
+                    if (stopId.equals(destStop)) continue;
+                    if (haversineMetres(req.getOriginLat(), req.getOriginLon(), sLat, sLon) < MIN_VEHICLE_LEG_M) continue;
+                    if (scheduledStopRepository.findLinesConnecting(stopId, destStop).isEmpty()) continue;
+                    viable.add(new Candidate(false, vehicleMode, stopId,
+                            haversineMetres(req.getOriginLat(), req.getOriginLon(), sLat, sLon)
+                          + haversineMetres(sLat, sLon, req.getDestLat(), req.getDestLon()), null));
+                }
+            }
+        }
+
+        // Bus → vehicle → bus. Two set queries answer where a bus can take you and
+        // where a bus can finish the trip; everything after that is arithmetic on
+        // the cached fleet, so the pairing costs nothing per candidate.
+        if (originStop != null && destStop != null) {
+            List<String> reachable = scheduledStopRepository.findStopsReachableFrom(originStop);
+            List<String> feeding   = scheduledStopRepository.findStopsConnectingTo(destStop);
+            for (String vehicleMode : List.of("BIKE", "SCOOTER")) {
+                if (!hasMode(req, vehicleMode)) continue;
+                for (String s1 : reachable) {
+                    if (s1.equals(originStop) || s1.equals(destStop)) continue;
+                    double s1Lat = getStopLat(s1), s1Lon = getStopLon(s1);
+                    if (bikeSharingService.findNearest(s1Lat, s1Lon, vehicleMode, maxWalkM).isEmpty()) continue;
+                    for (String s2 : feeding) {
+                        if (s2.equals(s1) || s2.equals(originStop)) continue;
+                        double s2Lat = getStopLat(s2), s2Lon = getStopLon(s2);
+                        double bridge = haversineMetres(s1Lat, s1Lon, s2Lat, s2Lon);
+                        if (bridge < MIN_VEHICLE_LEG_M || bridge > MAX_BRIDGE_M) continue;
+                        viable.add(new Candidate(true, vehicleMode, s1,
+                                haversineMetres(req.getOriginLat(), req.getOriginLon(), s1Lat, s1Lon)
+                              + bridge
+                              + haversineMetres(s2Lat, s2Lon, req.getDestLat(), req.getDestLon()),
+                                s2));
+                    }
+                }
+            }
+        }
+
+        // Only the most direct few are planned for real: each survivor costs a bus
+        // plan plus a couple of Google routes, and the detour proxy separates them
+        // well enough that the rest would not have won anyway.
+        List<JourneyOption> planned = new ArrayList<>();
+        viable.stream()
+                .sorted(Comparator.comparingDouble(Candidate::proxyMetres))
+                .limit(MAX_COMBOS_PLANNED)
+                .forEach(c -> {
+                    try {
+                        JourneyOption o = c.secondStop() != null
+                                ? busVehicleBus(req, weather, maxWalkM, c.vehicleMode(), c.stopId(), c.secondStop())
+                                : c.busFirst()
+                                    ? busThenVehicle(req, weather, maxWalkM, c.vehicleMode(), c.stopId())
+                                    : vehicleThenBus(req, weather, maxWalkM, c.vehicleMode(), c.stopId());
+                        if (o != null) planned.add(o);
+                    } catch (Exception e) {
+                        log.warn("Failed combined option ({} via {}): {}",
+                                c.vehicleMode(), c.stopId(), e.getMessage());
+                    }
+                });
+
+        return planned.stream()
+                .min(Comparator.comparingInt(JourneyOption::getDurationMinutes))
+                .orElse(null);
+    }
+
+    private static String firstOrNull(List<String> l) {
+        return l == null || l.isEmpty() ? null : l.get(0);
+    }
+
+    /** Bus for the long haul, shared vehicle from the alighting stop to the door. */
+    private JourneyOption busThenVehicle(JourneyRequest req, WeatherService.WeatherData weather,
+                                         int maxWalkM, String vehicleMode, String stopId) {
+        if (stopId == null) return null;
+
+        double stopLat = getStopLat(stopId), stopLon = getStopLon(stopId);
+
+        // Nothing to ride if the stop is already on top of the destination
+        if (haversineMetres(stopLat, stopLon, req.getDestLat(), req.getDestLon()) < MIN_VEHICLE_LEG_M) {
+            return null;
+        }
+        if (bikeSharingService.findNearest(stopLat, stopLon, vehicleMode, maxWalkM).isEmpty()) return null;
+
+        JourneyRequest trunk = copyRequest(req);
+        trunk.setDestLat(stopLat);
+        trunk.setDestLon(stopLon);
+        trunk.setDestName(fmtStop(stopId));
+        trunk.setDestStopId(stopId);
+        trunk.setDestIsGps(false);
+
+        JourneyRequest lastMile = copyRequest(req);
+        lastMile.setOriginLat(stopLat);
+        lastMile.setOriginLon(stopLon);
+        lastMile.setOriginName(fmtStop(stopId));
+        lastMile.setOriginStopId(stopId);
+        lastMile.setOriginIsGps(false);
+
+        List<String> quiet = new ArrayList<>();
+        JourneyOption bus  = planBus(trunk, quiet, weather);
+        if (bus == null) return null;
+        JourneyOption ride = rideOption(lastMile, quiet, weather, maxWalkM, vehicleMode);
+        if (ride == null) return null;
+
+        return stitch(req, weather, vehicleMode, List.of(bus, ride), "BUS_" + vehicleMode,
+                bus.getModeLabel() + " + " + ride.getModeLabel(),
+                (req.isItalian() ? "Bus fino a " : "Bus to ") + fmtStop(stopId)
+                        + (req.isItalian() ? ", poi " : ", then ") + vehicleWord(req, vehicleMode),
+                busEmoji(vehicleMode, true));
+    }
+
+    /** Shared vehicle to the boarding stop, bus for the long haul. */
+    private JourneyOption vehicleThenBus(JourneyRequest req, WeatherService.WeatherData weather,
+                                         int maxWalkM, String vehicleMode, String stopId) {
+        if (stopId == null) return null;
+
+        double stopLat = getStopLat(stopId), stopLon = getStopLon(stopId);
+
+        // Nothing to ride if you are already standing at the stop
+        if (haversineMetres(req.getOriginLat(), req.getOriginLon(), stopLat, stopLon) < MIN_VEHICLE_LEG_M) {
+            return null;
+        }
+        if (bikeSharingService.findNearest(req.getOriginLat(), req.getOriginLon(), vehicleMode, maxWalkM).isEmpty()) {
+            return null;
+        }
+
+        JourneyRequest firstMile = copyRequest(req);
+        firstMile.setDestLat(stopLat);
+        firstMile.setDestLon(stopLon);
+        firstMile.setDestName(fmtStop(stopId));
+        firstMile.setDestStopId(stopId);
+        firstMile.setDestIsGps(false);
+
+        JourneyRequest trunk = copyRequest(req);
+        trunk.setOriginLat(stopLat);
+        trunk.setOriginLon(stopLon);
+        trunk.setOriginName(fmtStop(stopId));
+        trunk.setOriginStopId(stopId);
+        trunk.setOriginIsGps(false);
+
+        List<String> quiet = new ArrayList<>();
+        JourneyOption ride = rideOption(firstMile, quiet, weather, maxWalkM, vehicleMode);
+        if (ride == null) return null;
+        JourneyOption bus = planBus(trunk, quiet, weather);
+        if (bus == null) return null;
+
+        return stitch(req, weather, vehicleMode, List.of(ride, bus), vehicleMode + "_BUS",
+                ride.getModeLabel() + " + " + bus.getModeLabel(),
+                capitalise(vehicleWord(req, vehicleMode))
+                        + (req.isItalian() ? " fino a " : " to ") + fmtStop(stopId)
+                        + (req.isItalian() ? ", poi bus" : ", then bus"),
+                busEmoji(vehicleMode, false));
+    }
+
+    /**
+     * Bus, shared vehicle, bus again: the vehicle bridges two stops that no line
+     * joins, or joins badly. This is the shape that makes the trip properly
+     * multimodal rather than merely two-legged — get off where a vehicle is
+     * waiting, ride across the gap, board again on a corridor that actually goes
+     * where you are going, and leave the vehicle at that stop.
+     */
+    private JourneyOption busVehicleBus(JourneyRequest req, WeatherService.WeatherData weather,
+                                        int maxWalkM, String vehicleMode,
+                                        String stop1, String stop2) {
+        if (stop1 == null || stop2 == null || stop1.equals(stop2)) return null;
+
+        double s1Lat = getStopLat(stop1), s1Lon = getStopLon(stop1);
+        double s2Lat = getStopLat(stop2), s2Lon = getStopLon(stop2);
+        if (haversineMetres(s1Lat, s1Lon, s2Lat, s2Lon) < MIN_VEHICLE_LEG_M) return null;
+
+        JourneyRequest first = copyRequest(req);
+        first.setDestLat(s1Lat); first.setDestLon(s1Lon);
+        first.setDestName(fmtStop(stop1)); first.setDestStopId(stop1); first.setDestIsGps(false);
+
+        JourneyRequest middle = copyRequest(req);
+        middle.setOriginLat(s1Lat); middle.setOriginLon(s1Lon);
+        middle.setOriginName(fmtStop(stop1)); middle.setOriginStopId(stop1); middle.setOriginIsGps(false);
+        middle.setDestLat(s2Lat); middle.setDestLon(s2Lon);
+        middle.setDestName(fmtStop(stop2)); middle.setDestStopId(stop2); middle.setDestIsGps(false);
+
+        JourneyRequest last = copyRequest(req);
+        last.setOriginLat(s2Lat); last.setOriginLon(s2Lon);
+        last.setOriginName(fmtStop(stop2)); last.setOriginStopId(stop2); last.setOriginIsGps(false);
+
+        List<String> quiet = new ArrayList<>();
+        JourneyOption busA = planBus(first, quiet, weather);
+        if (busA == null) return null;
+        JourneyOption ride = rideOption(middle, quiet, weather, maxWalkM, vehicleMode);
+        if (ride == null) return null;
+        JourneyOption busB = planBus(last, quiet, weather);
+        if (busB == null) return null;
+
+        return stitch(req, weather, vehicleMode, List.of(busA, ride, busB),
+                "BUS_" + vehicleMode + "_BUS",
+                busA.getModeLabel() + " + " + ride.getModeLabel() + " + " + busB.getModeLabel(),
+                (req.isItalian() ? "Bus, " : "Bus, ") + vehicleWord(req, vehicleMode)
+                        + (req.isItalian() ? " da " : " from ") + fmtStop(stop1)
+                        + (req.isItalian() ? " a " : " to ") + fmtStop(stop2)
+                        + (req.isItalian() ? ", poi bus" : ", then bus"),
+                "🚌+" + ("SCOOTER".equalsIgnoreCase(vehicleMode) ? "🛴" : "🚲") + "+🚌");
+    }
+
+    private JourneyOption rideOption(JourneyRequest req, List<String> msgs,
+                                     WeatherService.WeatherData weather, int maxWalkM, String vehicleMode) {
+        return "SCOOTER".equalsIgnoreCase(vehicleMode)
+                ? planScooter(req, msgs, weather, maxWalkM)
+                : planBike(req, msgs, weather, maxWalkM);
+    }
+
+    /** Two sub-plans, in travel order, welded into the option the traveller sees. */
+    private JourneyOption stitch(JourneyRequest req, WeatherService.WeatherData weather,
+                                 String vehicleMode, List<JourneyOption> chain,
+                                 String mode, String modeLabel, String summaryText, String emoji) {
+        List<JourneyLeg> legs = new ArrayList<>();
+        int totalMin = 0;
+        double totalM = 0, rawCost = 0;
+        for (JourneyOption seg : chain) {
+            legs.addAll(seg.getLegs());
+            totalMin += seg.getDurationMinutes();
+            totalM   += nz(seg.getDistanceMetres());
+            rawCost  += nz(seg.getCostEuros());
+        }
+        double cost = Math.round(rawCost * 100) / 100.0;
+
+        // The bus segments carry the delay and the emissions; the vehicle carries
+        // the Elerent details. With two bus rides the first one owns the delay:
+        // it is the one the traveller is about to catch.
+        JourneyOption bus  = chain.stream().filter(o -> "BUS".equals(o.getMode())).findFirst().orElse(chain.get(0));
+        JourneyOption ride = chain.stream().filter(o -> !"BUS".equals(o.getMode())).findFirst().orElse(chain.get(0));
+
+        return JourneyOption.builder()
+                .mode(mode).modeLabel(modeLabel)
+                .durationMinutes(totalMin).distanceMetres(totalM)
+                .costEuros(cost)
+                // The bus is the only emitting part; the shared vehicle adds none.
+                .greenIndex(bus.getGreenIndex())
+                .co2Grams(chain.stream().mapToDouble(o -> nz(o.getCo2Grams())).sum())
+                .etaMinutes(totalMin)
+                .summary(emoji + " " + summaryText
+                        + " — " + totalMin + " min (~€" + String.format("%.2f", cost) + ")")
+                .weatherWarning(ride.getWeatherWarning() != null ? ride.getWeatherWarning() : bus.getWeatherWarning())
+                .weatherSuggestion(weather.suggestion)
+                .delayMinutes(bus.getDelayMinutes()).delayStatus(bus.getDelayStatus())
+                .delayRealTime(bus.getDelayRealTime()).delayAtStop(bus.getDelayAtStop())
+                .delayLabel(bus.getDelayLabel())
+                .bikeId(ride.getBikeId()).bikePlate(ride.getBikePlate())
+                .bikeBatteryPct(ride.getBikeBatteryPct()).bikeWalkMetres(ride.getBikeWalkMetres())
+                .bikeWarning(ride.getBikeWarning())
+                .legs(legs)
+                .build();
+    }
+
+    private static String vehicleWord(JourneyRequest req, String vehicleMode) {
+        boolean scooter = "SCOOTER".equalsIgnoreCase(vehicleMode);
+        return req.isItalian() ? (scooter ? "monopattino" : "bici") : (scooter ? "e-scooter" : "bike");
+    }
+
+    private static String busEmoji(String vehicleMode, boolean busFirst) {
+        String v = "SCOOTER".equalsIgnoreCase(vehicleMode) ? "🛴" : "🚲";
+        return busFirst ? "🚌+" + v : v + "+🚌";
+    }
+
+    private static String capitalise(String s) {
+        return s == null || s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    /**
+     * Modes that leave the traveller in the weather. Matching on substrings is
+     * deliberate: BUS_BIKE and BUS_SCOOTER_BUS still mean pedalling, and an exact
+     * name check let the combined options slip past the rain filter — the app
+     * offered a bike in a downpour to the very people who had asked for bus only.
+     */
+    private static boolean exposedToRain(String mode) {
+        if (mode == null) return false;
+        String m = mode.toUpperCase();
+        return m.contains("BIKE") || m.contains("SCOOTER") || m.equals("WALK");
+    }
+
+    private static boolean hasMode(JourneyRequest req, String mode) {
+        return req.getModes() == null || req.getModes().isEmpty()
+                || req.getModes().stream().anyMatch(m -> m.equalsIgnoreCase(mode));
+    }
+
+    /**
+     * A vehicle leg shorter than this is not a combination, it is a rounding
+     * error: the stop was already at the door, and the card would just repeat
+     * the plain bus option with an unlock fee attached.
+     */
+    private static final double MIN_VEHICLE_LEG_M = 300;
+
+    /**
+     * How many nearby stops are considered as interchange points. Three keeps the
+     * search cheap while allowing the vehicle to reach past the closest stop when
+     * the closest one is poorly served.
+     */
+    private static final int INTERCHANGE_CANDIDATES = 5;
+
+    /** Survivors of the cheap filter that get a full plan, most direct first. */
+    private static final int MAX_COMBOS_PLANNED = 3;
+
+    /** Past this, the vehicle is doing the bus's job and the chain stops being sensible. */
+    private static final double MAX_BRIDGE_M = 4000;
+
+    private static double nz(Double v) { return v != null ? v : 0.0; }
+
+    /** Shallow copy, so a sub-plan can move the endpoints without touching the caller's request. */
+    private static JourneyRequest copyRequest(JourneyRequest r) {
+        JourneyRequest c = new JourneyRequest();
+        c.setOriginLat(r.getOriginLat());   c.setOriginLon(r.getOriginLon());
+        c.setOriginName(r.getOriginName()); c.setOriginIsGps(r.getOriginIsGps());
+        c.setOriginStopId(r.getOriginStopId());
+        c.setDestLat(r.getDestLat());       c.setDestLon(r.getDestLon());
+        c.setDestName(r.getDestName());     c.setDestIsGps(r.getDestIsGps());
+        c.setDestStopId(r.getDestStopId());
+        c.setUserId(r.getUserId());         c.setLang(r.getLang());
+        c.setDepartureTime(r.getDepartureTime());
+        c.setArriveBy(r.getArriveBy());
+        c.setModes(r.getModes());
+        return c;
+    }
+
     private JourneyOption planWalk(JourneyRequest req, WeatherService.WeatherData weather) {
         var r = googleMapsService.getRoute(req.getOriginLat(), req.getOriginLon(),
                                            req.getDestLat(),   req.getDestLon(), "walking");
@@ -774,6 +1156,28 @@ public class JourneyPlannerService {
         return d.realTime()
                 ? "Bus currently " + base
                 : "Bus was " + base + " at " + d.atStop();
+    }
+
+    /**
+     * The k stops closest to a point, nearest first, by straight line.
+     *
+     * The combined planner needs more than the single closest stop: riding to a
+     * slightly farther stop that a faster line serves is exactly the kind of
+     * trade a multimodal trip exists to make.
+     */
+    private List<String> nearestStopIds(double lat, double lon, int k) {
+        record Candidate(String id, double dist) {}
+        List<Candidate> candidates = new ArrayList<>();
+        for (it.unicas.omnimove.model.Stop stop : stopRepository.findAll()) {
+            if (stop.getLat() == null || stop.getLon() == null) continue;
+            candidates.add(new Candidate(stop.getId(),
+                    haversineMetres(lat, lon, stop.getLat(), stop.getLon())));
+        }
+        return candidates.stream()
+                .sorted(Comparator.comparingDouble(Candidate::dist))
+                .limit(k)
+                .map(Candidate::id)
+                .toList();
     }
 
     private String findNearestStopId(double lat, double lon) {

@@ -13,6 +13,39 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
 
     List<ScheduledStop> findByTripId(String tripId);
 
+    /**
+     * Every stop a bus can carry you to, leaving from `origin`. One query instead
+     * of asking pair by pair: the combined planner needs the whole reachable set
+     * to pick an interchange, and forty round trips to answer that would cost more
+     * than the plan itself.
+     */
+    @Query("""
+    SELECT DISTINCT sd.stopId
+    FROM ScheduledStop so
+         JOIN so.trip t
+         JOIN t.route r,
+         ScheduledStop sd
+    WHERE sd.trip = t
+      AND so.stopId = :origin
+      AND so.stopSequence < sd.stopSequence
+      AND r.active = true
+    """)
+    List<String> findStopsReachableFrom(@Param("origin") String origin);
+
+    /** The mirror image: every stop from which a bus reaches `dest`. */
+    @Query("""
+    SELECT DISTINCT so.stopId
+    FROM ScheduledStop so
+         JOIN so.trip t
+         JOIN t.route r,
+         ScheduledStop sd
+    WHERE sd.trip = t
+      AND sd.stopId = :dest
+      AND so.stopSequence < sd.stopSequence
+      AND r.active = true
+    """)
+    List<String> findStopsConnectingTo(@Param("dest") String dest);
+
     // ── Linea diretta origine → dest ───────────────────────────────
     @Query("""
     SELECT r.shortName AS shortName, r.longName AS longName,

@@ -98,6 +98,9 @@ const OMNI_T = {
     chip_bus:'🚌 Bus', chip_bike:'🚲 Bike', chip_scooter:'🛴 Scooter',
     btn_bus:'Select Bus', btn_bike:'Select Bike',
     btn_scooter:'Select Scooter', btn_walk:'Start Walking',
+    btn_bus_bike:'Select Bus + Bike', btn_bus_scooter:'Select Bus + Scooter',
+    btn_bike_bus:'Select Bike + Bus', btn_scooter_bus:'Select Scooter + Bus',
+    btn_bus_bike_bus:'Select Bus + Bike + Bus', btn_bus_scooter_bus:'Select Bus + Scooter + Bus',
     // Profile tabs
     ptab_history:'Last Routes', ptab_favourites:'Favourites',
     ptab_payment:'Payment', ptab_settings:'Preferences', ptab_account:'Account',
@@ -395,6 +398,9 @@ const OMNI_T = {
     chip_bus:'🚌 Bus', chip_bike:'🚲 Bici', chip_scooter:'🛴 Monopattino',
     btn_bus:'Scegli Bus', btn_bike:'Scegli Bici',
     btn_scooter:'Scegli Monopattino', btn_walk:'Inizia a camminare',
+    btn_bus_bike:'Scegli Bus + Bici', btn_bus_scooter:'Scegli Bus + Monopattino',
+    btn_bike_bus:'Scegli Bici + Bus', btn_scooter_bus:'Scegli Monopattino + Bus',
+    btn_bus_bike_bus:'Scegli Bus + Bici + Bus', btn_bus_scooter_bus:'Scegli Bus + Monopattino + Bus',
     // Profile tabs
     ptab_history:'Ultimi percorsi', ptab_favourites:'Preferiti',
     ptab_payment:'Pagamento', ptab_settings:'Preferenze', ptab_account:'Account',
