@@ -64,6 +64,20 @@ public class GreenIndexService {
      * @return              CO₂ in grams
      */
     /**
+     * CO₂ of a journey broken down by mode: each mode's kilometres are charged at
+     * its own factor. This is the only way a combined trip can be scored honestly
+     * — by mode alone the whole distance has to be charged to the dirtiest leg,
+     * which turned a bus-and-scooter journey into a bus journey.
+     */
+    public double computeCo2Grams(java.util.Map<String, Double> kilometresByMode) {
+        double total = 0;
+        for (var e : kilometresByMode.entrySet()) {
+            total += computeCo2Grams(e.getKey(), e.getValue());
+        }
+        return total;
+    }
+
+    /**
      * The Green Index of a journey whose emissions are already known.
      *
      * <p>A combined trip cannot be scored by mode: its bus kilometres pollute and

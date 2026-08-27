@@ -2430,7 +2430,18 @@ async function startJourney() {
                     distance_km: selectedJourney.distanceKm,
                     cost_euros:  selectedJourney.costEuros,
                     origin_name: origin ? origin.name : null,
-                    dest_name:   dest ? dest.name : null
+                    dest_name:   dest ? dest.name : null,
+                    // How the kilometres split between modes. A combined trip cannot
+                    // be scored without it: the server would otherwise have to charge
+                    // every kilometre to the dirtiest leg, and a bus-and-scooter
+                    // journey went into the history as pure bus. Waiting covers no
+                    // ground and is left out.
+                    legs_km: (selectedJourney.legs || []).reduce((acc, l) => {
+                        const m = (l.mode || '').toUpperCase();
+                        if (!m || m === 'WAIT' || m === 'TRANSFER') return acc;
+                        acc[m] = (acc[m] || 0) + (l.distance_metres || 0) / 1000;
+                        return acc;
+                    }, {})
                 })
             });
         } catch (e) { console.warn('Could not record journey event:', e); }

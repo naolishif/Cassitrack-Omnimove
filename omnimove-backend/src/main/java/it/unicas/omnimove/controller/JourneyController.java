@@ -250,6 +250,38 @@ public class JourneyController {
         return true;
     }
 
+    /** Kilometres accepted only within a tenth of the distance already declared. */
+    private static final double SPLIT_TOLERANCE = 0.10;
+
+    /**
+     * The per-mode kilometres, or null when they cannot be trusted to describe the
+     * journey that was declared: a mode the trip never claimed, or a total that
+     * disagrees with the distance. Walking is always allowed — every journey has
+     * some, and it emits nothing either way.
+     */
+    @SuppressWarnings("unchecked")
+    private java.util.Map<String, Double> usableSplit(Object raw, String mode, double distanceKm) {
+        if (!(raw instanceof Map) || ((Map<?, ?>) raw).isEmpty() || distanceKm <= 0) return null;
+
+        java.util.Set<String> declared = new java.util.HashSet<>(
+                java.util.List.of(mode.toUpperCase().split("_")));
+        declared.add("WALK");
+
+        java.util.Map<String, Double> out = new java.util.HashMap<>();
+        double sum = 0;
+        for (var e : ((Map<String, Object>) raw).entrySet()) {
+            String m = e.getKey() == null ? "" : e.getKey().toUpperCase();
+            if (!declared.contains(m)) return null;
+            if (!(e.getValue() instanceof Number n)) return null;
+            double km = n.doubleValue();
+            if (km < 0) return null;
+            out.merge(m, km, Double::sum);
+            sum += km;
+        }
+        if (Math.abs(sum - distanceKm) > distanceKm * SPLIT_TOLERANCE) return null;
+        return out;
+    }
+
     @PostMapping("/select")
     @Operation(summary = "Record a journey mode selection")
     public ResponseEntity<?> select(
@@ -277,9 +309,19 @@ public class JourneyController {
         if (costEuros < 0 || costEuros > 50)
             return ResponseEntity.badRequest().body(Map.of("message", "Cost out of valid range (0–50 €)"));
 
-        // Always compute server-side — never trust the client-supplied green_index
-        int greenIndex  = greenIndexService.computeGreenIndex(mode, distanceKm);
-        double co2Grams = greenIndexService.computeCo2Grams(mode, distanceKm);
+        // Emissions are always computed here, never taken from the client. What the
+        // client may supply is how its kilometres split between modes, because a
+        // combined trip cannot be scored without that: charging every kilometre to
+        // the dirtiest leg recorded a bus-and-scooter journey as pure bus. The
+        // split is used only when it agrees with the mode that was declared and
+        // with the distance that was declared — it can shift kilometres between
+        // the modes of a trip, it cannot invent a trip that was not claimed.
+        java.util.Map<String, Double> split = usableSplit(body.get("legs_km"), mode, distanceKm);
+
+        double co2Grams = split != null
+                ? greenIndexService.computeCo2Grams(split)
+                : greenIndexService.computeCo2Grams(mode, distanceKm);
+        int greenIndex = greenIndexService.greenIndexFor(co2Grams, distanceKm);
 
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
         journeyEventService.recordJourneySearch(
