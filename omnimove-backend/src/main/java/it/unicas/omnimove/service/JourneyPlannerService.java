@@ -1106,7 +1106,7 @@ public class JourneyPlannerService {
     }
 
     /**
-     * A walking stretch: how far, how long, and the shape to draw it with.
+     * A walking stretch: how far how long, and the shape to draw it with.
      *
      * @param points [lat, lon] pairs following the pavement when Google routed
      *               it, or just the two endpoints when it did not — which is
