@@ -5,6 +5,8 @@ import it.unicas.omnimove.dto.*;
 import it.unicas.omnimove.model.User;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.security.JwtUtil;
+import it.unicas.omnimove.service.ActiveSessionService;
+import it.unicas.omnimove.service.LoginHistoryService;
 import it.unicas.omnimove.service.SecurityAuditService;
 import it.unicas.omnimove.service.TokenBlacklistService;
 import it.unicas.omnimove.service.EmailService;
@@ -46,6 +48,8 @@ public class AuthController {
     private final RateLimiterService rateLimiter;
     private final TokenBlacklistService tokenBlacklistService;
     private final SecurityAuditService securityAuditService;
+    private final LoginHistoryService  loginHistoryService;
+    private final ActiveSessionService activeSessionService;
 
     // false = HTTP (dev + public server without TLS); true = HTTPS only
     // Controlled via COOKIE_SECURE env var — set to true once Nginx+TLS is in place
@@ -155,11 +159,14 @@ public class AuthController {
                             .build());
 
         user.setFailedLoginAttempts(0);
-        userRepo.save(user);
+        // Persists the counter reset together with the new last-login stamp
+        loginHistoryService.recordLogin(user, getClientIp(httpReq),
+                                        httpReq.getHeader("User-Agent"));
 
         String token = jwtUtil.generateToken(user.getEmail());
         long expiresInMs = jwtUtil.getExpirationMs();
         securityAuditService.loginSuccess(req.getEmail(), getClientIp(httpReq));
+        activeSessionService.open(token, user.getEmail(), expiresInMs);
 
         // V-04 FIX: Deliver token as httpOnly cookie.
         // cookieSecure=false allows the cookie over plain HTTP (dev + server without TLS).
@@ -367,6 +374,7 @@ public class AuthController {
             if (remaining > 0) {
                 String email = jwtUtil.extractEmail(token);
                 tokenBlacklistService.blacklist(token, remaining);
+                activeSessionService.close(token);
                 log.info("Token revoked on logout");
                 securityAuditService.logout(email);
             }

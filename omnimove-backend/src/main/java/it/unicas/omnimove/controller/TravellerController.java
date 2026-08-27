@@ -8,13 +8,12 @@ import it.unicas.omnimove.model.UserPreferences;
 import it.unicas.omnimove.repository.FavoriteRouteRepository;
 import it.unicas.omnimove.repository.FavoriteStopRepository;
 import it.unicas.omnimove.repository.StopRepository;
-import it.unicas.omnimove.repository.JourneyLogRepository;
 import it.unicas.omnimove.repository.UserPreferencesRepository;
 import it.unicas.omnimove.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import it.unicas.omnimove.service.GreenIndexService;
 import it.unicas.omnimove.service.SecurityAuditService;
+import it.unicas.omnimove.service.TravellerProfileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -26,10 +25,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
-import it.unicas.omnimove.model.JourneyLog;
 
 import java.time.ZonedDateTime;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/traveller")
@@ -41,13 +38,12 @@ public class TravellerController {
 
     private final UserRepository userRepo;
     private final PasswordEncoder passwordEncoder;
-    private final JourneyLogRepository journeyLogRepository;
-    private final GreenIndexService greenIndexService;
     private final FavoriteRouteRepository favoriteRouteRepository;
     private final FavoriteStopRepository  favoriteStopRepository;
     private final StopRepository          stopRepository;
     private final UserPreferencesRepository preferencesRepository;
     private final SecurityAuditService securityAuditService;
+    private final TravellerProfileService travellerProfileService;
 
     @PutMapping("/me")
     @Operation(summary = "Update own profile")
@@ -155,27 +151,8 @@ public class TravellerController {
         User user = userRepo.findByEmail(principal.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        List<JourneyLog> all = journeyLogRepository.findByUserId(user.getId());
-
-        ZonedDateTime since30d = ZonedDateTime.now().minusDays(30);
-        double spent30d = all.stream()
-                .filter(j -> j.getCreatedAt() != null && j.getCreatedAt().isAfter(since30d))
-                .mapToDouble(JourneyLog::getCostEuros).sum();
-
-        double co2SavedGrams = all.stream()
-                .mapToDouble(j -> {
-                    double carCo2 = greenIndexService.computeCo2Grams("CAR", j.getDistanceKm());
-                    return Math.max(0, carCo2 - j.getCo2Grams());
-                }).sum();
-
-        long ecoPoints = all.stream().mapToInt(JourneyLog::getGreenIndex).sum();
-
-        return ResponseEntity.ok(Map.of(
-                "ecoPoints",   ecoPoints,
-                "co2SavedKg",  Math.round((co2SavedGrams / 1000.0) * 10) / 10.0,
-                "trips",       all.size(),
-                "spent30d",    Math.round(spent30d * 100) / 100.0
-        ));
+        // Same figures the admin dashboard reads back — see TravellerProfileService
+        return ResponseEntity.ok(travellerProfileService.stats(user.getId()));
     }
 
     @GetMapping("/history")
@@ -186,31 +163,8 @@ public class TravellerController {
         User user = userRepo.findByEmail(principal.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        List<JourneyLog> logs = journeyLogRepository.findByUserId(user.getId());
-        logs.sort(Comparator.comparing(JourneyLog::getCreatedAt).reversed());
-
-        List<JourneyLog> limited = logs.stream().limit(20).toList();
-
-        Set<String> favKeys = favoriteRouteRepository.findByUserId(user.getId()).stream()
-                .map(f -> f.getMode() + "|" + f.getOriginName() + "|" + f.getDestName())
-                .collect(Collectors.toSet());
-
-        List<Map<String, Object>> result = limited.stream().map(j -> {
-            String key = j.getMode() + "|" + j.getOriginName() + "|" + j.getDestName();
-            Map<String, Object> m = new HashMap<>();
-            m.put("id", j.getId());
-            m.put("mode", j.getMode());
-            m.put("distanceKm", j.getDistanceKm());
-            m.put("costEuros", j.getCostEuros());
-            m.put("greenIndex", j.getGreenIndex());
-            m.put("originName", j.getOriginName());
-            m.put("destName", j.getDestName());
-            m.put("createdAt", j.getCreatedAt());
-            m.put("isFavorite", favKeys.contains(key));
-            return m;
-        }).toList();
-
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(travellerProfileService.history(
+                user.getId(), TravellerProfileService.HISTORY_LIMIT));
     }
 
     // ── Favourite stops ───────────────────────────────────────────
@@ -230,22 +184,7 @@ public class TravellerController {
         User user = userRepo.findByEmail(principal.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // Names and coordinates come from the current stops, never from what was
-        // stored: the id is the only thing that survives a rename. A favourite
-        // whose stop the network no longer serves is left out rather than
-        // returned half-empty — there is nothing the traveller could do with it.
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (FavoriteStop f : favoriteStopRepository.findByUserIdOrderByCreatedAtAsc(user.getId())) {
-            stopRepository.findById(f.getStopId())
-                .filter(st -> st.getLat() != null && st.getLon() != null)
-                .ifPresent(st -> result.add(Map.of(
-                        "id",      f.getId(),
-                        "stop_id", st.getId(),
-                        "name",    st.getName() != null ? st.getName() : st.getId(),
-                        "lat",     st.getLat(),
-                        "lon",     st.getLon())));
-        }
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(travellerProfileService.favoriteStops(user.getId()));
     }
 
     @PostMapping("/favorite-stops")
@@ -303,34 +242,7 @@ public class TravellerController {
         User user = userRepo.findByEmail(principal.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        List<FavoriteRoute> favs = favoriteRouteRepository.findByUserId(user.getId());
-        List<JourneyLog> allTrips = journeyLogRepository.findByUserId(user.getId());
-
-        List<Map<String, Object>> result = favs.stream().map(f -> {
-            List<JourneyLog> matching = allTrips.stream()
-                    .filter(j -> j.getMode().equals(f.getMode())
-                            && f.getOriginName().equals(j.getOriginName())
-                            && f.getDestName().equals(j.getDestName()))
-                    .toList();
-
-            int usedCount = matching.size();
-            int lastGreenIndex = matching.stream()
-                    .max(Comparator.comparing(JourneyLog::getCreatedAt))
-                    .map(JourneyLog::getGreenIndex).orElse(0);
-            double avgCost = matching.stream().mapToDouble(JourneyLog::getCostEuros).average().orElse(0);
-
-            return Map.<String, Object>of(
-                    "id", f.getId(),
-                    "mode", f.getMode(),
-                    "originName", f.getOriginName(),
-                    "destName", f.getDestName(),
-                    "usedCount", usedCount,
-                    "greenIndex", lastGreenIndex,
-                    "avgCost", Math.round(avgCost * 100) / 100.0
-            );
-        }).toList();
-
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(travellerProfileService.favoriteRoutes(user.getId()));
     }
 
     @PostMapping("/favorites/toggle")

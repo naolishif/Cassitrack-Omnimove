@@ -40,6 +40,20 @@ public class User {
     @Builder.Default
     private int failedLoginAttempts = 0;
 
+    // ── Activity tracking ───────────────────────────────────────────
+    /** First registration: set once, on insert, and never touched again. */
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    /** Most recent successful access — mirror of the newest login_events row. */
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
+
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) createdAt = LocalDateTime.now();
+    }
+
     // ── Password reset ──────────────────────────────────────────────
     @Column(name = "reset_password_token")
     private String resetPasswordToken;

@@ -527,3 +527,195 @@ body {
 .switch[aria-checked="true"]{background:var(--accent-green,#10b981)}
 .switch[aria-checked="true"]::after{transform:translateX(20px)}
 .switch[disabled]{opacity:.5;cursor:not-allowed}
+
+/* ── LOGIN HISTORY ── */
+/* The Last Login cell opens the full access history — make it read as a control */
+.login-cell {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent-cyan);
+    cursor: pointer;
+    text-align: left;
+    border-bottom: 1px dotted rgba(56,189,248,.45);
+}
+.login-cell:hover { color: var(--text-primary); border-bottom-color: var(--text-primary); }
+.login-cell .count { color: var(--text-dim); border-bottom: none; margin-left: 6px; }
+.login-cell:disabled {
+    color: var(--text-dim);
+    cursor: default;
+    border-bottom: none;
+}
+
+.history-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+.history-meta strong { color: var(--text-primary); font-weight: 600; }
+
+/* Long histories scroll inside the modal instead of growing past the viewport */
+.history-body { max-height: 46vh; overflow-y: auto; }
+.history-table { width: 100%; border-collapse: collapse; }
+.history-table th {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 500;
+    text-align: left;
+    padding: 6px 8px;
+    position: sticky;
+    top: 0;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-bright);
+}
+.history-table td {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+.history-table td.when { color: var(--text-primary); white-space: nowrap; }
+.history-table td.agent {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.history-empty {
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 18px 4px;
+    text-align: center;
+}
+
+/* ── USER PROFILE MODAL ── */
+/* The name cell opens the full profile — same affordance as the Last Login cell */
+.name-cell {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--font-main);
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+    border-bottom: 1px dotted var(--border-bright);
+}
+.name-cell:hover { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
+
+.profile-scroll { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
+
+.profile-id {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+.profile-id span strong { color: var(--text-primary); font-weight: 600; }
+
+.profile-section {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 18px 0 10px;
+}
+.profile-section:first-child { margin-top: 0; }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.kpi {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px;
+}
+.kpi .kpi-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-bottom: 6px;
+}
+.kpi .kpi-value {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    color: var(--accent-green);
+}
+.kpi .kpi-sub { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+
+.trip-table { width: 100%; border-collapse: collapse; }
+.trip-table th {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 500;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-bright);
+}
+.trip-table td {
+    font-size: 11px;
+    color: var(--text-secondary);
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border);
+}
+.trip-table td.route { color: var(--text-primary); font-size: 12px; }
+.trip-table td.num   { font-family: var(--font-mono); white-space: nowrap; }
+.mode-tag {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .5px;
+    padding: 2px 6px;
+    border-radius: 2px;
+    background: rgba(56,189,248,.12);
+    color: var(--accent-cyan);
+    border: 1px solid rgba(56,189,248,.25);
+}
+
+.edit-note {
+    font-size: 11px;
+    color: var(--accent-amber);
+    line-height: 1.6;
+    margin-top: 10px;
+}
+
+/* ── REFRESH CONTROL ── */
+.refresh-group { display: flex; align-items: center; gap: 10px; }
+.refresh-stamp {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+#refreshBtn.busy { opacity: .5; pointer-events: none; }
+
+/* ── FAVOURITES ── */
+.fav-list { display: flex; flex-direction: column; gap: 6px; }
+.fav-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+}
+.fav-row .fav-main { flex: 1; font-size: 12px; color: var(--text-primary); }
+.fav-row .fav-sub {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 3px;
+}
+.fav-row .fav-green { font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
+.fav-star { color: var(--accent-amber); font-size: 13px; }

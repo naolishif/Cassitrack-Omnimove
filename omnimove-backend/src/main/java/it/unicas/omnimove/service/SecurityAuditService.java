@@ -125,6 +125,32 @@ public class SecurityAuditService {
         persist("WEAK_PASSWORD_REJECTED", email, ip, null);
     }
 
+    public void adminViewedLoginHistory(String adminEmail, String targetEmail) {
+        log.info("ADMIN_VIEWED_LOGIN_HISTORY admin={} target={}",
+                maskEmail(adminEmail), maskEmail(targetEmail));
+        persist("ADMIN_VIEWED_LOGIN_HISTORY", adminEmail, null, "target=" + targetEmail);
+    }
+
+    public void adminViewedUserProfile(String adminEmail, String targetEmail) {
+        log.info("ADMIN_VIEWED_USER_PROFILE admin={} target={}",
+                maskEmail(adminEmail), maskEmail(targetEmail));
+        persist("ADMIN_VIEWED_USER_PROFILE", adminEmail, null, "target=" + targetEmail);
+    }
+
+    public void adminUserUpdated(String adminEmail, String targetEmail) {
+        log.info("ADMIN_USER_UPDATED admin={} target={}",
+                maskEmail(adminEmail), maskEmail(targetEmail));
+        persist("ADMIN_USER_UPDATED", adminEmail, null, "target=" + targetEmail);
+    }
+
+    /** Separate from the plain update: it changes what the user logs in with. */
+    public void adminUserEmailChanged(String adminEmail, String oldEmail, String newEmail) {
+        log.warn("ADMIN_USER_EMAIL_CHANGED admin={} from={} to={}",
+                maskEmail(adminEmail), maskEmail(oldEmail), maskEmail(newEmail));
+        persist("ADMIN_USER_EMAIL_CHANGED", adminEmail, null,
+                "from=" + oldEmail + " to=" + newEmail);
+    }
+
     public void adminUserCreated(String adminEmail, String targetEmail, String role) {
         log.info("ADMIN_USER_CREATED admin={} target={} role={}",
                 maskEmail(adminEmail), maskEmail(targetEmail), role);

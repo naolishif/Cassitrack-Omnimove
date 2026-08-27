@@ -180,8 +180,8 @@
             </div>
             <div class="stat-pill">
                 <div class="label">Active Sessions</div>
-                <div class="value">—</div>
-                <div class="sub">not available</div>
+                <div class="value" id="statSessions">—</div>
+                <div class="sub" id="statSessionsSub">loading...</div>
             </div>
             <div class="stat-pill">
                 <div class="label">Admins</div>
@@ -199,7 +199,11 @@
         <div class="card" style="flex:1">
             <div class="row-between">
                 <div class="card-title" style="margin-bottom:0">User Registry</div>
-                <button class="btn btn-primary" onclick="openModal()">+ ADD USER</button>
+                <div class="refresh-group">
+                    <span class="refresh-stamp" id="refreshStamp">—</span>
+                    <button class="btn btn-ghost" id="refreshBtn" onclick="refreshNow()" title="Reload users and counters">⟳ REFRESH</button>
+                    <button class="btn btn-primary" onclick="openModal()">+ ADD USER</button>
+                </div>
             </div>
             <div class="sep" style="margin:14px 0"></div>
 
@@ -316,6 +320,72 @@
         <div class="modal-footer">
             <button class="btn btn-ghost" onclick="closeDeleteModal()">Cancel</button>
             <button class="btn btn-danger" onclick="confirmDeleteUser()">Remove</button>
+        </div>
+    </div>
+</div>
+
+<!-- USER PROFILE MODAL -->
+<div class="modal-overlay" id="profileModal">
+    <div class="modal" style="width:720px;">
+        <div class="modal-header">
+            <span id="profileTitle">User Profile</span>
+            <button class="modal-close" onclick="closeProfileModal()">✕</button>
+        </div>
+        <div class="profile-scroll" id="profileScroll">
+            <div class="profile-id" id="profileId"></div>
+
+            <div class="profile-section">Travel figures — as the user sees them</div>
+            <div class="kpi-grid" id="profileKpis"></div>
+
+            <div class="profile-section" id="profileTripsTitle">Journeys</div>
+            <div id="profileTrips"></div>
+
+            <div class="profile-section" id="profileFavRoutesTitle">Favourite routes</div>
+            <div id="profileFavRoutes"></div>
+
+            <div class="profile-section" id="profileFavStopsTitle">Favourite stops</div>
+            <div id="profileFavStops"></div>
+
+            <div class="profile-section">Edit details</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>First Name</label>
+                    <input type="text" id="editFirst">
+                </div>
+                <div class="form-group">
+                    <label>Last Name</label>
+                    <input type="text" id="editLast">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="editEmail">
+                </div>
+            </div>
+            <div class="edit-note" id="editNote">
+                Changing the email changes what this user signs in with — their
+                current session ends and they must use the new address.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeProfileModal()">CLOSE</button>
+            <button class="btn btn-primary" id="saveProfileBtn" onclick="saveProfile()">SAVE CHANGES</button>
+        </div>
+    </div>
+</div>
+
+<!-- LOGIN HISTORY MODAL -->
+<div class="modal-overlay" id="historyModal">
+    <div class="modal" style="width:600px;">
+        <div class="modal-header">
+            Access History
+            <button class="modal-close" onclick="closeHistoryModal()">✕</button>
+        </div>
+        <div class="history-meta" id="historyMeta"></div>
+        <div class="history-body" id="historyBody"></div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeHistoryModal()">CLOSE</button>
         </div>
     </div>
 </div>

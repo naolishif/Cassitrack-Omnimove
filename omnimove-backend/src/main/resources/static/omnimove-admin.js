@@ -87,51 +87,406 @@ function toast(msg, err=false){
 const roles = { ADMIN:'badge-admin', TRAVELLER:'badge-user', Suspended:'badge-suspended' };
 let users = [];
 
-async function loadUsers() {
+async function loadUsers({ silent = false } = {}) {
     try {
         const r = await apiFetch('/admin/users');
-        if (r.status === 403) { toast('Accesso negato.', true); return; }
+        if (r.status === 403) { if (!silent) toast('Accesso negato.', true); return false; }
         users = await r.json();
-        renderTable(users);
+        // Re-render through the filter, otherwise a background refresh would
+        // wipe whatever the operator has typed into the search box
+        applyFilter();
+        return true;
     } catch(e) {
-        toast('Errore caricamento utenti.', true);
+        // A background poll that fails must not toast every 30 seconds
+        if (!silent) toast('Errore caricamento utenti.', true);
+        else console.warn('Background user refresh failed:', e);
+        return false;
     }
 }
-loadUsers();
+// ── Date helpers ──
+// Spring serialises LocalDateTime as ISO-8601 ("2026-08-27T15:04:05") — no
+// timezone, so it is read as local time, which is what the operator expects.
+function toDate(v) {
+    if (!v) return null;
+    // Defensive: some Jackson configurations emit [y,m,d,h,mi,s] instead
+    if (Array.isArray(v)) {
+        const [y, mo, d, h = 0, mi = 0, sec = 0] = v;
+        return new Date(y, mo - 1, d, h, mi, sec);
+    }
+    const dt = new Date(v);
+    return isNaN(dt.getTime()) ? null : dt;
+}
+
+function fmtDateTime(v) {
+    const d = toDate(v);
+    if (!d) return '—';
+    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+         + ' ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** "3 hours ago" style hint next to an absolute timestamp. */
+function relativeTime(v) {
+    const d = toDate(v);
+    if (!d) return '';
+    const mins = Math.round((Date.now() - d.getTime()) / 60000);
+    if (mins < 1)    return 'just now';
+    if (mins < 60)   return `${mins} min ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24)  return `${hours} h ago`;
+    const days = Math.round(hours / 24);
+    return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
 function renderTable(data) {
     const tb = document.getElementById('userTbody');
-    tb.innerHTML = data.map(u => `
+    tb.innerHTML = data.map(u => {
+        const never   = !u.lastLoginAt;
+        const count   = u.loginCount || 0;
+        // Nothing to open when the account has never been used
+        const lastCell = never
+            ? `<button class="login-cell" disabled>never</button>`
+            : `<button class="login-cell" onclick="openHistory(${u.id})"
+                       title="Show every access">${escHtml(fmtDateTime(u.lastLoginAt))}<span class="count">${count}×</span></button>`;
+        return `
     <tr>
       <td class="text-mono">#${escHtml(u.id)}</td>
-      <td>${escHtml(u.name)}</td>
+      <td><button class="name-cell" onclick="openProfile(${u.id})"
+                  title="Open profile">${escHtml(u.name)}</button></td>
       <td style="color:var(--text-secondary);font-size:12px">${escHtml(u.email)}</td>
       <td><span class="badge ${roles[u.role] || 'badge-user'}">${escHtml(u.role)}</span></td>
-      <td class="text-mono" style="font-size:11px">—</td>
-      <td class="text-mono" style="font-size:11px">—</td>
+      <td class="text-mono" style="font-size:11px">${escHtml(fmtDateTime(u.registeredAt))}</td>
+      <td>${lastCell}</td>
       <td>
         <div class="action-btns">
           <button class="icon-btn del" title="Delete" onclick="deleteUser(${u.id})">✕</button>
         </div>
       </td>
-    </tr>
-`).join('');
+    </tr>`;
+    }).join('');
 }
-renderTable(users);
+
+// ── User profile modal ──
+// Shows the same travel figures the user sees in their own app (one server-side
+// implementation feeds both), plus the identity fields an admin may correct.
+let _profileUserId = null;
+
+const MODE_LABEL = { BUS:'🚌 BUS', WALK:'🚶 WALK', BIKE:'🚲 BIKE', SCOOTER:'🛴 SCOOTER' };
+
+async function openProfile(id) {
+    _profileUserId = id;
+    const modal = document.getElementById('profileModal');
+    const user  = users.find(u => u.id === id);
+
+    document.getElementById('profileTitle').textContent = user ? user.name : 'User Profile';
+    document.getElementById('profileId').innerHTML      = '';
+    document.getElementById('profileKpis').innerHTML    = '';
+    document.getElementById('profileTrips').innerHTML     = `<div class="history-empty">Loading…</div>`;
+    document.getElementById('profileFavRoutes').innerHTML = '';
+    document.getElementById('profileFavStops').innerHTML  = '';
+    modal.classList.add('open');
+
+    try {
+        const r = await apiFetch(`/admin/users/${id}/profile`);
+        if (!r.ok) {
+            document.getElementById('profileTrips').innerHTML =
+                `<div class="history-empty">Could not load the profile.</div>`;
+            return;
+        }
+        renderProfile(await r.json());
+    } catch (e) {
+        document.getElementById('profileTrips').innerHTML =
+            `<div class="history-empty">Connection error.</div>`;
+    }
+}
+
+function renderProfile(data) {
+    const a = data.account;
+    const s = data.stats;
+
+    document.getElementById('profileTitle').textContent = a.name;
+
+    document.getElementById('profileId').innerHTML =
+        `<span>ID <strong>#${escHtml(a.id)}</strong></span>` +
+        `<span>${escHtml(a.email)}</span>` +
+        `<span><span class="badge ${roles[a.role] || 'badge-user'}">${escHtml(a.role)}</span></span>` +
+        `<span>${a.verified ? '<span class="text-green">verified</span>'
+                            : '<span class="text-amber">not verified</span>'}</span>` +
+        `<span>Registered <strong>${escHtml(fmtDateTime(a.registeredAt))}</strong></span>` +
+        `<span>Last login <strong>${a.lastLoginAt ? escHtml(fmtDateTime(a.lastLoginAt)) : 'never'}</strong></span>` +
+        `<span>Accesses <strong>${escHtml(a.loginCount)}</strong></span>`;
+
+    document.getElementById('profileKpis').innerHTML = `
+      <div class="kpi"><div class="kpi-label">Eco points</div>
+        <div class="kpi-value">${Number(s.ecoPoints).toLocaleString('it-IT')}</div></div>
+      <div class="kpi"><div class="kpi-label">CO₂ saved</div>
+        <div class="kpi-value">${escHtml(s.co2SavedKg)} kg</div>
+        <div class="kpi-sub">vs the same trips by car</div></div>
+      <div class="kpi"><div class="kpi-label">Trips</div>
+        <div class="kpi-value">${escHtml(s.trips)}</div></div>
+      <div class="kpi"><div class="kpi-label">Spent</div>
+        <div class="kpi-value">€${escHtml(s.spent30d)}</div>
+        <div class="kpi-sub">last 30 days</div></div>`;
+
+    document.getElementById('profileTripsTitle').textContent =
+        data.truncated ? `Journeys — latest ${data.history.length} of ${data.totalTrips}`
+                       : `Journeys (${data.totalTrips})`;
+
+    const trips = document.getElementById('profileTrips');
+    if (!data.history.length) {
+        trips.innerHTML = `<div class="history-empty">This user has not travelled yet.</div>`;
+    } else {
+        trips.innerHTML = `
+        <table class="trip-table">
+          <thead>
+            <tr><th>Date</th><th>Mode</th><th>Route</th><th>Distance</th><th>Cost</th><th>Green</th></tr>
+          </thead>
+          <tbody>
+            ${data.history.map(j => `
+            <tr>
+              <td class="num">${escHtml(fmtDateTime(j.createdAt))}</td>
+              <td><span class="mode-tag">${escHtml(MODE_LABEL[j.mode] || j.mode)}</span></td>
+              <td class="route">${escHtml(j.originName || '—')} → ${escHtml(j.destName || '—')}
+                  ${j.isFavorite ? '<span class="text-amber" title="Starred by the user">★</span>' : ''}</td>
+              <td class="num">${j.distanceKm != null ? Number(j.distanceKm).toFixed(1) + ' km' : '—'}</td>
+              <td class="num">${j.costEuros != null ? '€' + Number(j.costEuros).toFixed(2) : '—'}</td>
+              <td class="num" style="color:${greenColor(j.greenIndex)}">${escHtml(j.greenIndex ?? '—')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    renderFavRoutes(data.favoriteRoutes || []);
+    renderFavStops(data.favoriteStops || []);
+
+    // "Marco De Luca" → first "Marco", last "De Luca" — mirrors how the add-user
+    // form joins the two halves back together.
+    const space = (a.name || '').indexOf(' ');
+    document.getElementById('editFirst').value = space < 0 ? (a.name || '') : a.name.slice(0, space);
+    document.getElementById('editLast').value  = space < 0 ? '' : a.name.slice(space + 1);
+    document.getElementById('editEmail').value = a.email;
+}
+
+function renderFavRoutes(items) {
+    document.getElementById('profileFavRoutesTitle').textContent =
+        `Favourite routes (${items.length})`;
+
+    const box = document.getElementById('profileFavRoutes');
+    if (!items.length) {
+        box.innerHTML = `<div class="history-empty">No starred route.</div>`;
+        return;
+    }
+    box.innerHTML = `<div class="fav-list">${items.map(f => `
+      <div class="fav-row">
+        <span class="fav-star">★</span>
+        <div class="fav-main">
+          ${escHtml(f.originName)} → ${escHtml(f.destName)}
+          <div class="fav-sub">${escHtml(MODE_LABEL[f.mode] || f.mode)} · ~€${Number(f.avgCost).toFixed(2)} · used ${escHtml(f.usedCount)}×</div>
+        </div>
+        <div class="fav-green" style="color:${greenColor(f.greenIndex)}">🌱 ${escHtml(f.greenIndex)}</div>
+      </div>`).join('')}</div>`;
+}
+
+function renderFavStops(items) {
+    document.getElementById('profileFavStopsTitle').textContent =
+        `Favourite stops (${items.length})`;
+
+    const box = document.getElementById('profileFavStops');
+    if (!items.length) {
+        box.innerHTML = `<div class="history-empty">No starred stop.</div>`;
+        return;
+    }
+    box.innerHTML = `<div class="fav-list">${items.map(st => `
+      <div class="fav-row">
+        <span class="fav-star">★</span>
+        <div class="fav-main">
+          ${escHtml(st.name)}
+          <div class="fav-sub">${escHtml(st.stop_id)} · ${Number(st.lat).toFixed(5)}, ${Number(st.lon).toFixed(5)}</div>
+        </div>
+      </div>`).join('')}</div>`;
+}
+
+async function saveProfile() {
+    if (_profileUserId == null) return;
+
+    const first = document.getElementById('editFirst').value.trim();
+    const last  = document.getElementById('editLast').value.trim();
+    const email = document.getElementById('editEmail').value.trim();
+
+    if (!first)  { toast('First name is required.', true); return; }
+    if (!email)  { toast('Email is required.', true); return; }
+
+    const btn = document.getElementById('saveProfileBtn');
+    btn.disabled = true;
+    try {
+        const r = await apiFetch(`/admin/users/${_profileUserId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ name: last ? `${first} ${last}` : first, email })
+        });
+        const data = await r.json();
+        if (!r.ok) { toast(data.message || 'Error.', true); return; }
+
+        closeProfileModal();
+        toast(data.message || 'User updated.');
+        refreshAll();
+    } catch (e) {
+        toast('Connection error.', true);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function closeProfileModal() {
+    document.getElementById('profileModal').classList.remove('open');
+    _profileUserId = null;
+}
+
+// ── Access history modal ──
+async function openHistory(id) {
+    const modal = document.getElementById('historyModal');
+    const meta  = document.getElementById('historyMeta');
+    const body  = document.getElementById('historyBody');
+
+    const user = users.find(u => u.id === id);
+    meta.innerHTML = user ? `<strong>${escHtml(user.name)}</strong> — ${escHtml(user.email)}` : '';
+    body.innerHTML = `<div class="history-empty">Loading…</div>`;
+    modal.classList.add('open');
+
+    try {
+        const r = await apiFetch(`/admin/users/${id}/logins`);
+        if (!r.ok) { body.innerHTML = `<div class="history-empty">Could not load the history.</div>`; return; }
+        const data = await r.json();
+        renderHistory(data);
+    } catch (e) {
+        body.innerHTML = `<div class="history-empty">Connection error.</div>`;
+    }
+}
+
+function renderHistory(data) {
+    const meta = document.getElementById('historyMeta');
+    const body = document.getElementById('historyBody');
+
+    meta.innerHTML =
+        `<strong>${escHtml(data.name)}</strong> — ${escHtml(data.email)}<br>` +
+        `Registered: <strong>${escHtml(fmtDateTime(data.registeredAt))}</strong><br>` +
+        `Total accesses: <strong>${escHtml(data.total)}</strong>` +
+        (data.truncated ? ` <span style="color:var(--text-dim)">(showing the latest ${data.events.length})</span>` : '');
+
+    if (!data.events.length) {
+        body.innerHTML = `<div class="history-empty">No access recorded yet.</div>`;
+        return;
+    }
+
+    body.innerHTML = `
+    <table class="history-table">
+      <thead>
+        <tr><th>#</th><th>Date &amp; time</th><th>When</th><th>IP</th><th>Device</th></tr>
+      </thead>
+      <tbody>
+        ${data.events.map((e, i) => `
+        <tr>
+          <td>${data.events.length - i}</td>
+          <td class="when">${escHtml(fmtDateTime(e.loggedInAt))}</td>
+          <td>${escHtml(relativeTime(e.loggedInAt))}</td>
+          <td>${escHtml(e.ipAddress || '—')}</td>
+          <td class="agent" title="${escHtml(e.userAgent || '')}">${escHtml(shortAgent(e.userAgent))}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+/** Boils a User-Agent down to "Browser · OS" — the full string is in the tooltip. */
+function shortAgent(ua) {
+    if (!ua) return '—';
+    const browser = /Edg\//.test(ua)     ? 'Edge'
+                  : /OPR\//.test(ua)     ? 'Opera'
+                  : /Firefox\//.test(ua) ? 'Firefox'
+                  : /Chrome\//.test(ua)  ? 'Chrome'
+                  : /Safari\//.test(ua)  ? 'Safari'
+                  : 'Unknown';
+    const os = /Android/.test(ua)               ? 'Android'
+             : /iPhone|iPad|iPod/.test(ua)      ? 'iOS'
+             : /Windows/.test(ua)               ? 'Windows'
+             : /Mac OS X/.test(ua)              ? 'macOS'
+             : /Linux/.test(ua)                 ? 'Linux'
+             : '';
+    return os ? `${browser} · ${os}` : browser;
+}
+
+function closeHistoryModal() {
+    document.getElementById('historyModal').classList.remove('open');
+}
 
 async function loadStats() {
     try {
         const r = await apiFetch('/admin/users/stats');
-        if (!r.ok) return;
+        if (!r.ok) return false;
         const data = await r.json();
         document.getElementById('statTotal').textContent      = data.total;
         document.getElementById('statAdmins').textContent     = data.admins;
         document.getElementById('statTravellers').textContent = data.travellers;
         document.getElementById('statTotalSub').textContent   = `${data.total} registered`;
+
+        // One key per live token: -1 means Redis could not answer, which is not
+        // the same as zero and must not be shown as a count
+        const sessions = data.activeSessions;
+        document.getElementById('statSessions').textContent =
+            (sessions == null || sessions < 0) ? '—' : sessions;
+        document.getElementById('statSessionsSub').textContent =
+            (sessions == null || sessions < 0) ? 'count unavailable'
+          : sessions === 0                     ? 'nobody signed in'
+          :                                      'signed in right now';
+        return true;
     } catch(e) {
         console.error('Stats error:', e);
+        return false;
     }
 }
-loadStats();
+
+// ── Refresh ──
+// The dashboard is a snapshot of server state, so it polls; every mutation also
+// refreshes immediately rather than waiting for the next tick.
+const REFRESH_MS = 30000;
+
+function applyFilter() {
+    filterTable(document.getElementById('searchInput').value);
+}
+
+function stampRefresh(ok) {
+    const el = document.getElementById('refreshStamp');
+    if (!el) return;
+    el.textContent = ok
+        ? `updated ${new Date().toLocaleTimeString('en-GB')}`
+        : `stale — last try ${new Date().toLocaleTimeString('en-GB')}`;
+    el.style.color = ok ? 'var(--text-dim)' : 'var(--accent-amber)';
+}
+
+async function refreshAll({ silent = false } = {}) {
+    const [usersOk, statsOk] = await Promise.all([loadUsers({ silent }), loadStats()]);
+    stampRefresh(usersOk && statsOk);
+}
+
+/** Manual refresh from the button. */
+async function refreshNow() {
+    const btn = document.getElementById('refreshBtn');
+    btn.classList.add('busy');
+    try { await refreshAll(); } finally { btn.classList.remove('busy'); }
+}
+
+refreshAll();
+
+setInterval(() => {
+    // Nothing to gain from polling a hidden tab, and a refresh underneath an
+    // open modal would move the ground the operator is standing on
+    if (document.hidden) return;
+    if (document.querySelector('.modal-overlay.open')) return;
+    refreshAll({ silent: true });
+}, REFRESH_MS);
+
+// Catch up on whatever changed while the tab was in the background
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !document.querySelector('.modal-overlay.open'))
+        refreshAll({ silent: true });
+});
 
 function filterTable(q) {
     const role = document.getElementById('roleFilter').value;
@@ -170,7 +525,7 @@ async function confirmDeleteUser() {
         const data = await r.json();
         if (!r.ok) { toast(data.message || 'Error.', true); return; }
         toast('User removed.');
-        loadUsers();
+        refreshAll();
     } catch(e) {
         toast('Connection error.', true);
     }
@@ -211,7 +566,7 @@ async function addUser() {
         closeModal();
         toast('Utente creato.');
         ['newFirst','newLast','newEmail','newPass'].forEach(i => document.getElementById(i).value = '');
-        loadUsers();
+        refreshAll();
     } catch(e) {
         toast('Errore di connessione.', true);
     }
