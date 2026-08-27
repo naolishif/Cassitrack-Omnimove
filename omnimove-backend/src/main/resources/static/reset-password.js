@@ -5,13 +5,10 @@ const TOKEN  = window.location.hash.slice(1) || '';
 if (params.get('expired') === 'true' || !TOKEN) {
   document.getElementById('resetForm').style.display = 'none';
   document.getElementById('msgBox').innerHTML =
-    "<div class='msg err'>This reset link has expired or is invalid. " +
-    "<a href='/omnimove-login.html' style='color:#f87171'>Back to login</a></div>";
+    "<div class='msg err'>" + t('reset_link_dead') + " " +
+    "<a href='omnimove-login.html' style='color:#f87171'>" + t('btn_back_signin_short') + "</a></div>";
 }
 
-function valid(p) {
-  return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z0-9]).{8,}$/.test(p);
-}
 function showErr(id, msg) {
   const e = document.getElementById(id);
   e.textContent = msg;
@@ -29,15 +26,15 @@ async function doReset(e) {
   const p2 = document.getElementById('p2').value;
   clearErr('e1'); clearErr('e2');
   let ok = true;
-  if (!p1) { showErr('e1', '⚠ Required'); ok = false; }
-  else if (!valid(p1)) { showErr('e1', '⚠ Min 8 chars: uppercase, lowercase, number & special character'); ok = false; }
-  if (!p2) { showErr('e2', '⚠ Required'); ok = false; }
-  else if (p1 !== p2) { showErr('e2', '⚠ Passwords do not match'); ok = false; }
+  if (!p1) { showErr('e1', '⚠ ' + t('err_required')); ok = false; }
+  else if (!omniPwdValid(p1)) { showErr('e1', '⚠ ' + t('pwd_rule_short')); ok = false; }
+  if (!p2) { showErr('e2', '⚠ ' + t('err_required')); ok = false; }
+  else if (p1 !== p2) { showErr('e2', '⚠ ' + t('pwd_err_match')); ok = false; }
   if (!ok) return;
 
   const btn = document.getElementById('btn');
   btn.disabled = true;
-  btn.textContent = 'Saving…';
+  btn.textContent = t('btn_sending');
 
   try {
     const r = await fetch('/omnimove/api/v1/auth/reset-password', {
@@ -48,23 +45,35 @@ async function doReset(e) {
     const d = await r.json();
     const box = document.getElementById('msgBox');
     if (r.ok) {
-      box.innerHTML = "<div class='msg ok'>&#x2713; Password updated! <a href='/omnimove-login.html' style='color:#22C55E'>Sign in</a></div>";
+      box.innerHTML = "<div class='msg ok'>&#x2713; " + t('reset_done') + " " +
+                      "<a href='omnimove-login.html' style='color:#22C55E'>" + t('tab_signin') + "</a></div>";
       document.getElementById('resetForm').style.display = 'none';
     } else {
-      box.innerHTML = "<div class='msg err'>" + (d.message || 'Reset failed') + "</div>";
+      box.innerHTML = "<div class='msg err'>" + (d.message || t('reset_failed')) + "</div>";
       btn.disabled = false;
-      btn.textContent = 'Set New Password';
+      btn.textContent = t('btn_set_pass');
     }
   } catch (ex) {
     console.error(ex);
-    document.getElementById('msgBox').innerHTML = "<div class='msg err'>Cannot reach server.</div>";
+    document.getElementById('msgBox').innerHTML =
+        "<div class='msg err'>" + t('msg_server_short') + "</div>";
     btn.disabled = false;
-    btn.textContent = 'Set New Password';
+    btn.textContent = t('btn_set_pass');
   }
 }
 
 document.getElementById('p2').addEventListener('input', function () {
   const p1 = document.getElementById('p1').value;
-  if (this.value && p1 && this.value !== p1) showErr('e2', '⚠ Passwords do not match');
+  if (this.value && p1 && this.value !== p1) showErr('e2', '⚠ ' + t('pwd_err_match'));
   else clearErr('e2');
 });
+
+// Strength bar and rule list, shared with the sign-up form and the account panel
+const _pwdPaint = omniPwdWatch(document.getElementById('p1'),
+                               document.getElementById('pwdBar'),
+                               document.getElementById('pwdRules'));
+
+// applyTranslations() only reaches elements carrying data-i18n; these are drawn
+// by the module, so switching language has to repaint them by hand. Without this
+// the rules kept the language the page happened to open in.
+window._onLangChange = () => { if (_pwdPaint) _pwdPaint(); };

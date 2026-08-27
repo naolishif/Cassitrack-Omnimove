@@ -11,8 +11,15 @@ import it.unicas.omnimove.repository.StopRepository;
 import it.unicas.omnimove.repository.UserPreferencesRepository;
 import it.unicas.omnimove.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import it.unicas.omnimove.security.PasswordPolicy;
+import it.unicas.omnimove.util.RequestLang;
+import it.unicas.omnimove.service.PasswordResetService;
+import it.unicas.omnimove.service.RateLimiterService;
 import it.unicas.omnimove.service.SecurityAuditService;
+import it.unicas.omnimove.service.SessionService;
 import it.unicas.omnimove.service.TravellerProfileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,12 +51,36 @@ public class TravellerController {
     private final UserPreferencesRepository preferencesRepository;
     private final SecurityAuditService securityAuditService;
     private final TravellerProfileService travellerProfileService;
+    private final PasswordResetService    passwordResetService;
+    private final RateLimiterService      rateLimiter;
+    private final SessionService         sessionService;
+
+    @GetMapping("/me")
+    @Operation(summary = "Own profile, including how this account signs in")
+    public ResponseEntity<?> getMe(@AuthenticationPrincipal UserDetails principal) {
+        if (principal == null)
+            return ResponseEntity.status(401).body(Map.of("message", "Not authenticated"));
+
+        User user = userRepo.findByEmail(principal.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // hasPassword decides whether the account page offers "change password"
+        // or "set a password": a Google account has none to confirm against.
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("name",         user.getName());
+        body.put("email",        user.getEmail());
+        body.put("role",         user.getRole());
+        body.put("authProvider", user.getAuthProvider());
+        body.put("hasPassword",  user.hasPassword());
+        return ResponseEntity.ok(body);
+    }
 
     @PutMapping("/me")
     @Operation(summary = "Update own profile")
     public ResponseEntity<?> updateMe(
             @RequestBody TravellerUpdateRequest req,
-            @AuthenticationPrincipal UserDetails principal) {
+            @AuthenticationPrincipal UserDetails principal,
+            HttpServletRequest request) {
 
         if (principal == null)
             return ResponseEntity.status(401).body(Map.of("message", "Not authenticated"));
@@ -62,6 +93,7 @@ public class TravellerController {
         boolean nameChanged     = false;
         boolean emailChanged    = false;
         boolean passwordChanged = false;
+        boolean passwordAdded   = false;
         String  oldEmail        = user.getEmail();
 
         if (req.getName() != null && !req.getName().isBlank()) {
@@ -79,20 +111,28 @@ public class TravellerController {
         }
 
         if (req.getPassword() != null && !req.getPassword().isBlank()) {
-            // A Google account has no current password to confirm against, so the
-            // generic "incorrect" would be a dead end. Adding one is done through
-            // the reset-by-email flow, which proves the address independently.
-            if (!user.hasPassword())
-                return ResponseEntity.badRequest()
-                        .body(Map.of("message", "This account signs in with Google and has no password. "
-                                              + "Use \"Forgot password\" to set one."));
 
-            if (req.getCurrentPassword() == null || req.getCurrentPassword().isBlank()
-                    || !passwordEncoder.matches(req.getCurrentPassword(), user.getPassword()))
+            // A Google account has no current password to confirm against. The
+            // live session is the proof here — the same reasoning every "you are
+            // already signed in" flow uses — so the first password is set
+            // without one, and every later change asks for it as usual.
+            if (user.hasPassword()) {
+                if (req.getCurrentPassword() == null || req.getCurrentPassword().isBlank()
+                        || !passwordEncoder.matches(req.getCurrentPassword(), user.getPassword()))
+                    return ResponseEntity.badRequest()
+                            .body(Map.of("message", "Current password is incorrect"));
+            }
+
+            // Was missing entirely: sign-up and reset both enforce the policy,
+            // so a password set from this page could be weaker than one the
+            // same account was refused at registration.
+            if (!PasswordPolicy.isValid(req.getPassword()))
                 return ResponseEntity.badRequest()
-                        .body(Map.of("message", "Current password is incorrect"));
-            user.setPassword(passwordEncoder.encode(req.getPassword()));
+                        .body(Map.of("message", PasswordPolicy.message(RequestLang.of(request))));
+
+            passwordAdded   = !user.hasPassword();
             passwordChanged = true;
+            user.setPassword(passwordEncoder.encode(req.getPassword()));
         }
 
         userRepo.save(user);
@@ -100,11 +140,53 @@ public class TravellerController {
         // Audit — emit the most specific event for each change
         if (emailChanged)    securityAuditService.profileEmailChanged(oldEmail, user.getEmail());
         if (passwordChanged) securityAuditService.passwordChanged(oldEmail);
+        // Worth its own line: the account gained a second way in
+        if (passwordAdded)   log.info("Traveller {} set a first password on a {} account",
+                                      oldEmail, user.getAuthProvider());
         if (nameChanged && !emailChanged && !passwordChanged)
                              securityAuditService.profileUpdated(oldEmail);
 
         log.info("Traveller {} updated their profile", principal.getUsername());
-        return ResponseEntity.ok(Map.of("message", "Profile updated successfully"));
+        return ResponseEntity.ok(Map.of(
+                "message",     passwordAdded ? "Password set successfully" : "Profile updated successfully",
+                "hasPassword", user.hasPassword()));
+    }
+
+    @PostMapping("/me/password-reset")
+    @Operation(summary = "Email myself a password-reset link",
+               description = "For a signed-in user who no longer remembers their "
+                           + "current password. The link always goes to the address "
+                           + "on the account — it is never taken from the request.")
+    public ResponseEntity<?> requestOwnPasswordReset(@AuthenticationPrincipal UserDetails principal,
+                                                     HttpServletRequest request,
+                                                     HttpServletResponse response) {
+        if (principal == null)
+            return ResponseEntity.status(401).body(Map.of("message", "Not authenticated"));
+
+        User user = userRepo.findByEmail(principal.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Same bucket as the public form: being signed in is no reason to let
+        // someone use the account as a mail relay
+        if (!rateLimiter.allowForgotPassword(user.getEmail()))
+            return ResponseEntity.status(429)
+                    .body(Map.of("message", "Too many requests. Please wait before asking for another link."));
+
+        passwordResetService.sendResetLink(user, RequestLang.of(request));
+
+        // Someone who cannot remember their password should not be left holding a
+        // live session: whoever is at the keyboard has not proved they are the
+        // account owner, and the link that just went out is the proof. The old
+        // token is revoked here so the reset is a real re-authentication rather
+        // than a formality performed from inside an already-open door.
+        sessionService.terminate(request, response);
+        securityAuditService.logout(user.getEmail());
+
+        return ResponseEntity.ok(Map.of(
+                "message",        "We have emailed you a link to set a new password.",
+                "email",          user.getEmail(),
+                "expiresInHours", PasswordResetService.RESET_EXPIRY_HOURS,
+                "sessionEnded",   true));
     }
 
     @GetMapping("/preferences")

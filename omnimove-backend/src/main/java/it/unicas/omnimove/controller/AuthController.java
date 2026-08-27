@@ -5,14 +5,16 @@ import it.unicas.omnimove.dto.*;
 import it.unicas.omnimove.model.User;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.security.JwtUtil;
+import it.unicas.omnimove.security.PasswordPolicy;
+import it.unicas.omnimove.util.RequestLang;
 import it.unicas.omnimove.service.ActiveSessionService;
 import it.unicas.omnimove.service.GoogleTokenVerifier;
 import it.unicas.omnimove.service.LoginHistoryService;
+import it.unicas.omnimove.service.PasswordResetService;
+import it.unicas.omnimove.service.SessionService;
 import it.unicas.omnimove.service.SecurityAuditService;
-import it.unicas.omnimove.service.TokenBlacklistService;
 import it.unicas.omnimove.service.EmailService;
 import it.unicas.omnimove.service.RateLimiterService;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -25,7 +27,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
-import java.util.Arrays;
 import java.util.UUID;
 
 @RestController
@@ -35,28 +36,20 @@ import java.util.UUID;
 @Tag(name = "Authentication", description = "Register, login, email verification, password reset")
 public class AuthController {
 
-    // V-04 FIX (OWASP A02/A07): JWT delivered as httpOnly cookie — not readable by JavaScript
-    private static final String JWT_COOKIE_NAME   = "omnimove_jwt";
-
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final int VERIFY_EXPIRY_HOURS = 24;
-    private static final int RESET_EXPIRY_HOURS  = 1;
 
     private final UserRepository    userRepo;
     private final PasswordEncoder   passwordEncoder;
     private final JwtUtil           jwtUtil;
     private final EmailService      emailService;
     private final RateLimiterService rateLimiter;
-    private final TokenBlacklistService tokenBlacklistService;
     private final SecurityAuditService securityAuditService;
     private final LoginHistoryService  loginHistoryService;
     private final ActiveSessionService activeSessionService;
     private final GoogleTokenVerifier  googleTokenVerifier;
-
-    // false = HTTP (dev + public server without TLS); true = HTTPS only
-    // Controlled via COOKIE_SECURE env var — set to true once Nginx+TLS is in place
-    @Value("${omnimove.cookie.secure:false}")
-    private boolean cookieSecure;
+    private final PasswordResetService passwordResetService;
+    private final SessionService      sessionService;
 
     // ── REGISTER ────────────────────────────────────────────────────
 
@@ -76,11 +69,11 @@ public class AuthController {
             return ResponseEntity.badRequest()
                     .body(AuthResponse.builder().message("Passwords do not match").build());
 
-        if (!isPasswordValid(req.getPassword())) {
+        if (!PasswordPolicy.isValid(req.getPassword())) {
             securityAuditService.weakPasswordRejected(req.getEmail(), getClientIp(request));
             return ResponseEntity.badRequest()
                     .body(AuthResponse.builder()
-                            .message("Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character.")
+                            .message(PasswordPolicy.message(langFrom(request)))
                             .build());
         }
         if (userRepo.existsByEmail(req.getEmail()))
@@ -179,7 +172,7 @@ public class AuthController {
         securityAuditService.loginSuccess(req.getEmail(), getClientIp(httpReq));
         activeSessionService.open(token, user.getEmail(), expiresInMs);
 
-        setJwtCookie(httpResp, token, expiresInMs);
+        sessionService.issue(httpResp, token, expiresInMs);
 
         return ResponseEntity.ok(AuthResponse.builder()
                 .token(token)       // kept for API clients using Authorization header
@@ -241,7 +234,7 @@ public class AuthController {
         long expiresInMs = jwtUtil.getExpirationMs();
         securityAuditService.googleLoginSuccess(user.getEmail(), ip);
         activeSessionService.open(token, user.getEmail(), expiresInMs);
-        setJwtCookie(httpResp, token, expiresInMs);
+        sessionService.issue(httpResp, token, expiresInMs);
 
         return ResponseEntity.ok(AuthResponse.builder()
                 .token(token)
@@ -388,15 +381,8 @@ public class AuthController {
             return tooManyRequests("Too many password reset attempts. Please wait before requesting another link.");
 
         var userOpt = userRepo.findByEmail(req.getEmail());
-        if (userOpt.isPresent() && userOpt.get().isVerified()) {
-            User user = userOpt.get();
-            String resetToken = UUID.randomUUID().toString();
-            user.setResetPasswordToken(resetToken);
-            user.setResetPasswordTokenExpiry(LocalDateTime.now().plusHours(RESET_EXPIRY_HOURS));
-            userRepo.save(user);
-            emailService.sendPasswordResetEmail(user.getEmail(), resetToken, langFrom(request));
-            securityAuditService.passwordResetRequested(user.getEmail());
-        }
+        if (userOpt.isPresent() && userOpt.get().isVerified())
+            passwordResetService.sendResetLink(userOpt.get(), langFrom(request));
 
         // Always return the same message to prevent email enumeration
         return ResponseEntity.ok(AuthResponse.builder()
@@ -408,16 +394,17 @@ public class AuthController {
 
     @PostMapping("/reset-password")
     @Operation(summary = "Set a new password using the reset token")
-    public ResponseEntity<AuthResponse> resetPassword(@RequestBody ResetPasswordRequest req) {
+    public ResponseEntity<AuthResponse> resetPassword(@RequestBody ResetPasswordRequest req,
+                                                      HttpServletRequest request) {
 
         if (req.getToken() == null || req.getNewPassword() == null)
             return ResponseEntity.badRequest()
                     .body(AuthResponse.builder().message("Token and new password are required").build());
 
-        if (!isPasswordValid(req.getNewPassword()))
+        if (!PasswordPolicy.isValid(req.getNewPassword()))
             return ResponseEntity.badRequest()
                     .body(AuthResponse.builder()
-                            .message("Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character.")
+                            .message(PasswordPolicy.message(langFrom(request)))
                             .build());
 
         if (!req.getNewPassword().equals(req.getConfirmPassword()))
@@ -479,38 +466,11 @@ public class AuthController {
 
     @PostMapping("/logout")
     @Operation(summary="Logout and invalidate the current JWT token")
-    public ResponseEntity<Void> logout(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            HttpServletRequest request,
-            HttpServletResponse response) {
+    public ResponseEntity<Void> logout(HttpServletRequest request,
+                                       HttpServletResponse response) {
 
-        // Resolve token from Authorization header OR httpOnly cookie
-        String token = null;
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        } else if (request.getCookies() != null) {
-            token = Arrays.stream(request.getCookies())
-                    .filter(c -> JWT_COOKIE_NAME.equals(c.getName()))
-                    .map(Cookie::getValue)
-                    .findFirst()
-                    .orElse(null);
-        }
-
-        if (token != null) {
-            long remaining = jwtUtil.getRemainingValidityMs(token);
-            if (remaining > 0) {
-                String email = jwtUtil.extractEmail(token);
-                tokenBlacklistService.blacklist(token, remaining);
-                activeSessionService.close(token);
-                log.info("Token revoked on logout");
-                securityAuditService.logout(email);
-            }
-        }
-
-        // V-04 FIX: Clear the httpOnly JWT cookie
-        String secureFlag = cookieSecure ? "; Secure" : "";
-        response.setHeader("Set-Cookie",
-            JWT_COOKIE_NAME + "=; Path=/; Max-Age=0; HttpOnly" + secureFlag + "; SameSite=Strict");
+        String email = sessionService.terminate(request, response);
+        if (email != null) securityAuditService.logout(email);
 
         return ResponseEntity.noContent().build();
     }
@@ -539,26 +499,15 @@ public class AuthController {
     public ResponseEntity<AuthResponse> deleteAccount(
             @org.springframework.security.core.annotation.AuthenticationPrincipal
             org.springframework.security.core.userdetails.UserDetails userDetails,
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            HttpServletRequest request) {
+            HttpServletRequest request,
+            HttpServletResponse response) {
 
         if (userDetails == null) return ResponseEntity.status(401).build();
 
-        // Blacklist the current token so it cannot be used after deletion
-        String token = null;
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        } else if (request.getCookies() != null) {
-            token = Arrays.stream(request.getCookies())
-                    .filter(c -> JWT_COOKIE_NAME.equals(c.getName()))
-                    .map(Cookie::getValue)
-                    .findFirst()
-                    .orElse(null);
-        }
-        if (token != null) {
-            long remaining = jwtUtil.getRemainingValidityMs(token);
-            if (remaining > 0) tokenBlacklistService.blacklist(token, remaining);
-        }
+        // Full teardown, not just the blacklist: this used to leave the cookie in
+        // the browser and the session key in Redis, so a deleted account went on
+        // counting as signed in until its token expired.
+        sessionService.terminate(request, response);
 
         return userRepo.findByEmail(userDetails.getUsername())
                 .map(u -> {
@@ -578,22 +527,6 @@ public class AuthController {
     /**
      * Password must have ≥8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char.
      */
-    private boolean isPasswordValid(String password) {
-        if (password == null || password.length() < 8) return false;
-        return password.matches("^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^a-zA-Z0-9]).{8,}$");
-    }
-
-    /**
-     * V-04 FIX: the token travels as an httpOnly cookie, unreadable by JavaScript.
-     * cookieSecure=false allows it over plain HTTP (dev + server without TLS);
-     * set COOKIE_SECURE=true once Nginx+TLS is in place.
-     */
-    private void setJwtCookie(HttpServletResponse response, String token, long expiresInMs) {
-        String secureFlag = cookieSecure ? "; Secure" : "";
-        response.setHeader("Set-Cookie",
-            String.format("%s=%s; Path=/; Max-Age=%d; HttpOnly%s; SameSite=Strict",
-                JWT_COOKIE_NAME, token, (int) (expiresInMs / 1000), secureFlag));
-    }
 
     private String getClientIp(HttpServletRequest request) {
         return request.getRemoteAddr();
@@ -604,18 +537,7 @@ public class AuthController {
                 .body(AuthResponse.builder().message(message).build());
     }
 
-    /**
-     * Reads the X-Omnimove-Lang header set by the login page.
-     *
-     * Falls back to Accept-Language because not every path carries the custom
-     * header: the verification link is a plain GET from the mail client, and a
-     * user who registered in Italian should not be welcomed in English.
-     */
     private String langFrom(HttpServletRequest request) {
-        String lang = request.getHeader("X-Omnimove-Lang");
-        if (lang != null) return lang.equalsIgnoreCase("it") ? "it" : "en";
-
-        String accept = request.getHeader("Accept-Language");
-        return (accept != null && accept.toLowerCase().startsWith("it")) ? "it" : "en";
+        return RequestLang.of(request);
     }
 }

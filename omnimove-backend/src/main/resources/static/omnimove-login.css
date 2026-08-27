@@ -137,3 +137,76 @@ body{background:var(--bg);color:var(--text);font-family:var(--display);
     min-height: 40px;
 }
 #err-google { display: block; text-align: center; margin-top: 8px; }
+
+/* ── PASSWORD STRENGTH ── */
+/* Five segments, one per rule. Green only when every rule passes, so the colour
+   answers "will this be accepted?" rather than "does this feel long enough?" */
+.pwd-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.pwd-bar-track { display: flex; gap: 4px; flex: 1; }
+.pwd-bar-seg {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,.12);
+    transition: background .2s;
+}
+.pwd-bar-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    min-width: 44px;
+    text-align: right;
+}
+.pwd-bar.level-weak   .pwd-bar-seg.on { background: #f87171; }
+.pwd-bar.level-weak   .pwd-bar-label  { color: #f87171; }
+.pwd-bar.level-fair   .pwd-bar-seg.on { background: #fbbf24; }
+.pwd-bar.level-fair   .pwd-bar-label  { color: #fbbf24; }
+.pwd-bar.level-strong .pwd-bar-seg.on { background: #34d399; }
+.pwd-bar.level-strong .pwd-bar-label  { color: #34d399; }
+
+.pwd-rules {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 4px 14px;
+}
+.pwd-rule {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: rgba(255,255,255,.45);
+    transition: color .2s;
+}
+.pwd-rule.ok { color: #34d399; }
+.pwd-rule-mark { font-size: 10px; width: 10px; display: inline-block; }
+
+/* ── SHOW / HIDE PASSWORD ── */
+.pwd-reveal-wrap { position: relative; display: block; width: 100%; }
+/* Room for the button so the text never runs underneath it */
+.pwd-reveal-wrap > input { padding-right: 40px !important; width: 100%; }
+.pwd-reveal-btn {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    width: 30px;
+    height: 30px;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    box-shadow: none;
+    line-height: 0;
+    cursor: pointer;
+    color: rgba(255,255,255,.45);
+    transition: color .15s, background .15s;
+}
+.pwd-reveal-btn:hover { color: #ffffff; background: rgba(255,255,255,.08); }

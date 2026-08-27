@@ -11,6 +11,7 @@
           crossorigin="anonymous" />
     <link href="omnimove-traveller.css" rel="stylesheet">
     <script src="omnimove-session.js"></script>
+    <script src="omnimove-password.js"></script>
     <script src="omnimove-i18n.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
@@ -464,6 +465,47 @@
                                 <div class="pref-label" id="accountName">—</div>
                                 <div class="pref-desc" id="accountEmail">—</div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Password. The form adapts: an account created through
+                         Google has none to confirm, so it is offered a first one
+                         instead of a change. -->
+                    <div class="settings-section">
+                        <span class="section-label" data-i18n="section_password">Password</span>
+                        <div class="pwd-form">
+                            <div class="pref-desc" id="pwdIntro">—</div>
+
+                            <div class="pwd-field" id="pwdCurrentRow">
+                                <label class="pwd-label" for="pwdCurrent" data-i18n="pwd_current">Current password</label>
+                                <input class="pwd-input" type="password" id="pwdCurrent" autocomplete="current-password">
+                            </div>
+                            <div class="pwd-field">
+                                <label class="pwd-label" for="pwdNew" data-i18n="pwd_new">New password</label>
+                                <input class="pwd-input" type="password" id="pwdNew" autocomplete="new-password">
+                            </div>
+                            <div class="pwd-field">
+                                <label class="pwd-label" for="pwdConfirm" data-i18n="pwd_confirm">Confirm new password</label>
+                                <input class="pwd-input" type="password" id="pwdConfirm" autocomplete="new-password">
+                            </div>
+
+                            <!-- Bar and rules sit under both fields, so the
+                                 requirements are visible while typing either -->
+                            <div class="pwd-bar" id="pwdBar"></div>
+                            <ul class="pwd-rules" id="pwdRules"></ul>
+                            <div class="pwd-err" id="pwdErr"></div>
+
+                            <div class="pwd-actions">
+                                <button class="action-btn btn-dark" id="pwdSaveBtn" onclick="savePassword()"
+                                        style="width:auto;padding:9px 22px"
+                                        data-i18n="pwd_save">Update password</button>
+                                <!-- For someone signed in who no longer remembers the
+                                     current password: the link goes to the address on
+                                     the account, never to one typed here. -->
+                                <button class="pwd-forgot" id="pwdForgotBtn" onclick="sendOwnResetLink()"
+                                        data-i18n="pwd_forgot">I forgot my password</button>
+                            </div>
+                            <div class="pwd-note" id="pwdNote"></div>
                         </div>
                     </div>
 

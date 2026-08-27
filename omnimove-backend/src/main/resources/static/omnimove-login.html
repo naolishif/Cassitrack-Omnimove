@@ -10,7 +10,7 @@
 <body>
 <div class="container">
     <div class="logo">OMNI<span>MOVE</span></div>
-    <div class="tagline">Smart mobility for Cassino — UNICAS 2025/2026</div>
+    <div class="tagline" data-i18n="tagline">Smart mobility for Cassino — UNICAS 2025/2026</div>
 
     <div class="card">
         <!-- Tabs -->
@@ -69,6 +69,8 @@
                 <input class="input" type="password" id="regConfirm" data-i18n="ph_repeat" placeholder="Repeat your password"/>
                 <span class="field-err" id="err-regConfirm"></span>
             </div>
+            <div class="pwd-bar" id="regPwdBar"></div>
+            <ul class="pwd-rules" id="regPwdRules"></ul>
             <button class="btn" type="submit" id="regBtn" data-i18n="btn_create">Create Account</button>
         </form>
 
@@ -130,6 +132,8 @@
                 <input class="input" type="password" id="newPasswordConfirm" data-i18n="ph_repeat_new" placeholder="Repeat new password"/>
                 <span class="field-err" id="err-newPasswordConfirm"></span>
             </div>
+            <div class="pwd-bar" id="resetPwdBar"></div>
+            <ul class="pwd-rules" id="resetPwdRules"></ul>
             <input type="hidden" id="resetToken"/>
             <button class="btn btn-danger" type="submit" id="resetBtn" data-i18n="btn_set_pass">Set New Password</button>
             <button type="button" class="btn-ghost" onclick="cancelReset()" data-i18n="btn_back_signin">← Back to Sign In</button>
@@ -146,6 +150,7 @@
 </div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="omnimove-password.js"></script>
 <script src="omnimove-i18n.js"></script>
 <script src="omnimove-login.js"></script>
 </body>

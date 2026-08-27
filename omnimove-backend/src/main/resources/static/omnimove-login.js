@@ -562,3 +562,27 @@ async function handleGoogleCredential(response) {
 }
 
 initGoogle();
+
+// ── Password strength ──
+// Both forms that ask for a new password show the same bar and the same rules,
+// from omnimove-password.js — the mirror of the server-side policy.
+omniPwdWatch(document.getElementById('regPassword'),
+             document.getElementById('regPwdBar'),
+             document.getElementById('regPwdRules'));
+
+omniPwdWatch(document.getElementById('newPassword'),
+             document.getElementById('resetPwdBar'),
+             document.getElementById('resetPwdRules'));
+
+// The rule labels come from the module, not from data-i18n, so a language
+// switch has to repaint them
+const _prevLangChange = window._onLangChange;
+window._onLangChange = (lang) => {
+    if (typeof _prevLangChange === 'function') _prevLangChange(lang);
+    omniPwdRender(document.getElementById('regPassword')?.value,
+                  document.getElementById('regPwdBar'),
+                  document.getElementById('regPwdRules'));
+    omniPwdRender(document.getElementById('newPassword')?.value,
+                  document.getElementById('resetPwdBar'),
+                  document.getElementById('resetPwdRules'));
+};

@@ -369,6 +369,10 @@ window._onLangChange = () => {
     updateWeatherPill();
     syncSearchBtn();
     updateTimeDisplay();
+    // The password intro and button carry text set from JS, not from data-i18n,
+    // so applyTranslations() cannot reach them
+    if (document.getElementById('ptab-account')?.classList.contains('active'))
+        applyPasswordMode(_hasPassword);
 };
 
 // ── Weather pill on page load ──────────────────────────────────────
@@ -2910,11 +2914,7 @@ function switchProfileTab(tab) {
     if (tab === 'history')   loadHistory();
     if (tab === 'favorites') { loadFavorites(); loadFavoriteStops(); }
     if (tab === 'settings')  loadPreferences();
-    if (tab === 'account') {
-        const user = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
-        document.getElementById('accountName').textContent  = user.name  || '—';
-        document.getElementById('accountEmail').textContent = user.email || '—';
-    }
+    if (tab === 'account') loadAccount();
 }
 
 // Escape a string so it is safe inside a double-quoted HTML attribute.
@@ -3622,3 +3622,144 @@ initAutocomplete();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
     else ready();
 })();
+
+// ── Account tab ───────────────────────────────────────────────────
+// Name and email come from sessionStorage so the panel paints immediately;
+// the server is then asked how this account signs in, which decides whether
+// the password form asks for a current password or offers a first one.
+let _hasPassword = true;
+
+let _pwdPaint = null;
+
+async function loadAccount() {
+    const cached = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
+    document.getElementById('accountName').textContent  = cached.name  || '—';
+    document.getElementById('accountEmail').textContent = cached.email || '—';
+
+    try {
+        const r = await apiFetch('/traveller/me');
+        if (!r.ok) throw new Error('me ' + r.status);
+        const me = await r.json();
+        document.getElementById('accountName').textContent  = me.name  || '—';
+        document.getElementById('accountEmail').textContent = me.email || '—';
+        applyPasswordMode(me.hasPassword);
+    } catch (e) {
+        console.warn('Could not load account:', e);
+        // Assume the stricter form: asking for a password the account has is
+        // recoverable, offering to skip one it needs is not
+        applyPasswordMode(true);
+    }
+}
+
+function applyPasswordMode(hasPassword) {
+    _hasPassword = hasPassword !== false;
+
+    // Bound once; repainting afterwards is just calling it again
+    if (!_pwdPaint) {
+        _pwdPaint = omniPwdWatch(document.getElementById('pwdNew'),
+                                 document.getElementById('pwdBar'),
+                                 document.getElementById('pwdRules'));
+    } else {
+        _pwdPaint();
+    }
+
+    document.getElementById('pwdCurrentRow').style.display = _hasPassword ? 'flex' : 'none';
+    document.getElementById('pwdIntro').textContent =
+        _hasPassword ? t('pwd_intro_change') : t('pwd_intro_set');
+    document.getElementById('pwdSaveBtn').textContent =
+        _hasPassword ? t('pwd_save') : t('pwd_save_first');
+
+    // Nothing to recover on an account that has no password yet — it can set
+    // one right here without proving anything beyond being signed in
+    document.getElementById('pwdForgotBtn').style.display = _hasPassword ? '' : 'none';
+    document.getElementById('pwdForgotBtn').textContent   = t('pwd_forgot');
+}
+
+async function sendOwnResetLink() {
+    const btn  = document.getElementById('pwdForgotBtn');
+    const note = document.getElementById('pwdNote');
+    note.className = 'pwd-note';
+    note.textContent = '';
+    btn.disabled = true;
+
+    try {
+        const r = await apiFetch('/traveller/me/password-reset', { method: 'POST' });
+        const data = await r.json();
+
+        if (!r.ok) {
+            note.className = 'pwd-note err';
+            note.textContent = data.message || t('pwd_err_generic');
+            return;
+        }
+        note.textContent = tf('pwd_reset_sent', { email: data.email });
+        showToast(t('pwd_reset_sent_toast'));
+
+        // The server has already revoked this session — the cookie is gone and
+        // the token is blacklisted, so every further call would 401. Read the
+        // message, then out. No logout call: there is nothing left to log out of.
+        if (data.sessionEnded) {
+            document.getElementById('pwdSaveBtn').disabled = true;
+            setTimeout(() => {
+                OmniSession.clearClientSession();
+                location.replace(LOGIN_PAGE);
+            }, 3500);
+        }
+
+    } catch (e) {
+        note.className = 'pwd-note err';
+        note.textContent = t('toast_prefs_error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function savePassword() {
+    const current = document.getElementById('pwdCurrent');
+    const next    = document.getElementById('pwdNew');
+    const confirm = document.getElementById('pwdConfirm');
+    const err     = document.getElementById('pwdErr');
+
+    [current, next, confirm].forEach(i => i.classList.remove('err'));
+    err.textContent = '';
+
+    if (_hasPassword && !current.value) {
+        current.classList.add('err'); err.textContent = t('pwd_err_current'); return;
+    }
+    if (!next.value) {
+        next.classList.add('err'); err.textContent = t('pwd_err_required'); return;
+    }
+    if (next.value !== confirm.value) {
+        confirm.classList.add('err'); err.textContent = t('pwd_err_match'); return;
+    }
+
+    const btn = document.getElementById('pwdSaveBtn');
+    btn.disabled = true;
+    try {
+        const body = { password: next.value };
+        if (_hasPassword) body.currentPassword = current.value;
+
+        const r = await apiFetch('/traveller/me', {
+            method: 'PUT',
+            body: JSON.stringify(body)
+        });
+        const data = await r.json();
+
+        if (!r.ok) {
+            // The policy text comes from the server so the rule is stated once
+            err.textContent = data.message || t('pwd_err_generic');
+            next.classList.add('err');
+            return;
+        }
+
+        [current, next, confirm].forEach(i => i.value = '');
+        // A Google account that just gained a password now needs the current
+        // one for any further change
+        applyPasswordMode(data.hasPassword);
+        showToast(t('pwd_saved'));
+
+    } catch (e) {
+        err.textContent = t('pwd_err_generic');
+    } finally {
+        btn.disabled = false;
+    }
+}
