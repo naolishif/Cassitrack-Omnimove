@@ -70,16 +70,6 @@ public class JourneyPlannerService {
     private static final double SPEED_SCOOTER = 20.0;
     private static final double COST_BUS      = 1.00;
 
-    // ── Pesi del punteggio multi-criterio ──────────────────────────
-    // Ogni profilo pesa le tre metriche in modo diverso. La somma fa 1.0, cosi'
-    // i punteggi restano nell'intervallo [0,1] e sono confrontabili fra opzioni
-    // della STESSA ricerca. Sono una scelta di progetto, non una taratura
-    // sperimentale: modificarli qui cambia l'ordinamento senza toccare altro.
-    //                                        tempo  costo  ambiente
-    private static final double[] W_FAST   = { 0.70,  0.10,  0.20 };
-    private static final double[] W_BUDGET = { 0.20,  0.70,  0.10 };
-    private static final double[] W_ECO    = { 0.20,  0.10,  0.70 };
-
     @Value("${elerent.bike.unlock:1.00}")
     private double bikeUnlock;
     @Value("${elerent.bike.per-minute:0.29}")
@@ -109,19 +99,22 @@ public class JourneyPlannerService {
                         : List.of("BUS","BIKE","SCOOTER","WALK")
         );
 
+        // The behavioural preferences always shape CUSTOM — it is the traveller's
+        // own profile. Whether they reach FAST, BUDGET and ECO is their call:
+        // those three each answer one question, and a profile quietly filtering
+        // their results would make them answer a different one than their name
+        // promises. Loaded once here and passed down, so every use agrees.
+        UserPreferences prefs = activePreferences(req);
+
         boolean preferBike = false;
         int maxBikeWalk = 500;   // metres — overridden by the user preference
-        if (req.getUserId() != null) {
-            var prefsOpt = preferencesRepository.findByUserId(req.getUserId());
-            if (prefsOpt.isPresent()) {
-                var prefs = prefsOpt.get();
-                if (Boolean.FALSE.equals(prefs.getShowWalking())) {
-                    modes.remove("WALK");
-                }
-                preferBike = Boolean.TRUE.equals(prefs.getPreferBikeOverBus());
-                if (prefs.getMaxBikeWalkMetres() != null && prefs.getMaxBikeWalkMetres() > 0) {
-                    maxBikeWalk = prefs.getMaxBikeWalkMetres();
-                }
+        if (prefs != null) {
+            if (Boolean.FALSE.equals(prefs.getShowWalking())) {
+                modes.remove("WALK");
+            }
+            preferBike = Boolean.TRUE.equals(prefs.getPreferBikeOverBus());
+            if (prefs.getMaxBikeWalkMetres() != null && prefs.getMaxBikeWalkMetres() > 0) {
+                maxBikeWalk = prefs.getMaxBikeWalkMetres();
             }
         }
 
@@ -141,13 +134,16 @@ public class JourneyPlannerService {
         for (String mode : modes) {
             try {
                 JourneyOption opt = switch (mode.toUpperCase()) {
-                    case "BUS"     -> planBus(req, msgs, weather);
+                    case "BUS"     -> planBus(req, msgs, weather, false);
                     case "BIKE"    -> planBike(req, msgs, weather, maxBikeWalk);
                     case "SCOOTER" -> planScooter(req, msgs, weather, maxBikeWalk);
                     case "WALK"    -> planWalk(req, weather);
                     default -> null;
                 };
-                if (opt != null) options.add(opt);
+                if (opt != null) {
+                    options.add(opt);
+                    if ("BUS".equals(mode.toUpperCase())) addBusAlternative(req, weather, opt, options);
+                }
                 else if ("BUS".equals(mode.toUpperCase())) {
                     msgs.add(req.isItalian()
                             ? "🚌 Nessuna linea bus disponibile o dati insufficienti per questo percorso."
@@ -188,8 +184,11 @@ public class JourneyPlannerService {
             if (!bikeAvailable) {
                 // la bici non è disponibile → calcola il bus come riserva
                 try {
-                    JourneyOption bus = planBus(req,msgs, weather);
-                    if (bus != null) options.add(bus);
+                    JourneyOption bus = planBus(req, msgs, weather, false);
+                    if (bus != null) {
+                        options.add(bus);
+                        addBusAlternative(req, weather, bus, options);
+                    }
                 } catch (Exception e) {
                     log.warn("Failed BUS fallback option: {}", e.getMessage());
                 }
@@ -201,25 +200,31 @@ public class JourneyPlannerService {
                 weather.condition == WeatherService.WeatherCondition.RAIN ||
                         weather.condition == WeatherService.WeatherCondition.HEAVY_RAIN;
 
-        options.sort(
-                Comparator.comparingInt((JourneyOption o) ->
-                                raining && exposedToRain(o.getMode()) ? 1 : 0)   // bus prima se piove
-                        .thenComparingInt(JourneyOption::getDurationMinutes));
+        boolean rainPrefersBus = prefs == null || Boolean.TRUE.equals(prefs.getRainPrefersBus());
 
-        boolean onlyBusWhenRaining = true; // default
-        if (req.getUserId() != null) {
-            onlyBusWhenRaining = preferencesRepository.findByUserId(req.getUserId())
-                    .map(p -> Boolean.TRUE.equals(p.getOnlyBusWhenRaining()))
-                    .orElse(true);
-        }
-        if (raining && onlyBusWhenRaining) {
-            options.removeIf(o -> exposedToRain(o.getMode()));
+        // RAIN ORDERS, IT NO LONGER HIDES.
+        // This used to delete every walking, bike and scooter option when it was
+        // raining. That is the app deciding for the traveller — a five-minute
+        // walk in light rain is theirs to choose — and on a route with no bus it
+        // left the search with nothing at all. The bus now simply comes first,
+        // and the reason is said out loud.
+        if (raining && rainPrefersBus) {
+            options.sort(
+                    Comparator.comparingInt((JourneyOption o) -> exposedToRain(o.getMode()) ? 1 : 0)
+                            .thenComparingInt(JourneyOption::getDurationMinutes));
+
+            if (options.stream().anyMatch(o -> !exposedToRain(o.getMode())))
+                msgs.add(req.isItalian()
+                        ? "Piove: ti consigliamo il bus, non ti bagnerai. Le altre opzioni restano disponibili."
+                        : "It is raining: we suggest the bus so you stay dry. The other options are still there.");
+        } else {
+            options.sort(Comparator.comparingInt(JourneyOption::getDurationMinutes));
         }
 
-        // Punteggio multi-criterio: si calcola sull'insieme DEFINITIVO delle
-        // opzioni (dopo il filtro pioggia), perche' la normalizzazione dipende
-        // dal min/max di cio' che l'utente vedra' davvero.
-        computeScores(options);
+        // One pass over the final list, so every option gets the fourth criterion
+        // regardless of which builder produced it
+        options.forEach(o -> o.setReliabilityScore(
+                reliabilityOf(o.getMode(), o.getTransferWaitMinutes(), o.getDelayMinutes())));
 
         return JourneyResponse.builder()
                 .options(options)
@@ -235,72 +240,73 @@ public class JourneyPlannerService {
     }
 
 
+    // NESSUN PUNTEGGIO MULTI-CRITERIO
+    // Ogni profilo pesava le tre metriche (tempo/costo/ambiente) e il frontend
+    // ordinava per il punteggio risultante. Il peso rendeva l'ordine difficile
+    // da spiegare: con FAST a 0.70/0.10/0.20 un'opzione piu' lenta poteva
+    // precederne una piu' veloce perche' costava meno o inquinava meno, che e'
+    // esattamente cio' che il chip "il piu' veloce" dice di non fare.
+    //
+    // Adesso l'ordinamento e' quello letterale del chip, e vive nel frontend
+    // (sortOptions): FAST per durata crescente, BUDGET per costo crescente,
+    // ECO per green index decrescente. A parita' esatta l'ordine di arrivo
+    // resta invariato — il sort di JavaScript e' stabile — quindi il risultato
+    // e' comunque deterministico senza reintrodurre un peso nascosto.
+
+    /** Keeps the three existing call sites on the ordinary behaviour. */
     /**
-     * Assegna a ogni opzione tre punteggi in [0,1], uno per profilo (FAST /
-     * BUDGET / ECO). Il frontend ordina per il punteggio del chip attivo.
+     * Offers the itinerary with a change alongside the direct one.
      *
-     * Perche' un punteggio e non un semplice sort su una metrica: quando piu'
-     * opzioni pareggiano sul criterio principale (es. bici, monopattino e piedi
-     * hanno tutti green_index = 100), il criterio singolo non sa distinguerle e
-     * l'ordine diventa arbitrario. Il punteggio usa le altre due metriche come
-     * spareggio, con peso minore.
+     * WHY IT IS NOT ALWAYS ADDED
+     * A change costs a second fare and can be missed, so against a direct run
+     * it is worse on price and worse on reliability by construction. Its only
+     * possible advantage is time — a direct line that takes the long way round
+     * loses to a change that cuts across. If it is not faster it is beaten on
+     * every criterion at once, and adding it would be noise, not a choice.
      *
-     * Normalizzazione min-max SULLA SINGOLA RICERCA: i punteggi servono a
-     * ordinare le alternative fra loro, non hanno significato assoluto e non
-     * sono confrontabili fra ricerche diverse.
+     * WHY ONLY WHEN THE FIRST OPTION IS DIRECT
+     * With no direct line planBus already returns the change; asking again
+     * would recompute the same itinerary, live waits and all.
+     *
+     * Its messages are thrown away: they describe the same stop and the same
+     * lines the first pass already reported, and the traveller should not read
+     * them twice.
      */
-    private void computeScores(List<JourneyOption> options) {
-        if (options == null || options.isEmpty()) return;
+    private void addBusAlternative(JourneyRequest req, WeatherService.WeatherData weather,
+                                   JourneyOption direct, List<JourneyOption> options) {
+        if (direct.getTransferWaitMinutes() != null) return;   // already the change
 
-        double[] time  = normalise(options, o -> value(o.getDurationMinutes()));
-        double[] cost  = normalise(options, o -> value(o.getCostEuros()));
-        double[] green = normalise(options, o -> value(o.getGreenIndex()));
+        try {
+            JourneyOption viaChange = planBus(req, new ArrayList<>(), weather, true);
+            if (viaChange == null || viaChange.getTransferWaitMinutes() == null) return;
+            // nz() takes a Double; these are Integer minutes, and an unknown
+            // duration cannot be claimed to be faster
+            Integer viaMin = viaChange.getDurationMinutes();
+            Integer dirMin = direct.getDurationMinutes();
+            if (viaMin == null || dirMin == null || viaMin >= dirMin) return;
 
-        for (int i = 0; i < options.size(); i++) {
-            JourneyOption o = options.get(i);
-            // tempo e costo: piu' basso e' meglio -> si inverte (1 - x)
-            // ambiente: piu' alto e' meglio -> si usa diretto
-            o.setScoreFast(  score(W_FAST,   time[i], cost[i], green[i]));
-            o.setScoreBudget(score(W_BUDGET, time[i], cost[i], green[i]));
-            o.setScoreEco(   score(W_ECO,    time[i], cost[i], green[i]));
+            options.add(viaChange);
+        } catch (Exception e) {
+            // The direct option stands on its own; the alternative is a bonus
+            log.warn("Failed BUS-with-change alternative: {}", e.getMessage());
         }
-    }
-
-    private double score(double[] w, double tNorm, double cNorm, double gNorm) {
-        double s = w[0] * (1 - tNorm) + w[1] * (1 - cNorm) + w[2] * gNorm;
-        return Math.round(s * 1000) / 1000.0;
-    }
-
-    /**
-     * Min-max sulle opzioni presenti. Se tutte hanno lo stesso valore la metrica
-     * non discrimina: si restituisce 0.5 (neutro) per non favorire ne' penalizzare.
-     */
-    private double[] normalise(List<JourneyOption> options,
-                               java.util.function.ToDoubleFunction<JourneyOption> f) {
-        int n = options.size();
-        double[] raw = new double[n];
-        double lo = Double.MAX_VALUE, hi = -Double.MAX_VALUE;
-        for (int i = 0; i < n; i++) {
-            raw[i] = f.applyAsDouble(options.get(i));
-            lo = Math.min(lo, raw[i]);
-            hi = Math.max(hi, raw[i]);
-        }
-        double[] out = new double[n];
-        if (hi - lo < 1e-9) {
-            java.util.Arrays.fill(out, 0.5);
-            return out;
-        }
-        for (int i = 0; i < n; i++) out[i] = (raw[i] - lo) / (hi - lo);
-        return out;
-    }
-
-    /** Null-safe: un'opzione senza metrica non deve far saltare il calcolo. */
-    private double value(Number n) {
-        return n != null ? n.doubleValue() : 0.0;
     }
 
     private JourneyOption planBus(JourneyRequest req, List<String> msgs,
                                   WeatherService.WeatherData weather) {
+        return planBus(req, msgs, weather, false);
+    }
+
+    /**
+     * @param viaChange build the itinerary with an interchange even when a
+     *                  direct line exists. The direct run is otherwise always
+     *                  preferred, which used to mean the traveller never saw
+     *                  the two alternatives side by side — and left the
+     *                  reliability criterion with nothing to choose between.
+     */
+    private JourneyOption planBus(JourneyRequest req, List<String> msgs,
+                                  WeatherService.WeatherData weather,
+                                  boolean viaChange) {
 
         String nearestStop = req.getOriginStopId() != null
                 ? req.getOriginStopId()
@@ -354,12 +360,24 @@ public class JourneyPlannerService {
         String lineLabel;
         int busMin;
         int waitMin = 5;                       // attesa iniziale, assegnata nei rami
+        // Slack at the interchange, for the reliability criterion. Stays null on a
+        // direct run: there is no connection to miss, which is not the same as a
+        // margin of zero.
+        Integer transferWait = null;
+        // What a delay watcher has to follow: the runs actually ridden, and the
+        // stops ahead of them where their delay can be read
+        String boardedRouteId  = null;
+        String boardedTripId   = null;
+        String changeStopId    = null;
+        String changeTripId    = null;
         double busMetres ;     // default per cambio/ripiego
         List<JourneyLeg> busLegs = new ArrayList<>();
         DelayInfo busDelay = DelayInfo.none();
 
-        if (!direct.isEmpty()) {
+        if (!direct.isEmpty() && !viaChange) {
             var line = direct.get(0);
+            boardedRouteId = line.getRouteId();
+            boardedTripId  = line.getTripId();
             lineLabel = line.getShortName() + " → " + line.getLongName();
             DelayInfo[] delayOut = { DelayInfo.none() };
             waitMin = waitMinutesForLine(nearestStop, line.getRouteId(), line.getShortName(),
@@ -407,6 +425,11 @@ public class JourneyPlannerService {
                         java.time.Instant.now().plusSeconds(15 * 60));
                 int changeWait = waitMinutesForLine(t.stop(), t.l2RouteId(), t.l2Short(),
                         msgs, null, atTransfer, liveAtTransfer, req.isItalian());
+                transferWait   = changeWait;
+                boardedRouteId = t.l1RouteId();
+                boardedTripId  = t.l1TripId();
+                changeStopId   = t.stop();
+                changeTripId   = t.l2TripId();
 
                 java.time.Instant boarding2 = atTransfer.plusSeconds(60L * changeWait);
                 SegTime s2 = busTimeBySegments(t.l2TripId(), t.stop(), destStop,
@@ -500,15 +523,15 @@ public class JourneyPlannerService {
                 .build());
 
         String occupancyWarning = null;
-        if (req.getUserId() != null) {
-            boolean avoid = preferencesRepository.findByUserId(req.getUserId())
-                    .map(p -> Boolean.TRUE.equals(p.getAvoidHighOccupancy()))
-                    .orElse(false);
+        {
+            var prefs = activePreferences(req);
+            boolean avoid = prefs != null && Boolean.TRUE.equals(prefs.getAvoidHighOccupancy());
+            int threshold = (prefs != null && prefs.getOccupancyThresholdPct() != null)
+                    ? prefs.getOccupancyThresholdPct() : 80;
             if (avoid) {
                 boolean highOccupancy = cassitrackClient.getActiveVehicles().stream()
-                        .anyMatch(v -> "HIGH".equalsIgnoreCase(v.getCrowdingLevel())
-                                || "VERY_HIGH".equalsIgnoreCase(v.getCrowdingLevel()));
-                if (highOccupancy) occupancyWarning = "⚠️ High occupancy";
+                        .anyMatch(v -> occupancyPct(v.getCrowdingLevel()) >= threshold);
+                if (highOccupancy) occupancyWarning = "⚠️ Over " + threshold + "% full";
             }
         }
 
@@ -537,6 +560,13 @@ public class JourneyPlannerService {
                 .delayRealTime(isNow && busDelay != null ? busDelay.realTime() : null)
                 .delayAtStop(isNow && busDelay != null ? busDelay.atStop() : null)
                 .delayLabel(isNow ? delayLabel(busDelay) : null)
+                .transferWaitMinutes(transferWait)
+                .boardingStopId(nearestStop)
+                .busRouteId(boardedRouteId)
+                .boardingTripId(boardedTripId)
+                .alightStopId(destStop)
+                .transferStopId(changeStopId)
+                .transferTripId(changeTripId)
                 .summary("Take " + lineLabel + " from " + fmtStop(nearestStop)
                         + (walkMin > 0 ? " (" + fmtDist(walkMetres) + " walk)" : ""))
                 .weatherWarning(occupancyWarning != null ? occupancyWarning
@@ -954,6 +984,9 @@ public class JourneyPlannerService {
     /** Waiting for the bus, averaged: the search compares routes, not departures. */
     private static final double BOARDING_WAIT_MIN = 5.0;
 
+    /** Slack at which an interchange stops feeling tight, in minutes. */
+    private static final double COMFORTABLE_CHANGE_MIN = 10.0;
+
     /** Chains longer than this stop being itineraries and start being puzzles. */
     private static final int MAX_COMBINED_LEGS = 4;
 
@@ -1012,6 +1045,14 @@ public class JourneyPlannerService {
                 .delayMinutes(bus.getDelayMinutes()).delayStatus(bus.getDelayStatus())
                 .delayRealTime(bus.getDelayRealTime()).delayAtStop(bus.getDelayAtStop())
                 .delayLabel(bus.getDelayLabel())
+                // The chain is only as safe as the change inside its bus leg
+                .transferWaitMinutes(bus.getTransferWaitMinutes())
+                .boardingStopId(bus.getBoardingStopId())
+                .busRouteId(bus.getBusRouteId())
+                .boardingTripId(bus.getBoardingTripId())
+                .alightStopId(bus.getAlightStopId())
+                .transferStopId(bus.getTransferStopId())
+                .transferTripId(bus.getTransferTripId())
                 .bikeId(ride.getBikeId()).bikePlate(ride.getBikePlate())
                 .bikeBatteryPct(ride.getBikeBatteryPct()).bikeWalkMetres(ride.getBikeWalkMetres())
                 .bikeWarning(ride.getBikeWarning())
@@ -1034,6 +1075,98 @@ public class JourneyPlannerService {
      * name check let the combined options slip past the rain filter — the app
      * offered a bike in a downpour to the very people who had asked for bus only.
      */
+    /**
+     * The live feed reports a crowding band, not a number, so the threshold the
+     * traveller sets in percent has to be compared against something. Each band
+     * is read as the middle of its range: the setting then picks which bands
+     * count as crowded, which is what a percentage means with this data.
+     * An unknown or absent level is treated as empty rather than as crowded —
+     * a filter must not hide a bus on the strength of a missing reading.
+     */
+    private static int occupancyPct(String crowdingLevel) {
+        if (crowdingLevel == null) return 0;
+        return switch (crowdingLevel.toUpperCase()) {
+            case "VERY_HIGH" -> 95;
+            case "HIGH"      -> 80;
+            case "MEDIUM"    -> 55;
+            case "LOW"       -> 25;
+            default          -> 0;
+        };
+    }
+
+    /**
+     * How robust an itinerary is, 0..1 — the fourth criterion behind Q4.
+     *
+     * WHY IT IS NOT THE TRANSFER WAIT ON ITS OWN
+     * The first version scored options by their interchange slack, min-maxed
+     * across the search. It could never work: this planner returns ONE bus
+     * option, direct when a direct line exists and a single best transfer
+     * otherwise, so at most one option in a set carries a margin at all. Being
+     * the only non-null value it was always the maximum, and every option —
+     * a one-minute change included — came out at exactly 1.0. The weight
+     * shifted every score equally and changed no order whatsoever.
+     *
+     * WHAT IT IS INSTEAD
+     * The risk of the journey failing, judged in absolute terms so it stays
+     * meaningful with a single bus option in the set:
+     *
+     *   nothing to catch (walk, bike, scooter)     1.00 — no timetable to miss
+     *   one boarding, no interchange               0.90 — miss it, take the next
+     *   an interchange                    0.30 .. 0.90 by its slack
+     *
+     * Miss the first bus and you wait for another; miss the connection and you
+     * are stranded halfway, which is why only the interchange moves the score
+     * far. Slack is read against ten minutes: below that a change is tight,
+     * above it nothing more is gained.
+     *
+     * A bus already reported late eats into that margin, so a live delay costs
+     * up to a quarter of the score.
+     */
+    private static double reliabilityOf(String mode, Integer transferWaitMin, Integer delayMin) {
+        double score;
+        if (!hasBusLeg(mode)) {
+            score = 1.0;
+        } else if (transferWaitMin == null) {
+            score = 0.90;
+        } else {
+            double slack = Math.min(1.0, Math.max(0, transferWaitMin) / COMFORTABLE_CHANGE_MIN);
+            score = 0.30 + 0.60 * slack;
+        }
+
+        if (delayMin != null && delayMin > 0)
+            score -= Math.min(0.25, delayMin / 40.0);
+
+        return Math.max(0.0, Math.min(1.0, Math.round(score * 1000) / 1000.0));
+    }
+
+    /**
+     * The traveller's behavioural preferences, or null when they must not apply
+     * to this search.
+     *
+     * They always apply to CUSTOM. For FAST, BUDGET and ECO they apply only if
+     * the traveller has asked for it; otherwise null is returned and every
+     * caller falls back to the neutral defaults, so those three rankings answer
+     * their single question on the full set of options.
+     */
+    private UserPreferences activePreferences(JourneyRequest req) {
+        if (req.getUserId() == null) return null;
+
+        UserPreferences prefs = preferencesRepository.findByUserId(req.getUserId()).orElse(null);
+        if (prefs == null) return null;
+
+        // Absent or unrecognised, the preset is treated as CUSTOM: an older
+        // client that does not send one keeps the behaviour it had before.
+        String preset = req.getSortPreset() == null ? "CUSTOM" : req.getSortPreset().toUpperCase();
+        if ("CUSTOM".equals(preset)) return prefs;
+
+        return Boolean.FALSE.equals(prefs.getApplyPrefsToPresets()) ? null : prefs;
+    }
+
+    /** A chain such as BUS_BIKE contains a bus leg; WALK, BIKE, SCOOTER do not. */
+    private static boolean hasBusLeg(String mode) {
+        return mode != null && mode.toUpperCase().contains("BUS");
+    }
+
     private static boolean exposedToRain(String mode) {
         if (mode == null) return false;
         String m = mode.toUpperCase();

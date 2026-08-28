@@ -33,6 +33,16 @@ public class JourneyRequest {
     public void addMessage(String msg) { this.messages.add(msg); }
     private List<String> modes;
 
+    /**
+     * Which ranking the traveller has selected: FAST, BUDGET, ECO or CUSTOM.
+     *
+     * The ordering itself happens in the browser, but the server needs to know
+     * it: the behavioural preferences always shape CUSTOM and reach the other
+     * three only when the traveller says so, and some of them decide which
+     * options are computed at all rather than how they are sorted.
+     */
+    @JsonProperty("sort_preset") private String sortPreset;
+
     public boolean isItalian() { return "it".equalsIgnoreCase(lang); }
     public boolean isDestGps() { return Boolean.TRUE.equals(destIsGps); }
     public boolean isArriveBy() { return Boolean.TRUE.equals(arriveBy); }

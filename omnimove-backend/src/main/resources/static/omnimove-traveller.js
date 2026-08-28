@@ -68,7 +68,11 @@ async function loadPreferences() {
     try {
         const r = await apiFetch('/traveller/preferences');
         if (!r.ok) throw new Error('prefs ' + r.status);
-        const p = await r.json();
+        // { preferences, weights } — the weights are derived server-side so the
+        // formula lives in one place
+        const payload = await r.json();
+        const p = payload.preferences || payload;
+        PROFILE_WEIGHTS = payload.weights || PROFILE_WEIGHTS;
 
         // Select
         const sel = document.getElementById('prefDefaultMode');
@@ -86,19 +90,111 @@ async function loadPreferences() {
         set('prefAvoidOccupancy', p.avoidHighOccupancy);
         set('prefShowWalking',    p.showWalking);
         set('prefBikeOverBus',    p.preferBikeOverBus);
-        set('prefOnlyBusRain',    p.onlyBusWhenRaining);
+        set('prefRainPrefersBus', p.rainPrefersBus);
+        set('prefApplyToPresets', p.applyPrefsToPresets !== false);
+        _prefsScopedToCustom = p.applyPrefsToPresets === false;
         set('prefNotifyDelays',   p.notifyDelays);
-        set('prefNotifyTicket',   p.notifyTicketExpiry);
-        set('prefNotifyEcoTip',   p.notifyEcoTip);
+        _notifyDelays = p.notifyDelays !== false;
 
-        // Applica subito il sort di default ai chip nella topbar
-        const sortMap = { ECO: 'eco', BUDGET: 'budget', FAST: 'fast' };
-        const sortVal = sortMap[p.defaultJourneyMode] || 'eco';
-        setSort(sortVal);
+        // The four answers and the crowding threshold
+        setAnswer('ansTime',        p.answerTime);
+        setAnswer('ansCost',        p.answerCost);
+        setAnswer('ansEco',         p.answerEco);
+        setAnswer('ansReliability', p.answerReliability);
+        const occ = document.getElementById('prefOccupancyPct');
+        if (occ) { occ.value = String(p.occupancyThresholdPct ?? 80); syncOccupancyLabel(); }
+        renderWeightReadout();
+
+        // Applica subito il sort di default
+        setSort(SORT_OF_MODE[p.defaultJourneyMode] || 'eco');
+
+        // Asked once, at the first sign-in after registering. Everything it sets
+        // stays editable from Preferences.
+        if (p.onboardingDone === false) openOnboarding();
+        else initDotRows();
 
     } catch (e) {
         console.warn('Could not load preferences:', e);
     }
+}
+
+/** Weights derived from the answers; refreshed by every save. */
+let PROFILE_WEIGHTS = { time: 0.25, cost: 0.25, eco: 0.25, reliability: 0.25 };
+
+// True when the behavioural preferences apply to Custom only. It decides
+// whether switching ranking is a re-sort or a fresh search.
+let _prefsScopedToCustom = false;
+
+/** "Route delay alerts": watched only while a started journey is running. */
+let _notifyDelays = true;
+
+const SORT_OF_MODE = { ECO: 'eco', BUDGET: 'budget', FAST: 'fast', CUSTOM: 'custom' };
+const MODE_OF_SORT = { eco: 'ECO', budget: 'BUDGET', fast: 'FAST', custom: 'CUSTOM' };
+
+// ── The 0..5 answer control ──
+// Six dots, not five: the scale starts at zero because zero is a real answer.
+// On Q4 it is the whole left-hand meaning — "I want wide margins" — and on the
+// other three it says "this does not matter to me", which is different from
+// "it matters a little". The number is written inside each dot so the six are
+// never mistaken for a five-point rating.
+const ANSWER_MIN = 0;
+const ANSWER_MAX = 5;
+
+function setAnswer(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const v = Math.max(ANSWER_MIN, Math.min(ANSWER_MAX, Number(value ?? 3)));
+    el.dataset.value = String(v);
+    renderDots(el);
+}
+
+function answerOf(id) {
+    const el = document.getElementById(id);
+    return el ? parseInt(el.dataset.value, 10) : 3;
+}
+
+function renderDots(el) {
+    const v = parseInt(el.dataset.value, 10);
+    let html = '';
+    for (let i = ANSWER_MIN; i <= ANSWER_MAX; i++) {
+        html += `<button type="button" class="dot${i === v ? ' on' : ''}" data-dot="${i}"
+                         aria-pressed="${i === v}">${i}</button>`;
+    }
+    el.innerHTML = html;
+}
+
+// One listener for every dot row, present or added later
+document.addEventListener('click', e => {
+    const dot = e.target.closest('.dots .dot');
+    if (!dot) return;
+    const row = dot.parentElement;
+    row.dataset.value = dot.dataset.dot;
+    renderDots(row);
+});
+
+/** Paints every dot row that has not been rendered yet. */
+function initDotRows() {
+    document.querySelectorAll('.dots').forEach(renderDots);
+}
+document.addEventListener('DOMContentLoaded', initDotRows);
+
+function syncOccupancyLabel() {
+    const el  = document.getElementById('prefOccupancyPct');
+    const out = document.getElementById('prefOccupancyOut');
+    if (el && out) out.textContent = tf('pref_occupancy_over', { pct: el.value });
+}
+
+/** Shows what the answers actually became, so the profile is not a black box. */
+function renderWeightReadout() {
+    const box = document.getElementById('weightReadout');
+    if (!box) return;
+    const w = PROFILE_WEIGHTS;
+    const pct = v => Math.round((v || 0) * 100) + '%';
+    box.innerHTML =
+        `<span>${escHtml(t('w_time'))} <strong>${pct(w.time)}</strong></span>` +
+        `<span>${escHtml(t('w_cost'))} <strong>${pct(w.cost)}</strong></span>` +
+        `<span>${escHtml(t('w_eco'))} <strong>${pct(w.eco)}</strong></span>` +
+        `<span>${escHtml(t('w_reliability'))} <strong>${pct(w.reliability)}</strong></span>`;
 }
 
 async function savePreferences() {
@@ -109,11 +205,17 @@ async function savePreferences() {
         avoidHighOccupancy: isOn('prefAvoidOccupancy'),
         showWalking:        isOn('prefShowWalking'),
         preferBikeOverBus:  isOn('prefBikeOverBus'),
-        onlyBusWhenRaining: isOn('prefOnlyBusRain'),
+        rainPrefersBus:     isOn('prefRainPrefersBus'),
+        applyPrefsToPresets: isOn('prefApplyToPresets'),
         notifyDelays:       isOn('prefNotifyDelays'),
-        notifyTicketExpiry: isOn('prefNotifyTicket'),
-        notifyEcoTip:       isOn('prefNotifyEcoTip'),
-        maxBikeWalkMetres:  parseInt(document.getElementById('prefMaxBikeWalk')?.value, 10) || 500
+        maxBikeWalkMetres:  parseInt(document.getElementById('prefMaxBikeWalk')?.value, 10) || 500,
+        // Someone editing the panel has plainly met the questions already
+        onboardingDone:     true,
+        answerTime:         answerOf('ansTime'),
+        answerCost:         answerOf('ansCost'),
+        answerEco:          answerOf('ansEco'),
+        answerReliability:  answerOf('ansReliability'),
+        occupancyThresholdPct: parseInt(document.getElementById('prefOccupancyPct')?.value, 10) || 80
     };
 
     try {
@@ -122,12 +224,15 @@ async function savePreferences() {
             body: JSON.stringify(body)
         });
         if (!r.ok) throw new Error('save prefs ' + r.status);
+        const saved = await r.json();
+        // The server recomputes them; taking its answer keeps the two in step
+        if (saved.weights) { PROFILE_WEIGHTS = saved.weights; renderWeightReadout(); }
 
-        // Aggiorna subito il sort attivo nella topbar
-        const sortMap = { ECO: 'eco', BUDGET: 'budget', FAST: 'fast' };
-        const sortVal = sortMap[body.defaultJourneyMode] || 'eco';
-        setSort(sortVal);
-
+        _prefsScopedToCustom = body.applyPrefsToPresets === false;
+        _notifyDelays        = body.notifyDelays;
+        // A watch already running follows the new setting straight away
+        if (!_notifyDelays) stopDelayWatch();
+        setSort(SORT_OF_MODE[body.defaultJourneyMode] || 'eco');
         showToast(t('toast_prefs_saved'));
     } catch (e) {
         console.warn('Could not save preferences:', e);
@@ -1543,19 +1648,27 @@ function getDest() {
 let activeSort  = 'eco';   // 'eco' | 'budget' | 'fast'  — always exactly one
 let activeModes = [];      // [] = all modes; otherwise subset of BUS/BIKE/SCOOTER (WALK always included)
 
-// Declared here rather than reusing SCORE_KEY below: loadPreferences() runs from
-// the top of the file and calls setSort, so validating against a const declared
-// further down would work only for as long as that call stays behind an await.
-const SORT_VALUES = ['eco', 'budget', 'fast'];
+const SORT_VALUES = ['eco', 'budget', 'fast', 'custom'];
 
 // Takes the value now that the control is a dropdown. It used to take the chip
 // that was clicked and read its dataset, which a <select> has no equivalent of.
 function setSort(value) {
-    if (!SORT_VALUES.includes(value)) return;   // ignore anything not one of the three
+    if (!SORT_VALUES.includes(value)) return;   // ignore anything not one of the four
+    const changed = activeSort !== value;
     activeSort = value;
+    syncSortGear();
     const sel = document.getElementById('sortSelect');
     if (sel && sel.value !== value) sel.value = value;   // keeps it in step when set from code
-    if (window._lastSearchData) renderRoutes(window._lastSearchData);
+
+    if (!window._lastSearchData) return;
+
+    // Normally the ranking only reorders what is already on screen. But when the
+    // traveller has scoped their preferences to Custom, switching preset changes
+    // what the server computes — walking may reappear, the bus may come back
+    // ahead of the bike — so the results have to be asked for again. Same reason
+    // the mode chips re-search.
+    if (changed && _prefsScopedToCustom) doSearch();
+    else renderRoutes(window._lastSearchData);
 }
 
 function toggleModeChip(el) {
@@ -1568,29 +1681,89 @@ function toggleModeChip(el) {
     doSearch();
 }
 
-// Ordina per il punteggio multi-criterio calcolato dal backend (OM-17).
-// Ogni profilo pesa tempo/costo/ambiente diversamente, quindi due opzioni che
-// pareggiano sul criterio principale vengono comunque distinte.
-const SCORE_KEY = { eco: 'score_eco', budget: 'score_budget', fast: 'score_fast' };
-
+// The chip means what it says: one criterion, ordered.
+//
+// This used to sort by a weighted score the backend computed — FAST was
+// 0.70 time / 0.10 cost / 0.20 environment — so a slower option could come
+// first because it was cheaper or greener. Nobody could read that order off
+// the numbers on the cards, which is the whole point of showing them.
+//
+// Ties keep the order the backend sent: Array.sort is stable, so equal values
+// stay put instead of shuffling between searches, and no hidden second
+// criterion decides for the traveller.
 function sortOptions(options) {
     const sorted = [...options];
-    const key = SCORE_KEY[activeSort];
 
-    if (key && sorted.every(o => typeof o[key] === 'number')) {
-        sorted.sort((a, b) => b[key] - a[key]);      // punteggio alto = migliore
+    if (activeSort === 'custom') {
+        // Higher score first — see customScore
+        const scored = new Map(sorted.map(o => [o, customScore(o, sorted)]));
+        sorted.sort((a, b) => scored.get(b) - scored.get(a));
         return sorted;
     }
-
-    // Ripiego a criterio singolo: backend non aggiornato o punteggi assenti.
-    if (activeSort === 'eco') {
-        sorted.sort((a, b) => b.green_index - a.green_index);
+    if (activeSort === 'fast') {
+        sorted.sort((a, b) => sortValue(a.duration_minutes) - sortValue(b.duration_minutes));
     } else if (activeSort === 'budget') {
-        sorted.sort((a, b) => a.cost_euros - b.cost_euros);
-    } else if (activeSort === 'fast') {
-        sorted.sort((a, b) => a.duration_minutes - b.duration_minutes);
+        sorted.sort((a, b) => sortValue(a.cost_euros) - sortValue(b.cost_euros));
+    } else if (activeSort === 'eco') {
+        sorted.sort((a, b) => sortValue(b.green_index) - sortValue(a.green_index));
     }
     return sorted;
+}
+
+/**
+ * The Custom ranking: the four criteria combined with the traveller's own
+ * weights.
+ *
+ * Weighting is back here, but it is no longer hidden — these are the numbers
+ * the person set, shown in Preferences, and the other three presets stay a
+ * plain sort on one column. Values are min-maxed across THIS search only: they
+ * order alternatives against each other and mean nothing on their own.
+ *
+ * Reliability arrives already scored on an absolute 0..1 scale — see
+ * JourneyPlannerService.reliabilityOf — and is used as it comes. The other
+ * three are min-maxed because "cheap" only means anything against the
+ * alternatives; "this connection is tight" means something on its own.
+ */
+function customScore(option, all) {
+    const w = PROFILE_WEIGHTS;
+    const norm = (v, lo, hi) => (hi - lo < 1e-9 ? 0.5 : (v - lo) / (hi - lo));
+    const span = pick => {
+        const vals = all.map(pick).filter(v => typeof v === 'number' && !isNaN(v));
+        return vals.length ? [Math.min(...vals), Math.max(...vals)] : [0, 1];
+    };
+
+    const [tLo, tHi] = span(o => o.duration_minutes);
+    const [cLo, cHi] = span(o => o.cost_euros);
+    const [gLo, gHi] = span(o => o.green_index);
+
+    // time and cost: lower is better, so the normalised value is inverted
+    const t = 1 - norm(sortValueOr(option.duration_minutes, tHi), tLo, tHi);
+    const c = 1 - norm(sortValueOr(option.cost_euros, cHi), cLo, cHi);
+    const g =     norm(sortValueOr(option.green_index, gLo), gLo, gHi);
+
+    // Taken as it comes: reliability_score is already absolute. Min-maxing it
+    // like the other three is what made it useless — the planner returns a
+    // single bus option, so the only non-null margin in a set was always the
+    // maximum and every option scored 1.0, a one-minute change included.
+    const r = typeof option.reliability_score === 'number' ? option.reliability_score : 1;
+
+    return w.time * t + w.cost * c + w.eco * g + w.reliability * r;
+}
+
+/** A missing metric takes the worst value of the set instead of breaking the maths. */
+function sortValueOr(v, fallback) {
+    return typeof v === 'number' && !isNaN(v) ? v : fallback;
+}
+
+/**
+ * A missing metric sorts last instead of poisoning every comparison it takes
+ * part in. The sentinel is finite on purpose: with ±Infinity, two options both
+ * missing the metric would compare as NaN, which leaves the comparator
+ * inconsistent — MAX_VALUE simply makes them equal.
+ */
+function sortValue(v) {
+    if (typeof v === 'number' && !isNaN(v)) return v;
+    return activeSort === 'eco' ? -Number.MAX_VALUE : Number.MAX_VALUE;
 }
 
 // ── Search ────────────────────────────────────────────────────────
@@ -1670,7 +1843,12 @@ async function doSearch() {
             user_id: _user.id,
             dest_stop_id:   dest.isGPS   ? null : dest.id,
             origin_stop_id: origin.isGPS ? null : origin.id,
-            lang: getLang()
+            lang: getLang(),
+            // The ranking is applied here, but the server needs it: the
+            // behavioural preferences reach Fast, Budget and Eco only if the
+            // traveller has said so, and some of them decide which options get
+            // computed at all rather than merely how they are ordered.
+            sort_preset: MODE_OF_SORT[activeSort] || 'CUSTOM'
         };
         // Only constrain modes when the traveler picked specific ones via the chips.
         if (activeModes.length > 0) {
@@ -1794,7 +1972,11 @@ function renderRoutes(data) {
     const orderedOptions = sortOptions(data.options);
 
     list.innerHTML = noticeHtml + orderedOptions.map(opt => {
-        window._routeOptions[opt.mode] = opt;
+        // Keyed by option, not by mode: a search can now return two bus
+        // itineraries — the direct one and the faster one with a change — and
+        // keying by mode had the second overwrite the first, so both cards
+        // opened the same journey. It also produced two id="card-BUS".
+        window._routeOptions[optionKey(opt)] = opt;
 
         const icon = MODE_ICONS[opt.mode] || '🚗';
         const _btn = MODE_BTNS[opt.mode]  || { labelKey: null, cls: 'btn-dark' };
@@ -1818,8 +2000,13 @@ function renderRoutes(data) {
         const _arrDate = new Date(_depDate.getTime() + (opt.duration_minutes || 0) * 60000);
         const _depTime = _fmtHHMM(_depDate);
         const _arrTime = _fmtHHMM(_arrDate);
+        const key = optionKey(opt);
+        // Says which of the two bus cards this is, and how much slack the change has
+        const changeBadge = opt.transfer_wait_minutes != null
+            ? `<span class="status-badge s-change">${escHtml(tf('badge_change', { min: opt.transfer_wait_minutes }))}</span>`
+            : '';
         return `
-<div class="route-card" id="card-${opt.mode}">
+<div class="route-card" id="card-${escAttr(key)}">
     <div class="route-top">
         <div class="route-name">${icon} ${modeLabel}</div>
         <div class="route-time">${opt.duration_minutes} min</div>
@@ -1832,6 +2019,7 @@ function renderRoutes(data) {
     <div class="status-row">
         ${warn || `<span class="status-badge s-ok">${t('badge_available')}</span>`}
         ${bikeWarn}
+        ${changeBadge}
         ${delayBadge}
     </div>
     <div class="metrics-row">
@@ -1841,11 +2029,22 @@ function renderRoutes(data) {
             <div class="metric-value" style="color:${greenColor(opt.green_index)}">${opt.green_index}/100</div>
         </div>
     </div>
-    <button class="action-btn ${btn.cls}" data-select-mode="${escHtml(opt.mode)}">
+    <button class="action-btn ${btn.cls}" data-select-mode="${escAttr(key)}">
         ${btn.label}
     </button>
 </div>`;
     }).join('');
+}
+
+/**
+ * Identifies one option among the results.
+ *
+ * The mode alone is no longer unique: a bus search can return the direct run
+ * and the quicker one with a change, both mode "BUS". The suffix keeps them
+ * apart in the option map, in the card id and in the select button.
+ */
+function optionKey(opt) {
+    return opt.transfer_wait_minutes != null ? opt.mode + '_CHG' : opt.mode;
 }
 
 // ── Route preview (shown on card selection, before Start Journey) ──
@@ -1981,50 +2180,56 @@ document.addEventListener('click', e => {
 
 // selectMode — highlights the card, previews the route on the map, and shows the Start Journey banner.
 // Full GPS resolution + solid lines happen in startJourney.
-function selectMode(mode, label, greenIndex, distanceMetres, costEuros) {
+function selectMode(key, label, greenIndex, distanceMetres, costEuros) {
     // Arguments stay optional so the function is still callable directly; when
     // omitted they come from the option the cards were rendered from.
-    const _opt     = (window._routeOptions || {})[mode] || {};
+    const _opt     = (window._routeOptions || {})[key] || {};
+    // The key identifies the card (BUS_CHG is one of two bus options); the mode
+    // is what icons, previews and labels are chosen by. Passing the key on would
+    // leave the itinerary with a car icon and no line styling.
+    const mode     = _opt.mode ?? key;
     label          = label          ?? _opt.mode_label ?? mode;
     greenIndex     = greenIndex     ?? _opt.green_index ?? 0;
     distanceMetres = distanceMetres ?? _opt.distance_metres ?? 0;
     costEuros      = costEuros      ?? _opt.cost_euros ?? 0;
 
     selectedJourney = {
-        mode, label, greenIndex,
+        mode, key, label, greenIndex,
         distanceKm: distanceMetres / 1000,
         costEuros,
-        durationMinutes: window._routeOptions[mode]?.duration_minutes,
-        co2Grams: window._routeOptions[mode]?.co2_grams ?? 0
+        durationMinutes: _opt.duration_minutes,
+        co2Grams: _opt.co2_grams ?? 0
     };
 
-    if (window._routeOptions && window._routeOptions[mode]) {
-        selectedJourney.legs = window._routeOptions[mode].legs || [];
-    }
+    selectedJourney.legs = _opt.legs || [];
 
     // Highlight selected card
     document.querySelectorAll('.route-card').forEach(c => {
         c.style.border = '1px solid var(--border-mid)';
         c.style.opacity = '0.6';
     });
-    const card = document.getElementById('card-' + mode);
+    const card = document.getElementById('card-' + key);
     if (card) { card.style.border = '2px solid var(--primary)'; card.style.opacity = '1'; }
 
     // The vehicle this journey rides, if any: showRoutePreview puts the rest of
     // the Elerent layer away, and this is the one pin that has to survive — the
     // itinerary sends the traveller walking to it.
-    window._keepBikeId = window._routeOptions?.[mode]?.bike_id || null;
+    window._keepBikeId = _opt.bike_id || null;
 
     // Show dashed preview on map immediately
     showRoutePreview(mode, selectedJourney.legs || []);
 
-    // Open detail sheet instead of a sticky banner
-    _openRouteDetail(mode, label, greenIndex, distanceMetres, costEuros);
+    // Open detail sheet instead of a sticky banner. It reads the option back
+    // out of the map, so it needs the key, not the mode.
+    _openRouteDetail(key, label, greenIndex, distanceMetres, costEuros);
 }
 
 // ── Route detail preview sheet ────────────────────────────────────────
-function _openRouteDetail(mode, label, greenIndex, distanceMetres, costEuros) {
-    const opt = window._routeOptions?.[mode] || {};
+function _openRouteDetail(key, label, greenIndex, distanceMetres, costEuros) {
+    const opt = window._routeOptions?.[key] || {};
+    // Same split as in selectMode: the key finds the option, the mode drives
+    // the icon and the fallback speeds
+    const mode = opt.mode ?? key;
     const durationMin = opt.duration_minutes
         || selectedJourney.durationMinutes
         || Math.ceil((distanceMetres/1000) / (mode==='WALK'?5:mode==='BIKE'?15:mode==='SCOOTER'?20:25) * 60);
@@ -2080,6 +2285,11 @@ function clearJourneySelection() {
     // The button stays disabled while a start is in flight; re-arm it for the next pick
     const rdBtn = document.getElementById('rdStartBtn');
     if (rdBtn) { rdBtn.disabled = false; rdBtn.textContent = t('btn_start_journey'); }
+
+    // A new search, a cancelled pick or a logout all pass through here, and none
+    // of them leaves a journey to watch. endJourney stops it too, but this is
+    // the path every other teardown takes.
+    stopDelayWatch();
 
     // Live ETA countdown, bus polling, bus markers and the dashed preview
     clearInterval(window._etaInterval);
@@ -2625,6 +2835,11 @@ async function startJourney() {
             }
         }
 
+        // The journey is under way: from here the line being boarded is watched
+        // for delays. Only now — a search the traveller merely looked at is not
+        // something they are waiting for.
+        startDelayWatch((window._routeOptions || {})[selectedJourney.key || selectedJourney.mode]);
+
     } catch (err) {
         console.error('startJourney failed:', err);
         showToast(t('toast_journey_start_fail'), true);
@@ -2778,6 +2993,7 @@ async function fetchAndRenderBusMarkers() {
 }
 
 function endJourney() {
+    stopDelayWatch();
     clearJourneySelection();
 
     // Keep the live GPS dot if we have a real position
@@ -2847,12 +3063,6 @@ function showToast(msg, isError = false) {
 // the section comes back exactly as it is.
 const FEATURE_PAYMENT = false;
 
-// The ticket-expiry reminder warns about a ticket expiring, and there is no
-// longer any way to hold one — the fare list only quotes prices. The toggle is
-// hidden rather than removed, and hiding it leaves the stored preference alone,
-// so whatever a traveller had chosen is still there when ticketing arrives.
-const FEATURE_TICKET_REMINDER = false;
-
 function applyFeatureFlags() {
     // The `hidden` attribute rather than a class, so anything switched off here
     // leaves the accessibility tree and the tab order too, not just the screen.
@@ -2862,12 +3072,6 @@ function applyFeatureFlags() {
         document.querySelectorAll(
             '.nav-item[data-tab="payment"], .profile-tab[data-ptab="payment"], #ptab-payment'
         ).forEach(el => { el.hidden = true; });
-    }
-    if (!FEATURE_TICKET_REMINDER) {
-        // The whole row, label and description included — not just the switch,
-        // which would leave its caption behind with nothing to operate.
-        const row = document.getElementById('prefNotifyTicket')?.closest('.pref-row');
-        if (row) row.hidden = true;
     }
 }
 
@@ -3936,4 +4140,262 @@ function bindTimetableScrollHint() {
     window.addEventListener('resize', sync);
     // Layout is not settled in the same frame the markup is written
     requestAnimationFrame(sync);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ONBOARDING
+// ══════════════════════════════════════════════════════════════════
+// Three short screens, once. Skipping is a real option: every default is
+// documented and sensible, so an unanswered profile ranks evenly rather than
+// arbitrarily — and the same questions live in Preferences either way.
+let _obStep = 0;
+// Which screens were skipped. Skip moves past one screen, not past the whole
+// thing: three taps to get out, and each one only forfeits the answers on the
+// screen it was tapped on.
+let _obSkipped = [false, false, false];
+
+function openOnboarding() {
+    _obStep = 0;
+    _obSkipped = [false, false, false];
+    syncObOccupancyLabel();
+    initDotRows();
+    renderOnboardingStep();
+    document.getElementById('obOverlay').classList.add('open');
+
+    // Marked as done the moment it is SHOWN, not when it is completed. Closing
+    // the tab halfway through is an answer of sorts — the defaults are sound —
+    // and re-opening this at every sign-in would be nagging rather than
+    // onboarding. Preferences holds the same questions for whenever they want
+    // them.
+    markOnboardingSeen();
+}
+
+async function markOnboardingSeen() {
+    try {
+        await apiFetch('/traveller/preferences', {
+            method: 'PUT',
+            body: JSON.stringify({ onboardingDone: true })
+        });
+    } catch (e) {
+        // Worst case it opens once more next time; not worth interrupting for
+        console.warn('Could not mark onboarding as seen:', e);
+    }
+}
+
+function renderOnboardingStep() {
+    document.querySelectorAll('#obOverlay .ob-step').forEach((el, i) =>
+        el.classList.toggle('active', i === _obStep));
+    document.querySelectorAll('#obOverlay .ob-dot').forEach((el, i) =>
+        el.classList.toggle('on', i <= _obStep));
+
+    const last = _obStep === 2;
+    document.getElementById('obNextBtn').textContent  = last ? t('ob_done') : t('ob_next');
+    // Available on every screen, the last one included: skipping there forfeits
+    // that screen's settings, it does not undo the ones already given
+    document.getElementById('obSkipBtn').textContent  = last ? t('ob_skip_last') : t('ob_skip');
+}
+
+function onboardingNext() {
+    _obSkipped[_obStep] = false;
+    advanceOnboarding();
+}
+
+function onboardingSkip() {
+    _obSkipped[_obStep] = true;
+    advanceOnboarding();
+}
+
+function advanceOnboarding() {
+    if (_obStep < 2) { _obStep++; renderOnboardingStep(); return; }
+    finishOnboarding();
+}
+
+function syncObOccupancyLabel() {
+    const el  = document.getElementById('obOccPct');
+    const out = document.getElementById('obOccOut');
+    if (el && out) out.textContent = tf('pref_occupancy_over', { pct: el.value });
+}
+
+/**
+ * Writes the profile and closes.
+ *
+ * onboardingDone is set even when skipped: the questions were asked, and asking
+ * again at every sign-in would be nagging rather than onboarding. Preferences
+ * is the way back.
+ */
+async function finishOnboarding() {
+    const isOn = id => document.getElementById(id)?.classList.contains('on') ?? false;
+    const val  = id => parseInt(document.getElementById(id)?.value, 10);
+
+    // Only the screens that were answered are sent. The server merges, so a
+    // skipped screen leaves its settings exactly as they were rather than
+    // overwriting them with the defaults shown on it.
+    const body = { onboardingDone: true };
+
+    if (!_obSkipped[0]) {
+        body.answerTime = answerOf('obTime');
+        body.answerCost = answerOf('obCost');
+        body.answerEco  = answerOf('obEco');
+        // Only worth defaulting to Custom if the weights behind it were set
+        body.defaultJourneyMode = 'CUSTOM';
+    }
+    if (!_obSkipped[1]) {
+        body.answerReliability = answerOf('obRel');
+        body.rainPrefersBus    = isOn('obRain');
+    }
+    if (!_obSkipped[2]) {
+        body.maxBikeWalkMetres     = val('obWalk');
+        body.avoidHighOccupancy    = isOn('obCrowd');
+        body.occupancyThresholdPct = val('obOccPct');
+    }
+
+    const answeredAny = _obSkipped.some(v => !v);
+    document.getElementById('obOverlay').classList.remove('open');
+
+    try {
+        const r = await apiFetch('/traveller/preferences', {
+            method: 'PUT',
+            body: JSON.stringify(body)
+        });
+        if (!r.ok) throw new Error('onboarding ' + r.status);
+        const saved = await r.json();
+        if (saved.weights) { PROFILE_WEIGHTS = saved.weights; renderWeightReadout(); }
+        if (!_obSkipped[0]) setSort('custom');
+        if (answeredAny) showToast(t('ob_saved'));
+        loadPreferences();   // repaint the panel with what was just stored
+    } catch (e) {
+        console.warn('Could not save the profile:', e);
+        showToast(t('toast_prefs_error'), true);
+    }
+}
+
+// ── Weight editor (the gear beside the ranking) ──
+// Custom is the only ranking these numbers touch, so the gear appears only
+// while Custom is the active one.
+function syncSortGear() {
+    const gear = document.getElementById('sortGear');
+    if (gear) gear.style.display = activeSort === 'custom' ? '' : 'none';
+}
+
+/** Jumps to the answers in Preferences: one place to edit them, not two. */
+function openWeightEditor() {
+    document.querySelector('.sidebar-nav .nav-item[data-pane="profile"][data-tab="settings"]')?.click();
+    setTimeout(() => {
+        document.getElementById('ansTime')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DELAY ALERTS
+// ══════════════════════════════════════════════════════════════════
+// The preference used to be a switch wired to nothing. It now does one thing,
+// and only that: once a journey has been STARTED, the runs it rides are watched
+// and the traveller is told when the journey is at risk.
+//
+// Tied to Start Journey on purpose. Watching every route someone has ever
+// searched would need a background job, a delivery channel and a subscription
+// model none of which exist here; watching the journey they are actually on
+// needs none of that, and is the moment the information can still be acted on.
+//
+// WATCHED BY RUN, NOT BY LINE
+// The first version polled arrivals at the boarding stop and matched on the
+// route. That is right until the traveller boards, and wrong from the moment
+// they do: those arrivals are the NEXT buses of that line, so the watcher
+// started reporting a vehicle the traveller was not on. Arrivals carry a trip
+// id, so the run itself is matched instead, and it is read at the stop AHEAD of
+// the bus — the interchange when there is one, the alighting stop otherwise.
+//
+// WHAT IS WORTH SAYING
+// On a direct run, only a growing delay. On a journey with a change, the number
+// that matters is not the delay at all but what is left of the margin:
+//
+//     slack = transfer wait + delay(second run) − delay(first run)
+//
+// A first bus running late eats the margin; a second bus running late hands it
+// back, because a connection you are late for is easier to catch when it is
+// late too. Below zero the connection is at risk, and that is the alert — the
+// bare "your line is N minutes late" never said whether it mattered.
+let _delayWatch = null;
+
+const DELAY_POLL_MS  = 60000;  // the feed itself refreshes about once a minute
+const DELAY_STEP_MIN = 2;      // below this, a change is noise, not news
+
+/** Called when a journey starts. Does nothing unless there is a run to watch. */
+function startDelayWatch(option) {
+    stopDelayWatch();
+
+    if (!_notifyDelays) return;
+    if (!option || !option.boarding_trip_id) return;
+
+    // The stop ahead of the bus. Behind it, arrivals describe the next run.
+    const watchStop = option.transfer_stop_id || option.alight_stop_id;
+    if (!watchStop) return;
+
+    _delayWatch = {
+        watchStop,
+        firstTrip:    option.boarding_trip_id,
+        transferTrip: option.transfer_trip_id || null,
+        slackMin:     option.transfer_wait_minutes,   // null on a direct run
+        // The delay already on the card is the baseline: the traveller saw it
+        // and chose to travel anyway
+        knownDelay:   Math.max(0, option.delay_minutes || 0),
+        warnedRisk:   false,
+        timer:        setInterval(checkDelay, DELAY_POLL_MS)
+    };
+}
+
+function stopDelayWatch() {
+    if (_delayWatch?.timer) clearInterval(_delayWatch.timer);
+    _delayWatch = null;
+}
+
+async function checkDelay() {
+    const w = _delayWatch;
+    if (!w) return;
+
+    try {
+        const r = await apiFetch('/journeys/stops/' + encodeURIComponent(w.watchStop) + '/arrivals?limit=10');
+        if (!r.ok) return;
+        const arrivals = await r.json();
+        if (!Array.isArray(arrivals)) return;
+
+        const delayOf = tripId => {
+            if (!tripId) return null;
+            const a = arrivals.find(x => x.trip_id === tripId);
+            return a && typeof a.delay_minutes === 'number' ? Math.max(0, a.delay_minutes) : null;
+        };
+
+        const first = delayOf(w.firstTrip);
+        if (first === null) return;   // the run has gone past, or is not reported yet
+
+        // ── A journey with a change: the margin is the story ──
+        if (w.slackMin != null) {
+            const second = delayOf(w.transferTrip) ?? 0;
+            const left   = w.slackMin + second - first;
+
+            if (left < 0 && !w.warnedRisk) {
+                w.warnedRisk = true;
+                showToast(tf('alert_connection_risk', { min: Math.abs(Math.round(left)) }), true);
+            } else if (left >= 0 && w.warnedRisk) {
+                // The connection is back within reach — worth saying, once
+                w.warnedRisk = false;
+                showToast(tf('alert_connection_ok', { min: Math.round(left) }));
+            }
+            w.knownDelay = first;
+            return;
+        }
+
+        // ── A direct run: only a worsening is news ──
+        if (first >= w.knownDelay + DELAY_STEP_MIN) {
+            w.knownDelay = first;
+            showToast(tf('alert_delay_grew', { min: first }), true);
+        } else if (first < w.knownDelay) {
+            // Recovered time is not an alert, but it resets the bar so a later
+            // slip is measured from where the bus actually is
+            w.knownDelay = first;
+        }
+    } catch (e) {
+        // A missed poll is not worth telling anyone about; the next one follows
+        console.warn('[DELAY] poll failed:', e);
+    }
 }

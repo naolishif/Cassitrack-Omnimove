@@ -117,6 +117,9 @@
                     data-i18n-title="time_depart">🕐 <span id="sidebarTimeDisplay">Now</span></button>
             <button class="search-btn" id="searchBtn" onclick="doSearch()" data-i18n="search_btn" data-label="Search">Search</button>
         </div>
+        <!-- Filters, not sorting: several can be on at once. The ranking is the
+             single-choice control in the results header. -->
+        <div class="cats-label" data-i18n="label_modes">Modes</div>
         <div class="cats" id="modeChips">
             <div class="cat-chip" data-mode="BUS" onclick="toggleModeChip(this)" data-i18n="chip_bus">🚌 Bus</div>
             <div class="cat-chip" data-mode="BIKE" onclick="toggleModeChip(this)" data-i18n="chip_bike">🚲 Bike</div>
@@ -138,12 +141,18 @@
                 <div class="map-sidebar-header">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
                         <h2 data-i18n="smart_routes">Smart Routes</h2>
-                        <select id="sortSelect" class="sort-select" onchange="setSort(this.value)"
-                                data-i18n-title="sort_by">
-                            <option value="eco"    data-i18n="chip_eco">🌱 Eco</option>
-                            <option value="budget" data-i18n="chip_budget">💸 Budget</option>
-                            <option value="fast"   data-i18n="chip_fast">⚡ Fast</option>
-                        </select>
+                        <div class="sort-group">
+                            <select id="sortSelect" class="sort-select" onchange="setSort(this.value)"
+                                    data-i18n-title="sort_by">
+                                <option value="eco"    data-i18n="chip_eco">🌱 Eco</option>
+                                <option value="budget" data-i18n="chip_budget">💸 Budget</option>
+                                <option value="fast"   data-i18n="chip_fast">⚡ Fast</option>
+                                <option value="custom" data-i18n="chip_custom">🎚 Custom</option>
+                            </select>
+                            <!-- Only meaningful while Custom is the active ranking -->
+                            <button class="sort-gear" id="sortGear" onclick="openWeightEditor()"
+                                    style="display:none" data-i18n-title="edit_weights">⚙</button>
+                        </div>
                     </div>
                     <div class="weather-pill">☁️ 18°C · Light rain</div>
                 </div>
@@ -418,23 +427,81 @@
 
                 <div class="ptab-pane" id="ptab-settings">
                     <div class="settings-section">
-                        <span class="section-label" data-i18n="label_journey_prefs">Journey Preferences</span>
+                        <span class="section-label" data-i18n="label_ranking">Result ranking</span>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label" data-i18n="label_default_mode">Default journey mode</div>
+                                <div class="pref-label" data-i18n="label_default_mode">Default ranking</div>
+                                <div class="pref-desc" data-i18n="desc_default_mode">One at a time — this is the order, not a filter</div>
                             </div>
                             <select class="pref-select" id="prefDefaultMode">
                                 <option value="ECO" data-i18n="opt_eco">🌱 Eco</option>
                                 <option value="BUDGET" data-i18n="opt_budget">💸 Budget</option>
                                 <option value="FAST" data-i18n="opt_fast">⚡ Fast</option>
+                                <option value="CUSTOM" data-i18n="opt_custom">🎚 Custom</option>
                             </select>
+                        </div>
+
+                        <!-- The four answers. Custom ranks with these; the other
+                             three presets ignore them. -->
+                        <div class="answer-row">
+                            <span class="answer-q" data-i18n="q_time"></span>
+                            <div class="answer-scale">
+                                
+                                <div class="dots" id="ansTime" data-value="3"></div>
+                                
+                            </div>
+                        </div>
+                        <div class="answer-row">
+                            <span class="answer-q" data-i18n="q_cost"></span>
+                            <div class="answer-scale">
+                                
+                                <div class="dots" id="ansCost" data-value="3"></div>
+                                
+                            </div>
+                        </div>
+                        <div class="answer-row">
+                            <span class="answer-q" data-i18n="q_eco"></span>
+                            <div class="answer-scale">
+                                
+                                <div class="dots" id="ansEco" data-value="3"></div>
+                                
+                            </div>
+                        </div>
+                        <div class="answer-row">
+                            <span class="answer-q" data-i18n="q_reliability"></span>
+                            <div class="answer-scale">
+                                <span class="answer-end" data-i18n="q_rel_low">Wide margins</span>
+                                <div class="dots" id="ansReliability" data-value="3"></div>
+                                <span class="answer-end" data-i18n="q_rel_high">Tight is fine</span>
+                            </div>
+                        </div>
+                        <div class="weight-readout" id="weightReadout"></div>
+
+                        <!-- The options below always shape Custom — it is the
+                             traveller's own profile. This decides whether they
+                             reach Fast, Budget and Eco as well. -->
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_apply_presets">Apply the options below to Fast, Budget and Eco too</div>
+                                <div class="pref-desc" data-i18n="desc_apply_presets">Off: they shape Custom only, and the other three answer their one question unfiltered</div>
+                            </div>
+                            <div class="toggle on" id="prefApplyToPresets" onclick="togglePref(this)"></div>
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label" data-i18n="pref_avoid_occupancy">Avoid high-occupancy buses</div>
-                                <div class="pref-desc" data-i18n="desc_avoid_occupancy">Only show routes with low to medium occupancy</div>
+                                <div class="pref-label" data-i18n="pref_avoid_occupancy">Warn me about crowded buses</div>
+                                <div class="pref-desc" id="prefOccupancyOut">Over 80% full</div>
                             </div>
-                            <div class="toggle" id="prefAvoidOccupancy" onclick="togglePref(this)"></div>
+                            <div class="occ-control">
+                                <select class="pref-select" id="prefOccupancyPct" onchange="syncOccupancyLabel()">
+                                    <option value="50">50%</option>
+                                    <option value="60">60%</option>
+                                    <option value="70">70%</option>
+                                    <option value="80" selected>80%</option>
+                                    <option value="90">90%</option>
+                                </select>
+                                <div class="toggle" id="prefAvoidOccupancy" onclick="togglePref(this)"></div>
+                            </div>
                         </div>
                         <div class="pref-row">
                             <div>
@@ -445,17 +512,17 @@
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label" data-i18n="pref_ebike">E-bike preferred over bus</div>
-                                <div class="pref-desc" data-i18n="desc_ebike">Prioritise bike sharing when available</div>
+                                <div class="pref-label" data-i18n="pref_ebike">Show bike before bus</div>
+                                <div class="pref-desc" data-i18n="desc_ebike">An ordering preference — bus options are never removed</div>
                             </div>
                             <div class="toggle" id="prefBikeOverBus" onclick="togglePref(this)"></div>
                         </div>
                         <div class="pref-row">
                             <div>
-                                <div class="pref-label" data-i18n="pref_rain">Hide bike/scooter/walk when raining</div>
-                                <div class="pref-desc" data-i18n="desc_rain">Only show bus options when the weather is rainy</div>
+                                <div class="pref-label" data-i18n="pref_rain">Suggest the bus when it rains</div>
+                                <div class="pref-desc" data-i18n="desc_rain">Bus options come first. Bike, scooter and walking stay available.</div>
                             </div>
-                            <div class="toggle" id="prefOnlyBusRain" onclick="togglePref(this)"></div>
+                            <div class="toggle" id="prefRainPrefersBus" onclick="togglePref(this)"></div>
                         </div>
                         <div class="pref-row">
                             <div>
@@ -475,23 +542,9 @@
                         <div class="pref-row">
                             <div>
                                 <div class="pref-label" data-i18n="pref_delay_alerts">Route delay alerts</div>
-                                <div class="pref-desc" data-i18n="desc_delay_alerts">Get notified when your route has a delay</div>
+                                <div class="pref-desc" data-i18n="desc_delay_alerts">While a started journey is running, we tell you if your line falls further behind</div>
                             </div>
                             <div class="toggle" id="prefNotifyDelays" onclick="togglePref(this)"></div>
-                        </div>
-                        <div class="pref-row">
-                            <div>
-                                <div class="pref-label" data-i18n="pref_ticket_reminder">Ticket expiry reminders</div>
-                                <div class="pref-desc" data-i18n="desc_ticket_reminder">Alert 10 min before ticket expires</div>
-                            </div>
-                            <div class="toggle" id="prefNotifyTicket" onclick="togglePref(this)"></div>
-                        </div>
-                        <div class="pref-row">
-                            <div>
-                                <div class="pref-label" data-i18n="pref_eco_tip">Eco tip of the day</div>
-                                <div class="pref-desc" data-i18n="desc_eco_tip">Daily sustainability tips for your commute</div>
-                            </div>
-                            <div class="toggle" id="prefNotifyEcoTip" onclick="togglePref(this)"></div>
                         </div>
                     </div>
                     <div class="settings-section">
@@ -758,6 +811,100 @@
 
         <div class="eco-modal-foot">
             <button type="button" class="eco-modal-ok" onclick="closeEcoInfo()" data-i18n="btn_got_it">Got it</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══════════ ONBOARDING ══════════
+     Three short screens, shown once. Everything it sets is in Preferences
+     afterwards, so nothing here is a decision the traveller cannot revisit. -->
+<div class="ob-overlay" id="obOverlay">
+    <div class="ob-card">
+        <div class="ob-progress"><span class="ob-dot on"></span><span class="ob-dot"></span><span class="ob-dot"></span></div>
+
+        <div class="ob-step active" data-step="0">
+            <h2 class="ob-title" data-i18n="ob_t1">What matters on a journey?</h2>
+            <p class="ob-sub" data-i18n="ob_s1">Drag each one. We turn the answers into how results are ranked.</p>
+
+            <div class="answer-row">
+                <span class="answer-q" data-i18n="q_time"></span>
+                <div class="answer-scale">
+                    <div class="dots" id="obTime" data-value="3"></div>
+                </div>
+            </div>
+            <div class="answer-row">
+                <span class="answer-q" data-i18n="q_cost"></span>
+                <div class="answer-scale">
+                    <div class="dots" id="obCost" data-value="3"></div>
+                </div>
+            </div>
+            <div class="answer-row">
+                <span class="answer-q" data-i18n="q_eco"></span>
+                <div class="answer-scale">
+                    <div class="dots" id="obEco" data-value="3"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="ob-step" data-step="1">
+            <h2 class="ob-title" data-i18n="ob_t2">Connections and weather</h2>
+            <p class="ob-sub" data-i18n="ob_s2">Two quick ones.</p>
+
+            <div class="answer-row">
+                <span class="answer-q" data-i18n="q_reliability"></span>
+                <div class="answer-scale">
+                    <span class="answer-end" data-i18n="q_rel_low">Wide margins</span>
+                    <div class="dots" id="obRel" data-value="3"></div>
+                    <span class="answer-end" data-i18n="q_rel_high">Tight is fine</span>
+                </div>
+            </div>
+
+            <div class="pref-row">
+                <div>
+                    <div class="pref-label" data-i18n="q_rain">When it rains, suggest the bus?</div>
+                    <div class="pref-desc" data-i18n="q_rain_desc">Bus first — the other options stay available</div>
+                </div>
+                <div class="toggle on" id="obRain" onclick="togglePref(this)"></div>
+            </div>
+        </div>
+
+        <div class="ob-step" data-step="2">
+            <h2 class="ob-title" data-i18n="ob_t3">Walking and crowding</h2>
+            <p class="ob-sub" data-i18n="ob_s3">Last one.</p>
+
+            <div class="pref-row">
+                <div>
+                    <div class="pref-label" data-i18n="q_walk">How far will you walk to a shared bike or a stop?</div>
+                </div>
+                <select class="pref-select" id="obWalk">
+                    <option value="250">250 m</option>
+                    <option value="500" selected>500 m</option>
+                    <option value="750">750 m</option>
+                    <option value="1000">1 km</option>
+                </select>
+            </div>
+
+            <div class="pref-row">
+                <div>
+                    <div class="pref-label" data-i18n="q_crowd">Warn me about crowded buses?</div>
+                    <div class="pref-desc" id="obOccOut">Over 80% full</div>
+                </div>
+                <div class="occ-control">
+                    <select class="pref-select" id="obOccPct" onchange="syncObOccupancyLabel()">
+                        <option value="50">50%</option>
+                        <option value="60">60%</option>
+                        <option value="70">70%</option>
+                        <option value="80" selected>80%</option>
+                        <option value="90">90%</option>
+                    </select>
+                    <div class="toggle" id="obCrowd" onclick="togglePref(this)"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="ob-actions">
+            <button class="action-btn ob-skip" id="obSkipBtn" onclick="onboardingSkip()" data-i18n="ob_skip">Skip this one</button>
+            <button class="action-btn btn-dark ob-next" id="obNextBtn" onclick="onboardingNext()" data-i18n="ob_next">Next</button>
         </div>
     </div>
 </div>

@@ -17,6 +17,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import it.unicas.omnimove.security.PasswordPolicy;
 import it.unicas.omnimove.util.RequestLang;
 import it.unicas.omnimove.service.PasswordResetService;
+import it.unicas.omnimove.service.PreferenceWeights;
 import it.unicas.omnimove.service.RateLimiterService;
 import it.unicas.omnimove.service.SecurityAuditService;
 import it.unicas.omnimove.service.SessionService;
@@ -198,21 +199,65 @@ public class TravellerController {
         User user = userRepo.findByEmail(principal.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        UserPreferences prefs = preferencesRepository.findByUserId(user.getId())
-                .orElse(UserPreferences.builder()
-                        .userId(user.getId())
-                        .defaultJourneyMode("FAST")
-                        .avoidHighOccupancy(false)
-                        .showWalking(true)
-                        .preferBikeOverBus(false)
-                        .onlyBusWhenRaining(true)
-                        .notifyDelays(true)
-                        .notifyTicketExpiry(true)
-                        .notifyEcoTip(false)
-                        .maxBikeWalkMetres(500)
-                        .build());
+        UserPreferences prefs = defaults(user.getId());
+        preferencesRepository.findByUserId(user.getId()).ifPresent(p -> copyInto(p, prefs));
 
-        return ResponseEntity.ok(prefs);
+        // The derived weights travel with the answers so the page never has to
+        // reproduce the formula — one definition, in PreferenceWeights
+        PreferenceWeights w = PreferenceWeights.from(prefs);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("preferences", prefs);
+        body.put("weights", Map.of(
+                "time",        w.time(),
+                "cost",        w.cost(),
+                "eco",         w.eco(),
+                "reliability", w.reliability()));
+        return ResponseEntity.ok(body);
+    }
+
+    /** A profile that has never been saved, with every field at its documented default. */
+    private UserPreferences defaults(Long userId) {
+        return UserPreferences.builder()
+                .userId(userId)
+                .defaultJourneyMode("FAST")
+                .avoidHighOccupancy(false)
+                .showWalking(true)
+                .preferBikeOverBus(false)
+                .rainPrefersBus(true)
+                .notifyDelays(true)
+                .maxBikeWalkMetres(500)
+                .answerTime(3).answerCost(3).answerEco(3).answerReliability(3)
+                .occupancyThresholdPct(80)
+                .onboardingDone(false)
+                .applyPrefsToPresets(true)
+                .build();
+    }
+
+    /**
+     * Copies only the fields that are set.
+     *
+     * The panel saves what it shows, and the onboarding panel shows a different
+     * subset, so a plain save of the request body would write nulls over
+     * everything the sender did not know about — and the NOT NULL columns would
+     * reject the row. Merging keeps each screen responsible only for its own
+     * settings.
+     */
+    private void copyInto(UserPreferences from, UserPreferences into) {
+        if (from.getDefaultJourneyMode()   != null) into.setDefaultJourneyMode(from.getDefaultJourneyMode());
+        if (from.getAvoidHighOccupancy()   != null) into.setAvoidHighOccupancy(from.getAvoidHighOccupancy());
+        if (from.getShowWalking()          != null) into.setShowWalking(from.getShowWalking());
+        if (from.getPreferBikeOverBus()    != null) into.setPreferBikeOverBus(from.getPreferBikeOverBus());
+        if (from.getRainPrefersBus()       != null) into.setRainPrefersBus(from.getRainPrefersBus());
+        if (from.getNotifyDelays()         != null) into.setNotifyDelays(from.getNotifyDelays());
+        if (from.getMaxBikeWalkMetres()    != null) into.setMaxBikeWalkMetres(from.getMaxBikeWalkMetres());
+        if (from.getAnswerTime()           != null) into.setAnswerTime(from.getAnswerTime());
+        if (from.getAnswerCost()           != null) into.setAnswerCost(from.getAnswerCost());
+        if (from.getAnswerEco()            != null) into.setAnswerEco(from.getAnswerEco());
+        if (from.getAnswerReliability()    != null) into.setAnswerReliability(from.getAnswerReliability());
+        if (from.getOccupancyThresholdPct()!= null) into.setOccupancyThresholdPct(from.getOccupancyThresholdPct());
+        if (from.getOnboardingDone()       != null) into.setOnboardingDone(from.getOnboardingDone());
+        if (from.getApplyPrefsToPresets()  != null) into.setApplyPrefsToPresets(from.getApplyPrefsToPresets());
     }
 
     @PutMapping("/preferences")
@@ -225,10 +270,30 @@ public class TravellerController {
         User user = userRepo.findByEmail(principal.getUsername())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        body.setUserId(user.getId());
-        preferencesRepository.save(body);
+        // Merge, never replace: see copyInto
+        UserPreferences current = preferencesRepository.findByUserId(user.getId())
+                .orElseGet(() -> defaults(user.getId()));
+        copyInto(body, current);
+        current.setUserId(user.getId());
 
-        return ResponseEntity.ok(Map.of("message", "Preferences saved"));
+        // The answers drive every ranking that reads them, so a value off the
+        // 0..5 scale is refused here rather than left to the CHECK constraint
+        if (!inScale(current.getAnswerTime()) || !inScale(current.getAnswerCost())
+                || !inScale(current.getAnswerEco()) || !inScale(current.getAnswerReliability()))
+            return ResponseEntity.badRequest()
+                    .body(Map.of("message", "Answers must be between 0 and 5"));
+
+        if (current.getOccupancyThresholdPct() < 10 || current.getOccupancyThresholdPct() > 100)
+            return ResponseEntity.badRequest()
+                    .body(Map.of("message", "Occupancy threshold must be between 10% and 100%"));
+
+        preferencesRepository.save(current);
+
+        PreferenceWeights w = PreferenceWeights.from(current);
+        return ResponseEntity.ok(Map.of(
+                "message", "Preferences saved",
+                "weights", Map.of("time", w.time(), "cost", w.cost(),
+                                  "eco",  w.eco(),  "reliability", w.reliability())));
     }
 
     @GetMapping("/stats")
@@ -378,6 +443,10 @@ public class TravellerController {
                     .build());
             return ResponseEntity.ok(Map.of("favorited", true));
         }
+    }
+
+    private static boolean inScale(Integer v) {
+        return v != null && v >= 0 && v <= 5;
     }
 
     private static final Set<String> SIMPLE_MODES = Set.of("BUS", "WALK", "BIKE", "SCOOTER");

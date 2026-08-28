@@ -2901,3 +2901,113 @@ body {
     /* Replaced by .tt-hint-mobile above: the full sentence does not fit */
     .tt-hint { display: none; }
 }
+
+/* ── RANKING PROFILE ── */
+.sort-group { display: flex; align-items: center; gap: 6px; }
+.sort-gear {
+    width: 30px; height: 30px;
+    border-radius: 9px;
+    border: 1px solid var(--border-mid);
+    background: var(--bg-white);
+    color: var(--text-mid);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+.sort-gear:hover { color: var(--text-dark); border-color: var(--text-soft); }
+
+/* Says out loud that the chips filter and the dropdown orders */
+.cats-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--text-soft);
+    margin: 10px 0 4px;
+}
+
+.answer-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.answer-q { display: block; font-size: 13px; font-weight: 600; color: var(--text-dark); margin-bottom: 8px; }
+.answer-scale { display: flex; align-items: center; gap: 10px; }
+.answer-end { font-size: 10px; color: var(--text-soft); white-space: nowrap; }
+
+/* What the answers became — the profile is not a black box */
+.weight-readout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    padding: 12px 0 2px;
+    font-size: 11px;
+    color: var(--text-soft);
+}
+.weight-readout strong { color: var(--text-dark); }
+
+.occ-control { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+/* ── ONBOARDING ── */
+.ob-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    background: rgba(15,23,42,.55);
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.ob-overlay.open { display: flex; }
+.ob-card {
+    background: var(--bg-white);
+    border-radius: 18px;
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 460px;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 24px;
+}
+.ob-progress { display: flex; gap: 6px; margin-bottom: 18px; }
+.ob-dot { flex: 1; height: 3px; border-radius: 2px; background: var(--border-mid); transition: background .2s; }
+.ob-dot.on { background: var(--primary); }
+
+.ob-step { display: none; }
+.ob-step.active { display: block; }
+.ob-title { font-size: 19px; font-weight: 800; color: var(--text-dark); margin: 0 0 6px; }
+.ob-sub { font-size: 12px; color: var(--text-soft); margin: 0 0 12px; }
+
+.ob-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.ob-actions .action-btn { width: auto; padding: 10px 22px; }
+.ob-skip { background: none; color: var(--text-soft); }
+.ob-skip:hover { color: var(--text-dark); }
+
+/* ── 0..5 ANSWER DOTS ── */
+/* Replaces a full-width range slider: the same six values in a control that
+   takes the height of one line and reads at a glance. */
+.dots { display: flex; gap: 6px; flex-wrap: wrap; }
+.dot {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid var(--border-mid);
+    background: var(--bg-white);
+    color: var(--text-soft);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .12s, color .12s, border-color .12s;
+}
+.dot:hover { border-color: var(--primary); color: var(--primary-dark); }
+.dot.on {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+.answer-row .answer-q { display: block; }
+
+/* Marks the bus card that involves an interchange, so the two bus options are
+   told apart at a glance and the slack is visible before selecting. */
+.status-badge.s-change {
+    background: #fef3c7;
+    color: #92400e;
+}
