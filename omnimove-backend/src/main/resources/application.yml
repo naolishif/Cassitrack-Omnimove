@@ -84,12 +84,25 @@ cassitrack:
     version-url: ${CASSITRACK_VERSION_URL:}
     poll-interval-ms: ${CASSITRACK_POLL_INTERVAL_MS:60000}
 
-# ── Anthropic Claude API ──────────────────────────────────────
-anthropic:
+# ── AI assistant ──────────────────────────────────────────────
+# Any provider that speaks the OpenAI chat-completions dialect. Default is
+# Regolo (Seeweb, Italy): EU data residency and zero data retention, which
+# matters because the assistant is handed the traveller's journey history and
+# their free-text questions.
+#
+# Switching provider is these three values and nothing else — the service was
+# rewritten around the common dialect precisely so the choice stays reversible.
+#   OpenAI  → https://api.openai.com/v1/chat/completions
+#   Groq    → https://api.groq.com/openai/v1/chat/completions
+#   local   → http://localhost:11434/v1/chat/completions   (Ollama)
+#
+# Leave the key empty and the assistant falls back to its canned answers rather
+# than failing: see AiOrchestrationService.getFallbackResponse.
+ai:
   api:
-    key: ${ANTHROPIC_API_KEY:}
-    url: https://api.anthropic.com/v1/messages
-    model: ${ANTHROPIC_API_MODEL:claude-haiku-4-5-20251001}
+    key:   ${AI_API_KEY:}
+    url:   ${AI_API_URL:https://api.regolo.ai/v1/chat/completions}
+    model: ${AI_API_MODEL:mistral-small-4-119b}
 
 # ── Weather Service ───────────────────────────────────────────
 weather:

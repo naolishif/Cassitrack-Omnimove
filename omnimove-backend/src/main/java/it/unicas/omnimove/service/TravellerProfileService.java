@@ -93,6 +93,12 @@ public class TravellerProfileService {
             m.put("originName",  j.getOriginName());
             m.put("destName",    j.getDestName());
             m.put("createdAt",   j.getCreatedAt());
+            // Only present on journeys recorded since V26; reuse falls back to
+            // resolving the names when they are missing
+            m.put("originLat",   j.getOriginLat());
+            m.put("originLon",   j.getOriginLon());
+            m.put("destLat",     j.getDestLat());
+            m.put("destLon",     j.getDestLon());
             m.put("isFavorite",  favKeys.contains(key));
             return m;
         }).toList();

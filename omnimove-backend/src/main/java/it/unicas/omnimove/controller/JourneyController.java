@@ -76,6 +76,7 @@ public class JourneyController {
     private final CassitrackClient      cassitrackClient;
     private final TrafficAwareETAService trafficAwareETAService;
     private final GoogleApiSettingsService googleApiSettings;
+    private final it.unicas.omnimove.service.GoogleMapsService googleMapsService;
     private final StringRedisTemplate   redisTemplate;
     private final TripRepository        tripRepository;
     private final ObjectMapper          objectMapper;
@@ -100,6 +101,28 @@ public class JourneyController {
                 ))
                 .toList();
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/geocode/reverse")
+    @Operation(summary = "The street a point sits on",
+               description = "For a place tapped on the map. Answers with an empty "
+                           + "street when geocoding is off or nothing is found — the "
+                           + "caller falls back to the coordinates.")
+    public ResponseEntity<?> reverseGeocode(@RequestParam double lat,
+                                            @RequestParam double lon,
+                                            @AuthenticationPrincipal UserDetails principal) {
+
+        // Coordinates outside the world are a client bug, not a place
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180)
+            return ResponseEntity.badRequest().body(Map.of("message", "Coordinates out of range."));
+
+        // Every tap costs a Google call, so the same bucket that guards the
+        // arrivals lookup guards this one
+        if (principal != null && !rateLimiter.allowStopArrivalsLookup(principal.getUsername()))
+            return ResponseEntity.status(429).body(Map.of("message", "Too many requests."));
+
+        String street = googleMapsService.reverseGeocodeStreet(lat, lon).orElse("");
+        return ResponseEntity.ok(Map.of("street", street));
     }
 
     @GetMapping("/timetable/routes")
@@ -451,10 +474,25 @@ public class JourneyController {
                 .greenIndex(greenIndex)
                 .originName(originName)
                 .destName(destName)
+                // Kept so the trip can be replayed even when an end was a point
+                // on the map, which no stop name can resolve back to
+                .originLat(coord(body.get("origin_lat")))
+                .originLon(coord(body.get("origin_lon")))
+                .destLat(coord(body.get("dest_lat")))
+                .destLon(coord(body.get("dest_lon")))
                 .createdAt(java.time.ZonedDateTime.now())
                 .build());
 
         return ResponseEntity.ok(Map.of("message", "Journey recorded"));
+    }
+
+    /** A coordinate off the request body, or null. Out-of-range values are dropped
+     *  rather than stored: a broken pair is worse than an absent one, because
+     *  reuse would replay the journey somewhere it never happened. */
+    private static Double coord(Object v) {
+        if (!(v instanceof Number n)) return null;
+        double d = n.doubleValue();
+        return (d >= -180 && d <= 180) ? d : null;
     }
 
     /**

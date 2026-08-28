@@ -42,6 +42,12 @@ renderAiGreeting();
 
 const API_BASE = '/omnimove/api/v1';
 
+// The id a field carries when its place was tapped on the map rather than
+// chosen from the list. Declared up here because it is read from three places
+// spread across the file — the autocomplete, getOrigin/getDest and the picking
+// mode — and a const has to sit above every one of them.
+const MAP_PICK_ID = '__MAP_PICK__';
+
 async function loadEcoStats() {
     try {
         const r = await apiFetch('/traveller/stats');
@@ -282,6 +288,8 @@ function renderHistory(items) {
         return `
         <div class="route-hist-card route-hist-card--reusable"
              data-origin="${escAttr(origin)}" data-dest="${escAttr(dest)}"
+             data-origin-lat="${escAttr(j.originLat ?? '')}" data-origin-lon="${escAttr(j.originLon ?? '')}"
+             data-dest-lat="${escAttr(j.destLat ?? '')}" data-dest-lon="${escAttr(j.destLon ?? '')}"
              title="${escAttr(t('reuse_trip_hint'))}">
             <div class="route-hist-icon ${iconClass}">${emoji}</div>
             <div class="route-hist-info">
@@ -1614,15 +1622,29 @@ function tryGetGPS() {
 function swapStops() {
     const o = document.getElementById('originSelect');
     const d = document.getElementById('destSelect');
-    const ov = o.value, oid = o.dataset.id || '';
-    o.value = d.value; _acSetId(o, d.dataset.id || '');
-    d.value = ov;      _acSetId(d, oid);
+
+    // The coordinates travel with the label: a point picked on the map lives in
+    // dataset.lat/lon, and swapping only the id would leave it pointing at the
+    // other field's place.
+    const snapshot = el => ({ value: el.value, id: el.dataset.id || '',
+                              lat: el.dataset.lat, lon: el.dataset.lon });
+    const restore = (el, st) => {
+        el.value = st.value;
+        _acSetId(el, st.id);
+        if (st.lat != null) el.dataset.lat = st.lat; else delete el.dataset.lat;
+        if (st.lon != null) el.dataset.lon = st.lon; else delete el.dataset.lon;
+    };
+
+    const os = snapshot(o), ds = snapshot(d);
+    restore(o, ds);
+    restore(d, os);
 }
 
 function getOrigin() {
     const el  = document.getElementById('originSelect');
     const val = el.dataset.id;
     // No origin picked (empty field) → default to My Location (GPS)
+    if (val === MAP_PICK_ID) return mapPointOf(el);
     if (!el.value.trim() || !val || val === 'GPS') {
         setStop(el, 'GPS');          // show "My Location" in the field, don't leave it empty
         if (!userLat) return null;   // null → doSearch will request GPS
@@ -1637,11 +1659,25 @@ function getOrigin() {
 function getDest() {
     const el  = document.getElementById('destSelect');
     const val = el.dataset.id;
+    if (val === MAP_PICK_ID) return mapPointOf(el);
     if (val === 'GPS') {
         if (!userLat) return null;   // null → doSearch will request GPS
         return { name: t('my_location'), lat: userLat, lon: userLon, isGPS: true };
     }
     return { ...STOPS[val], isGPS: false };
+}
+
+/**
+ * A point tapped on the map, read back off the field.
+ *
+ * It has no stop id, so the planner receives coordinates and finds the nearest
+ * stop itself — exactly what it already does for a GPS position.
+ */
+function mapPointOf(el) {
+    const lat = parseFloat(el.dataset.lat);
+    const lon = parseFloat(el.dataset.lon);
+    if (isNaN(lat) || isNaN(lon)) return null;
+    return { id: null, name: el.value || t('map_point'), lat, lon, isGPS: false };
 }
 
 // ── Filter / sort state ──────────────────────────────────────────
@@ -1775,7 +1811,7 @@ async function doSearch() {
 
     // The fields start empty now, so a destination is no longer guaranteed. An empty
     // origin is fine — getOrigin() reads it as "where I am" and asks for GPS.
-    if (!destId || (destId !== 'GPS' && !STOPS[destId])) {
+    if (!destId || (destId !== 'GPS' && destId !== MAP_PICK_ID && !STOPS[destId])) {
         showToast(t('pick_dest'), true);
         destEl.focus();
         return;
@@ -1822,6 +1858,10 @@ async function doSearch() {
     // Same for a line the traveller was browsing on the network map
     clearBusRoute();
     closeStopSheet();
+    // The picking pin marked a choice that is now committed; the journey draws
+    // its own endpoint markers on the very same spot, and two icons stacked
+    // there read as two places.
+    clearMapPickMarker();
 
     // Switch to map pane
     document.querySelectorAll('.sidebar-nav .nav-item').forEach(n => n.classList.remove('active'));
@@ -2645,6 +2685,12 @@ async function startJourney() {
                     cost_euros:  selectedJourney.costEuros,
                     origin_name: origin ? origin.name : null,
                     dest_name:   dest ? dest.name : null,
+                    // So the trip can be replayed from Last Routes even when an
+                    // end was a point on the map, which no stop name resolves to
+                    origin_lat:  origin ? origin.lat : null,
+                    origin_lon:  origin ? origin.lon : null,
+                    dest_lat:    dest ? dest.lat : null,
+                    dest_lon:    dest ? dest.lon : null,
                     // How the kilometres split between modes. A combined trip cannot
                     // be scored without it: the server would otherwise have to charge
                     // every kilometre to the dirtiest leg, and a bus-and-scooter
@@ -3028,13 +3074,43 @@ function resetSearchFields() {
         // dataset.id. Clearing one without the other would leave Search
         // planning from a stop the field no longer names.
         _acSetId(el, '');
+        delete el.dataset.lat;
+        delete el.dataset.lon;
     });
     _acHide();
+    // The pin marks a choice that no longer exists
+    cancelMapPick();
+    clearMapPickMarker();
     // Without this the sort chips would re-render the stale cards through
     // setSort(), putting the completed journey straight back on screen.
     window._lastSearchData = null;
     window._currentOrigin  = null;
     window._currentDest    = null;
+}
+
+/**
+ * Empties both ends, the results and everything the map is showing for them.
+ *
+ * Until now the only way back to a blank slate was to finish a journey: with a
+ * search on screen and no option selected, the traveller could edit each field
+ * but had nothing that undid the search itself.
+ */
+function clearSearch() {
+    clearJourneySelection();
+    clearBusRoute();
+    closeStopSheet();
+    cancelMapPick();
+    clearMapPickMarker();
+    resetSearchFields();
+
+    document.querySelector('.routes-list').innerHTML =
+        '<div style="text-align:center;padding:48px 20px;color:var(--text-soft)">'
+        + '<div style="font-size:36px;margin-bottom:12px">🧭</div>'
+        + `<div style="font-size:14px;font-weight:700;color:var(--text-dark)">${t('plan_trip_title')}</div>`
+        + `<div style="font-size:12px;margin-top:6px">${t('plan_trip_desc')}</div>`
+        + '</div>';
+
+    document.getElementById('originSelect')?.focus();
 }
 
 // ── Toast ─────────────────────────────────────────────────────────
@@ -3141,23 +3217,42 @@ document.addEventListener('click', e => {
     // The star sits inside the card and has its own job; a tap on it must not
     // also rewrite the search fields.
     if (!card || e.target.closest('.fav-star')) return;
-    fillSearchFromSaved(card.dataset.origin, card.dataset.dest);
+    fillSearchFromSaved(card.dataset, card.dataset.origin, card.dataset.dest);
 });
 
-function fillSearchFromSaved(originName, destName) {
+/** Whether a label names a stop the network still serves. */
+function stopNamed(name) {
+    const n = (name || '').trim().toLowerCase();
+    return Object.values(STOPS).some(s => (s.name || '').toLowerCase() === n);
+}
+
+function fillSearchFromSaved(saved, originName, destName) {
     // The field's value is only a label — doSearch validates dataset.id — so each
     // one is run through _acSyncId to resolve the stop actually meant. It also
     // maps "My Location" to GPS, which is what a history entry with no origin
     // was rendered as.
-    const fill = (el, name) => {
+    //
+    // A journey that started or ended on a point of the map answers to no stop
+    // name, and used to fail here with "no longer served". Its coordinates are
+    // recorded now, so the end is restored as the point it was — keeping the
+    // street name the traveller recognises as the label.
+    const fill = (el, name, lat, lon) => {
+        const la = parseFloat(lat), lo = parseFloat(lon);
+        if (name && !isNaN(la) && !isNaN(lo) && !stopNamed(name)) {
+            el.value = name;
+            _acSetId(el, MAP_PICK_ID);
+            el.dataset.lat = String(la);
+            el.dataset.lon = String(lo);
+            return true;
+        }
         el.value = name || '';
         _acSyncId(el);
         return !name || !!el.dataset.id;
     };
     const originEl = document.getElementById('originSelect');
     const destEl   = document.getElementById('destSelect');
-    const okOrigin = fill(originEl, originName);
-    const okDest   = fill(destEl,   destName);
+    const okOrigin = fill(originEl, originName, saved.originLat, saved.originLon);
+    const okDest   = fill(destEl,   destName,   saved.destLat,   saved.destLon);
     _acHide();
 
     // Back to the map pane: on a phone the search bar is hidden on the profile
@@ -3550,8 +3645,20 @@ function setStop(el, id) {
     if (s) { el.value = s.name; el.dataset.id = id; }
 }
 
+// A point tapped on the map is not in STOPS, so it carries its own coordinates
+// on the field. dataset.id stays the field's single source of truth, exactly as
+// it is for a stop or for GPS.
+function setMapPoint(el, lat, lon) {
+    if (!el) return;
+    el.value = t('map_point') + ' · ' + lat.toFixed(4) + ', ' + lon.toFixed(4);
+    _acSetId(el, MAP_PICK_ID);
+    el.dataset.lat = String(lat);
+    el.dataset.lon = String(lon);
+}
+
 let _acFor = null;
 let _acIndex = -1;   // keyboard-highlighted row, -1 = none
+
 
 function _acSetId(el, id) {
     if (id) el.dataset.id = id; else delete el.dataset.id;
@@ -3563,6 +3670,10 @@ function _acSetId(el, id) {
 // traveller had just deleted. A name typed in full still counts as a choice.
 function _acSyncId(inputEl) {
     const v = (inputEl.value || '').trim().toLowerCase();
+    // Editing the text abandons a point picked on the map, the same way it
+    // abandons a chosen stop — otherwise its coordinates would outlive the label
+    delete inputEl.dataset.lat;
+    delete inputEl.dataset.lon;
     if (!v) { _acSetId(inputEl, ''); return; }
     if (v === t('my_location').toLowerCase()) { _acSetId(inputEl, 'GPS'); return; }
     const hit = Object.values(STOPS).find(s => (s.name || '').toLowerCase() === v);
@@ -3587,7 +3698,12 @@ function _acItems(inputEl, q) {
     };
     consider('GPS', t('my_location'));   // offered on both ends: you can travel to where you are too
     Object.values(STOPS).forEach(s => consider(s.id, s.name));
-    return starts.concat(contains).slice(0, AC_MAX_ITEMS);
+
+    const list = starts.concat(contains).slice(0, AC_MAX_ITEMS);
+    // Always first and never filtered out: it is an action, not a place, so a
+    // query that matches no stop is exactly when it is most wanted.
+    list.unshift({ id: MAP_PICK_ID, name: t('pick_on_map') });
+    return list;
 }
 
 // Opening the list on the whole catalogue only makes sense in two cases: an empty field,
@@ -3651,6 +3767,11 @@ function _acHighlight(i) {
 // Committing a choice is the same job whether it came from a tap or from Enter, so both
 // go through here — the mouse path used to be the only way to ever set dataset.id.
 function _acPick(target, id) {
+    if (id === MAP_PICK_ID) {
+        _acHide();
+        startMapPick(target);
+        return;
+    }
     if (id === 'GPS') {
         setStop(target, 'GPS');
         showToast(t('toast_locating'));
@@ -4397,5 +4518,155 @@ async function checkDelay() {
     } catch (e) {
         // A missed poll is not worth telling anyone about; the next one follows
         console.warn('[DELAY] poll failed:', e);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PICK A POINT ON THE MAP
+// ══════════════════════════════════════════════════════════════════
+// Offered from both dropdowns, because not every origin or destination is a bus
+// stop: a house, a shop, the far side of the campus. The planner already copes
+// with bare coordinates — it is what a GPS position is — so the point needs no
+// id, only a latitude and a longitude on the field.
+//
+// The map is emptied while picking. Lines, live buses, bikes and scooters are
+// all things you tap, and leaving them under a crosshair invites a tap that
+// opens a popup instead of choosing the place beneath it. What stays is the
+// base map and the stops, which are the landmarks that make a point findable.
+let _mapPick = null;   // { field, wasNetworkVisible }
+
+function startMapPick(field) {
+    if (_mapPick) cancelMapPick();
+
+    // What to put back afterwards. Restoring more than was there is how the map
+    // ended up covered in live buses that had never been drawn: they only appear
+    // once a bus journey is under way, not on the ordinary map.
+    _mapPick = {
+        field,
+        wasNetworkVisible: !_networkHidden,
+        hadBusPoll:        !!window._busPollInterval
+    };
+
+    // Lines, parked bikes and scooters, and their zones
+    setNetworkLinesVisible(false);
+    // And the stops. They are markers with a click handler of their own, so a
+    // tap meant to choose a place opened the stop's arrivals sheet instead.
+    (window._stopMarkers || []).forEach(m => { try { map.removeLayer(m); } catch(_) {} });
+    // Live buses, and the poll that would draw them straight back
+    clearInterval(window._busPollInterval);
+    window._busPollInterval = null;
+    clearBusMarkers();
+
+    document.getElementById('map').classList.add('map-picking');
+    document.getElementById('mapPickBar').classList.add('open');
+    document.getElementById('mapPickLabel').textContent =
+        field.id === 'destSelect' ? t('pick_map_dest') : t('pick_map_origin');
+
+    map.on('click', onMapPickClick);
+
+    // The sheet covers the map on a phone; picking is impossible behind it
+    document.querySelector('.map-sidebar')?.classList.add('sidebar-collapsed');
+}
+
+function onMapPickClick(e) {
+    if (!_mapPick) return;
+    const { lat, lng } = e.latlng;
+    const field = _mapPick.field;
+    setMapPoint(field, lat, lng);
+    // Coordinates first, then the street name if one comes back. The label is a
+    // convenience: the journey is planned from the coordinates either way, so
+    // it is never worth making the traveller wait for it.
+    nameMapPoint(field, lat, lng);
+
+    // A marker where they tapped, so the choice is visible and not just written
+    // A divIcon like every other pin in this app. L.marker's default icon points
+    // at image files Leaflet expects beside its own CSS; loaded from a CDN they
+    // never resolve, and the map showed a black box with the alt text in it.
+    const isDest = _mapPick.field.id === 'destSelect';
+    if (window._mapPickMarker) { try { map.removeLayer(window._mapPickMarker); } catch(_) {} }
+    window._mapPickMarker = L.marker([lat, lng], {
+        icon: L.divIcon({
+            className: '',
+            html: `<div class="map-pick-pin${isDest ? ' is-dest' : ''}">${isDest ? '🏁' : '📍'}</div>`,
+            iconSize: [30, 30],
+            iconAnchor: [15, 30]
+        })
+    }).addTo(map).bindPopup((isDest ? '🏁 ' : '📍 ') + escHtml(t('map_point')));
+
+    finishMapPick();
+    showToast(t('map_point_set'));
+
+    // Straight on to the other end when it is still empty: picking one point on
+    // the map usually means picking two
+    const other = field.id === 'originSelect'
+        ? document.getElementById('destSelect')
+        : document.getElementById('originSelect');
+    if (other && !other.dataset.id) other.focus();
+}
+
+/**
+ * Replaces the coordinates in the field with the street they sit on.
+ *
+ * Asked for after the point is already set, never before: the label is
+ * cosmetic, and a slow or disabled geocoder must not delay a choice the
+ * traveller has already made. Anything short of a street name — geocoding
+ * switched off in the dashboard, no key, open countryside, a network error —
+ * simply leaves the coordinates showing.
+ */
+async function nameMapPoint(field, lat, lon) {
+    try {
+        const r = await apiFetch(`/journeys/geocode/reverse?lat=${lat}&lon=${lon}`);
+        if (!r.ok) return;
+        const { street } = await r.json();
+        if (!street) return;
+
+        // The traveller may have moved on: only relabel while this is still the
+        // point the field holds
+        if (field.dataset.id !== MAP_PICK_ID) return;
+        if (Math.abs(parseFloat(field.dataset.lat) - lat) > 1e-9) return;
+
+        field.value = street;
+    } catch (e) {
+        console.warn('[GEOCODE] failed:', e);
+    }
+}
+
+/** Leaves picking mode and puts back whatever was on the map. */
+function finishMapPick() {
+    if (!_mapPick) return;
+    const restoreNetwork = _mapPick.wasNetworkVisible;
+    const restoreBuses   = _mapPick.hadBusPoll;
+    map.off('click', onMapPickClick);
+    _mapPick = null;
+
+    document.getElementById('map').classList.remove('map-picking');
+    document.getElementById('mapPickBar').classList.remove('open');
+    document.querySelector('.map-sidebar')?.classList.remove('sidebar-collapsed');
+
+    // Only if the map was not already cleared by something else — a journey
+    // preview owns the map too, and must not have its background handed back
+    if (restoreNetwork) {
+        setNetworkLinesVisible(true);
+        (window._stopMarkers || []).forEach(m => { try { m.addTo(map); } catch(_) {} });
+    }
+
+    // Live buses come back only if they were already being polled, which happens
+    // while a bus journey is running. Redrawing them unconditionally put a fleet
+    // of markers on a map that had none before the pick.
+    if (restoreBuses && _pickerHour === null) {
+        fetchAndRenderBusMarkers();
+        window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
+    }
+}
+
+function cancelMapPick() {
+    finishMapPick();
+}
+
+/** Removes the pin, when the choice it marks is gone. */
+function clearMapPickMarker() {
+    if (window._mapPickMarker) {
+        try { map.removeLayer(window._mapPickMarker); } catch(_) {}
+        window._mapPickMarker = null;
     }
 }

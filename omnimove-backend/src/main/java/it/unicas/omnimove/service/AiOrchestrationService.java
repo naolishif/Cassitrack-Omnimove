@@ -30,7 +30,7 @@ import java.util.*;
  *   2. Personalised context — knows the logged-in traveller's journey history
  *   3. Weather awareness — proactively warns about rain/wind affecting modes
  *   4. Language auto-detection — replies in the language the user wrote in
- *   5. Graceful fallback — contextual canned answers if Claude is unavailable
+ *   5. Graceful fallback — contextual canned answers if the model is unavailable
  */
 @Service
 public class AiOrchestrationService {
@@ -44,11 +44,11 @@ public class AiOrchestrationService {
     private final WeatherService weatherService;
     private final GreenIndexService greenIndexService;
 
-    @Value("${anthropic.api.key}")
+    @Value("${ai.api.key:}")
     private String apiKey;
-    @Value("${anthropic.api.url}")
+    @Value("${ai.api.url}")
     private String apiUrl;
-    @Value("${anthropic.api.model}")
+    @Value("${ai.api.model}")
     private String model;
 
     public AiOrchestrationService(CassitrackClient cassitrackClient,
@@ -94,7 +94,7 @@ public class AiOrchestrationService {
         try {
             String context = buildContext(userId);
             String system = buildSystem(lang, context);
-            String answer = callClaude(system, req.getHistory(), question);
+            String answer = callModel(system, req.getHistory(), question);
 
             return ChatResponse.builder()
                     .answer(answer)
@@ -311,20 +311,34 @@ public class AiOrchestrationService {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    //  1. CLAUDE CALL WITH MULTI-TURN HISTORY
+    //  1. MODEL CALL WITH MULTI-TURN HISTORY
     // ════════════════════════════════════════════════════════════════════
 
+    /**
+     * Speaks the OpenAI chat-completions dialect, which nearly every inference
+     * provider now serves — Regolo among them. Changing provider is a base URL,
+     * a key and a model name, with no code to rewrite; the previous version was
+     * shaped around Anthropic's own /v1/messages and tied the assistant to one
+     * vendor.
+     *
+     * Two differences from that shape, and they are the whole migration: the
+     * system prompt is the first message rather than a top-level field, and the
+     * reply is choices[0].message.content rather than content[0].text.
+     */
     @SuppressWarnings("unchecked")
-    private String callClaude(String systemPrompt,
-                              List<ChatRequest.ChatTurn> history,
-                              String userMessage) {
+    private String callModel(String systemPrompt,
+                             List<ChatRequest.ChatTurn> history,
+                             String userMessage) {
 
-        // Build the messages array from prior history + the new message
         List<Map<String, Object>> messages = new ArrayList<>();
+        // The system prompt leads the conversation instead of sitting beside it
+        messages.add(Map.of("role", "system", "content", systemPrompt));
+
         if (history != null) {
             for (ChatRequest.ChatTurn turn : history) {
                 if (turn.getRole() == null || turn.getContent() == null) continue;
-                // Only "user" and "assistant" roles are valid for the API
+                // Anything that is not the assistant is treated as the user: a
+                // stray role would be rejected by the API for the whole request
                 String role = turn.getRole().equalsIgnoreCase("assistant")
                         ? "assistant" : "user";
                 messages.add(Map.of("role", role, "content", turn.getContent()));
@@ -335,30 +349,36 @@ public class AiOrchestrationService {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
-        body.put("max_tokens", 1024);
-        body.put("system", systemPrompt);
         body.put("messages", messages);
+        body.put("max_tokens", 1024);
+        // Low but not zero: the answers quote live times and must not drift,
+        // while a completely deterministic assistant repeats itself word for
+        // word when asked the same thing twice.
+        body.put("temperature", 0.3);
 
         WebClient client = WebClient.builder().baseUrl(apiUrl)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .defaultHeader("x-api-key", apiKey)
-                .defaultHeader("anthropic-version", "2023-06-01")
+                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .build();
 
-        log.info("Calling Claude model: {}", model);
-        Map response = client.post().bodyValue(body).retrieve()
-                .onStatus(status -> status.is4xxClientError(), clientResponse ->
+        log.info("Calling model {} at {}", model, apiUrl);
+        Map<String, Object> response = client.post().bodyValue(body).retrieve()
+                .onStatus(status -> status.isError(), clientResponse ->
                         clientResponse.bodyToMono(String.class).flatMap(errorBody -> {
-                            log.error("ANTHROPIC ERROR BODY: {}", errorBody);
-                            return reactor.core.publisher.Mono.error(new RuntimeException("Claude 400: " + errorBody));
+                            log.error("AI provider error {}: {}", clientResponse.statusCode(), errorBody);
+                            return reactor.core.publisher.Mono.error(
+                                    new RuntimeException("AI provider error: " + errorBody));
                         }))
                 .bodyToMono(Map.class).block();
 
-        if (response != null && response.containsKey("content")) {
-            List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");
-            if (!content.isEmpty()) return (String) content.get(0).get("text");
+        Object choices = response == null ? null : response.get("choices");
+        if (choices instanceof List<?> list && !list.isEmpty()
+                && list.get(0) instanceof Map<?, ?> first
+                && first.get("message") instanceof Map<?, ?> msg) {
+            Object content = msg.get("content");
+            if (content instanceof String text && !text.isBlank()) return text;
         }
-        throw new RuntimeException("Unexpected Claude API response");
+        throw new RuntimeException("Unexpected AI provider response");
     }
 
     // ════════════════════════════════════════════════════════════════════

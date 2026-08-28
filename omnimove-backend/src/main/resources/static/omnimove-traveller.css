@@ -386,6 +386,26 @@ body {
     white-space: nowrap;
 }
 .search-btn:hover { background: var(--primary-dark); }
+
+/* The two controls that act on the fields rather than on the search. They sit
+   inside the pill and must not read as actions: same height and separator as
+   the rest, but the bar's own background. Kept BEFORE the Search button on
+   purpose — the pill rounds its last child, so anything after Search would take
+   the rounded end and leave Search a square block short of the edge. */
+.search-ghost {
+    background: var(--bg-app);
+    color: var(--text-dark);
+    border-left: 1px solid var(--border-mid);
+    padding: 10px 14px;
+    font-size: 16px;
+    line-height: 1;
+}
+.search-ghost:hover { background: var(--bg-white); color: var(--text-dark); }
+.search-clear { font-size: 14px; color: var(--text-soft); }
+.search-clear:hover { background: var(--bg-white); color: var(--red); }
+
+/* Search closes the pill: its rounded end is the pill's own */
+#searchBtn { padding-right: 22px; }
 .search-notice{background:#fef9c3;color:#92400e;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12px;font-weight:600}
 .cats { display: flex; gap: 7px; align-items: center; }
 .cat-chip {
@@ -3011,3 +3031,78 @@ body {
     background: #fef3c7;
     color: #92400e;
 }
+
+/* ── PICK A POINT ON THE MAP ── */
+/* The crosshair says the next tap chooses a place rather than opening whatever
+   is under it — which is also why the layers you can tap are removed first. */
+#map.map-picking { cursor: crosshair; }
+#map.map-picking .leaflet-marker-icon { cursor: crosshair; }
+
+.map-pick-bar {
+    display: none;
+    position: absolute;
+    z-index: 1200;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    align-items: center;
+    gap: 14px;
+    max-width: calc(100% - 28px);
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: var(--text-dark);
+    color: #fff;
+    box-shadow: var(--shadow-lg);
+}
+.map-pick-bar.open { display: flex; }
+
+.map-pick-label {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.map-pick-cancel {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: rgba(255,255,255,.14);
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+}
+.map-pick-cancel:hover { background: rgba(255,255,255,.24); }
+
+/* On a phone the results sheet covers the map, and you cannot tap what you
+   cannot see. It slides away for the duration of the pick. */
+@media (max-width: 768px) {
+    .map-sidebar.sidebar-collapsed { transform: translateY(100%); }
+    .map-pick-bar { top: 10px; }
+}
+
+/* The pin for a point chosen on the map. A divIcon, not Leaflet's default:
+   that one loads image files from beside its own CSS, and served from a CDN
+   they resolve to nothing — leaving a black box with the alt text inside. */
+.map-pick-pin {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    font-size: 16px;
+    line-height: 1;
+    border-radius: 50%;
+    background: var(--primary);
+    border: 2px solid #fff;
+    box-shadow: var(--shadow-md);
+}
+.map-pick-pin.is-dest { background: var(--text-dark); }

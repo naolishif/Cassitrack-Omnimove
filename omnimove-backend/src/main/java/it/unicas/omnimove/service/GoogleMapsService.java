@@ -35,16 +35,23 @@ public class GoogleMapsService {
     private static final String DIRECTIONS_URL =
             "https://maps.googleapis.com/maps/api/directions/json";
 
+    private static final String GEOCODE_URL =
+            "https://maps.googleapis.com/maps/api/geocode/json";
+
     @Value("${google.maps.api-key:}")
     private String apiKey;
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    /** The administrator's switches: every call here can be turned off. */
+    private final GoogleApiSettingsService settings;
 
     public GoogleMapsService(WebClient.Builder webClientBuilder,
-                             ObjectMapper objectMapper) {
+                             ObjectMapper objectMapper,
+                             GoogleApiSettingsService settings) {
         this.webClient    = webClientBuilder.baseUrl(BASE_URL).build();
         this.objectMapper = objectMapper;
+        this.settings     = settings;
     }
 
     /**
@@ -154,9 +161,77 @@ public class GoogleMapsService {
      *             bicycling is the closest fit and is what the planner already
      *             asks for when timing a scooter ride.
      */
+    /**
+     * The street a point sits on, for a place the traveller tapped on the map.
+     *
+     * Returns the road name alone — "Via Santa Scolastica" — not the postal
+     * address: a house number is precision the tap never had, and printing one
+     * would claim the traveller chose a doorway rather than a spot on a street.
+     *
+     * Empty on any failure, including a missing key. The caller is expected to
+     * fall back to the coordinates: a label is a convenience, and losing it must
+     * never cost the journey.
+     */
+    public Optional<String> reverseGeocodeStreet(double lat, double lon) {
+        if (!settings.isGeocodingEnabled()) {
+            log.debug("Geocoding disabled by the administrator");
+            return Optional.empty();
+        }
+        if (apiKey == null || apiKey.isBlank()) {
+            log.debug("Google Maps API key non configurata — nessun geocoding");
+            return Optional.empty();
+        }
+        try {
+            // result_type=route asks Google for the road itself rather than the
+            // building, the postcode and the province it would otherwise return
+            String url = GEOCODE_URL
+                    + "?latlng="      + lat + "," + lon
+                    + "&result_type=route"
+                    + "&language=it"
+                    + "&key="         + apiKey;
+
+            String response = webClient.get()
+                    .uri(URI.create(url))
+                    .retrieve().bodyToMono(String.class).block();
+            if (response == null) return Optional.empty();
+
+            JsonNode root = objectMapper.readTree(response);
+            String status = root.path("status").asText();
+            if (!"OK".equals(status)) {
+                // ZERO_RESULTS is ordinary out in the countryside, not a fault
+                if (!"ZERO_RESULTS".equals(status))
+                    log.warn("Geocoding returned {}: {}", status, root.path("error_message").asText(""));
+                return Optional.empty();
+            }
+
+            for (JsonNode result : root.path("results")) {
+                for (JsonNode comp : result.path("address_components")) {
+                    for (JsonNode type : comp.path("types")) {
+                        if ("route".equals(type.asText())) {
+                            String name = comp.path("long_name").asText("");
+                            if (!name.isBlank()) return Optional.of(name);
+                        }
+                    }
+                }
+            }
+            return Optional.empty();
+
+        } catch (Exception e) {
+            log.warn("Geocoding failed: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     public Optional<RouteResult> getRoute(double originLat, double originLon,
                                           double destLat,   double destLon,
                                           String mode) {
+        // The one Google call that had no switch. Off, the legs are still
+        // planned — only their drawn shape falls back to a straight line
+        // between the stops.
+        if (!settings.isRouteShapeEnabled()) {
+            log.debug("Route shapes disabled by the administrator");
+            return Optional.empty();
+        }
         if (apiKey == null || apiKey.isBlank()) {
             log.debug("Google Maps API key non configurata — nessuna geometria");
             return Optional.empty();

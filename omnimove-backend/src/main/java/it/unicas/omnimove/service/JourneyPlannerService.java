@@ -335,12 +335,17 @@ public class JourneyPlannerService {
 
 
         // --- Step 1: walk to bus stop ---
-        boolean fromGps = Boolean.TRUE.equals(req.getOriginIsGps());
+        // Walk whenever the journey does not START AT a stop, not merely when it
+        // starts from a GPS fix. That was the same thing until a traveller could
+        // tap a place on the map: with no stop id and no GPS flag, the itinerary
+        // began at the nearest stop as though they were already standing there,
+        // and the walk to reach it vanished from both the steps and the total.
+        boolean fromLoosepoint = req.getOriginStopId() == null;
 
         double walkMetres = 0;
         int walkMin = 0;
         List<double[]> walkPoints = List.of();
-        if (fromGps) {
+        if (fromLoosepoint) {
             var w = walkStretch(req.getOriginLat(), req.getOriginLon(),
                                 getStopLat(nearestStop), getStopLon(nearestStop));
             walkMetres = w.metres();
@@ -484,10 +489,12 @@ public class JourneyPlannerService {
         // Mirror of the walk that opens a GPS-origin trip: when the destination is the
         // traveller's own position the bus can only reach the nearest stop, so the last
         // stretch is on foot and has to count towards the total.
+        // Mirror of the rule above: the last stretch is on foot whenever the
+        // journey does not END AT a stop
         double destWalkMetres = 0;
         int destWalkMin = 0;
         List<double[]> destWalkPoints = List.of();
-        if (req.isDestGps()) {
+        if (req.getDestStopId() == null) {
             var w = walkStretch(getStopLat(destStop), getStopLon(destStop),
                                 req.getDestLat(), req.getDestLon());
             destWalkMetres = w.metres();

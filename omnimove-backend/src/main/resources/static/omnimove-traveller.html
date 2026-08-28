@@ -112,7 +112,11 @@
                 <input id="destSelect" type="text" autocomplete="off" data-i18n="ph_dest" placeholder="Destination" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
             </div>
 
-            <button class="search-btn" onclick="swapStops()" style="background:var(--bg-app);color:var(--text-dark);border-left:1px solid var(--border-mid);padding:10px 14px;font-size:16px" title="Swap">⇄</button>
+            <button class="search-btn search-ghost" onclick="swapStops()" title="Swap">⇄</button>
+            <!-- The only way out of a search nobody wants to act on: editing the
+                 fields one by one never cleared the results underneath. -->
+            <button class="search-btn search-ghost search-clear" id="clearSearchBtn" onclick="clearSearch()"
+                    data-i18n-title="btn_clear_search" title="Clear" aria-label="Clear">✕</button>
             <button class="search-btn time-pill" id="sidebarTimePill" onclick="openTimePicker()"
                     data-i18n-title="time_depart">🕐 <span id="sidebarTimeDisplay">Now</span></button>
             <button class="search-btn" id="searchBtn" onclick="doSearch()" data-i18n="search_btn" data-label="Search">Search</button>
@@ -133,6 +137,13 @@
         <!-- ── MAP PANE ── -->
         <div class="pane active" id="pane-map">
             <div id="map"></div>
+            <!-- Shown only while a point is being picked: the map is emptied and
+                 the next tap on it chooses the place. -->
+            <div class="map-pick-bar" id="mapPickBar">
+                <span class="map-pick-label" id="mapPickLabel">Tap a point on the map</span>
+                <button class="map-pick-cancel" onclick="cancelMapPick()"
+                        data-i18n-title="btn_cancel" title="Cancel" aria-label="Cancel">✕</button>
+            </div>
             <button class="map-menu-fab" onclick="openMenu()" aria-label="Open menu">☰</button>
             <div class="ai-fab" onclick="openAI()" title="Ask OmniAI">✦</div>
 

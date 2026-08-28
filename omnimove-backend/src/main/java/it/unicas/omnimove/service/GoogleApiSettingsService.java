@@ -29,8 +29,15 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class GoogleApiSettingsService {
 
-    public static final String KEY_SEARCH   = "google.search";
-    public static final String KEY_STOP_ETA = "google.stop_eta";
+    public static final String KEY_SEARCH      = "google.search";
+    public static final String KEY_STOP_ETA    = "google.stop_eta";
+    /** Reverse geocoding: the street name behind a point tapped on the map. */
+    public static final String KEY_GEOCODING   = "google.geocoding";
+    /** Directions: the drawn shape of a walking or riding leg. */
+    public static final String KEY_ROUTE_SHAPE = "google.route_shape";
+
+    private static final java.util.Set<String> KEYS = java.util.Set.of(
+            KEY_SEARCH, KEY_STOP_ETA, KEY_GEOCODING, KEY_ROUTE_SHAPE);
 
     private final AppSettingRepository repo;
 
@@ -41,10 +48,8 @@ public class GoogleApiSettingsService {
     void load() {
         // Default ON: if the row is missing (fresh DB, migration not yet run),
         // the feature stays enabled rather than silently disabling Google.
-        cache.put(KEY_SEARCH,   readOrDefault(KEY_SEARCH,   true));
-        cache.put(KEY_STOP_ETA, readOrDefault(KEY_STOP_ETA, true));
-        log.info("Google API flags loaded: search={}, stop_eta={}",
-                cache.get(KEY_SEARCH), cache.get(KEY_STOP_ETA));
+        KEYS.forEach(k -> cache.put(k, readOrDefault(k, true)));
+        log.info("Google API flags loaded: {}", cache);
     }
 
     private boolean readOrDefault(String key, boolean dflt) {
@@ -53,14 +58,16 @@ public class GoogleApiSettingsService {
                 .orElse(dflt);
     }
 
-    public boolean isSearchEnabled()  { return cache.getOrDefault(KEY_SEARCH,   true); }
-    public boolean isStopEtaEnabled() { return cache.getOrDefault(KEY_STOP_ETA, true); }
+    public boolean isSearchEnabled()     { return cache.getOrDefault(KEY_SEARCH,      true); }
+    public boolean isStopEtaEnabled()    { return cache.getOrDefault(KEY_STOP_ETA,    true); }
+    public boolean isGeocodingEnabled()  { return cache.getOrDefault(KEY_GEOCODING,   true); }
+    public boolean isRouteShapeEnabled() { return cache.getOrDefault(KEY_ROUTE_SHAPE, true); }
 
     public boolean isEnabled(String key) { return cache.getOrDefault(key, true); }
 
     /** Update one flag, write-through to Postgres and refresh the cache. */
     public void set(String key, boolean enabled) {
-        if (!KEY_SEARCH.equals(key) && !KEY_STOP_ETA.equals(key)) {
+        if (!KEYS.contains(key)) {
             throw new IllegalArgumentException("Unknown setting: " + key);
         }
         AppSetting s = repo.findById(key).orElseGet(() -> {
@@ -78,7 +85,9 @@ public class GoogleApiSettingsService {
     /** Snapshot for the admin UI. */
     public Map<String, Boolean> snapshot() {
         return Map.of(
-                KEY_SEARCH,   isSearchEnabled(),
-                KEY_STOP_ETA, isStopEtaEnabled());
+                KEY_SEARCH,      isSearchEnabled(),
+                KEY_STOP_ETA,    isStopEtaEnabled(),
+                KEY_GEOCODING,   isGeocodingEnabled(),
+                KEY_ROUTE_SHAPE, isRouteShapeEnabled());
     }
 }

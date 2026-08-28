@@ -1116,8 +1116,7 @@ async function loadGoogleSettings() {
         const r = await apiFetch('/admin/settings/google');
         if (!r.ok) throw new Error('settings ' + r.status);
         const s = await r.json();
-        setSwitch('swSearch',  s['google.search']);
-        setSwitch('swStopEta', s['google.stop_eta']);
+        applyGoogleSettings(s);
     } catch (e) {
         console.warn('Could not load Google settings:', e);
     }
@@ -1132,6 +1131,21 @@ async function loadSecuritySettings() {
     } catch (e) {
         console.warn('Could not load security settings:', e);
     }
+}
+
+// One place that maps the payload onto the switches, so a new flag is a line
+// here and a line of HTML — not another branch in the toggle handler.
+const GOOGLE_SWITCHES = {
+    'google.search':      'swSearch',
+    'google.stop_eta':    'swStopEta',
+    'google.route_shape': 'swRouteShape',
+    'google.geocoding':   'swGeocoding'
+};
+
+function applyGoogleSettings(s) {
+    Object.entries(GOOGLE_SWITCHES).forEach(([key, id]) => {
+        if (key in s) setSwitch(id, s[key]);
+    });
 }
 
 function applySecuritySettings(s) {
@@ -1178,8 +1192,7 @@ async function toggleSetting(btn) {
         // Repaint from the server's answer, never from the click: the stored
         // value is the truth, and for the captcha it can differ from what was
         // asked when no keys are configured.
-        if ('google.search' in s)      setSwitch('swSearch',  s['google.search']);
-        if ('google.stop_eta' in s)    setSwitch('swStopEta', s['google.stop_eta']);
+        applyGoogleSettings(s);
         if ('security.recaptcha' in s) applySecuritySettings(s);
 
         if (key === 'security.recaptcha')

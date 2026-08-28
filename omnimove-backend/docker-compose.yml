@@ -93,7 +93,9 @@ services:
       CASSITRACK_POLL_INTERVAL_MS: ${CASSITRACK_POLL_INTERVAL_MS:-60000}
 
       # External APIs
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_API_URL: ${AI_API_URL:-}
+      AI_API_MODEL: ${AI_API_MODEL:-}
       WEATHER_API_KEY: ${WEATHER_API_KEY}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
       # Leave empty in an environment whose origin is not registered with Google:
