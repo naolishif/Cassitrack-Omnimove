@@ -456,6 +456,17 @@
                             <div class="toggle" id="prefProfiling" onclick="toggleProfilingConsent(this)"></div>
                         </div>
 
+                        <!-- Objection, not consent: the lawful basis for research is
+                             public interest (art. 6(1)(e)), so this starts ON and the
+                             user switches it OFF to object (art. 21(6)). -->
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_research">Contribute to University research</div>
+                                <div class="pref-desc" data-i18n="desc_research">Anonymous, aggregated mobility statistics for research by the University of Cassino. Switch off to object: your data is excluded and anything already collected is deleted.</div>
+                            </div>
+                            <div class="toggle" id="prefResearch" onclick="toggleResearchUse(this)"></div>
+                        </div>
+
                         <div class="pref-row">
                             <div>
                                 <div class="pref-label" data-i18n="pref_export">Download my data</div>

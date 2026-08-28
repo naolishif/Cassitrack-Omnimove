@@ -72,13 +72,18 @@ function togglePref(el) {
 // posts immediately and reverts visually if the server refuses.
 
 async function loadPrivacyConsents() {
-    const el = document.getElementById('prefProfiling');
-    if (!el) return;
+    const profiling = document.getElementById('prefProfiling');
+    const research  = document.getElementById('prefResearch');
+    if (!profiling && !research) return;
     try {
         const r = await apiFetch('/privacy/consents');
         if (!r.ok) return;
-        const data = await r.json();
-        el.classList.toggle('on', data.consents && data.consents.PROFILING === true);
+        const c = (await r.json()).consents || {};
+        // PROFILING is a consent: absent means not given, so the toggle stays off.
+        if (profiling) profiling.classList.toggle('on', c.PROFILING === true);
+        // RESEARCH_USE is an objection register on a public-interest basis: absent
+        // means included, so the default is on. The server sends true explicitly.
+        if (research) research.classList.toggle('on', c.RESEARCH_USE !== false);
     } catch (e) {
         console.warn('Could not load consent state:', e);
     }
@@ -96,6 +101,29 @@ async function toggleProfilingConsent(el) {
         showToast(granted ? t('toast_profiling_on') : t('toast_profiling_off'));
     } catch (e) {
         el.classList.toggle('on', !granted);   // keep the UI honest about what was stored
+        showToast(t('toast_consent_failed'), true);
+    }
+}
+
+async function toggleResearchUse(el) {
+    const included = !el.classList.contains('on');
+    el.classList.toggle('on', included);
+    try {
+        const r = await apiFetch('/privacy/consents', {
+            method: 'POST',
+            body: JSON.stringify({ type: 'RESEARCH_USE', granted: included })
+        });
+        if (!r.ok) throw new Error('consent ' + r.status);
+        const data = await r.json();
+        // Switching off is an objection under art. 21: it also erases what was
+        // already promoted, so tell the user how much was actually removed rather
+        // than letting them assume.
+        if (!included && data.researchRowsRemoved > 0)
+            showToast(tf('toast_research_off_n', { n: data.researchRowsRemoved }));
+        else
+            showToast(included ? t('toast_research_on') : t('toast_research_off'));
+    } catch (e) {
+        el.classList.toggle('on', !included);
         showToast(t('toast_consent_failed'), true);
     }
 }
@@ -2264,7 +2292,14 @@ async function startJourney() {
                     distance_km: selectedJourney.distanceKm,
                     cost_euros:  selectedJourney.costEuros,
                     origin_name: origin ? origin.name : null,
-                    dest_name:   dest ? dest.name : null
+                    dest_name:   dest ? dest.name : null,
+                    // Sent so the journey can be generalised to a zone for research.
+                    // The names above are free text and cannot be. When the origin
+                    // came from GPS, the fix we just took is the accurate one.
+                    origin_lat:  gpsPos ? gpsPos.lat : (origin ? origin.lat : null),
+                    origin_lon:  gpsPos ? gpsPos.lon : (origin ? origin.lon : null),
+                    dest_lat:    dest ? dest.lat : null,
+                    dest_lon:    dest ? dest.lon : null
                 })
             });
         } catch (e) { console.warn('Could not record journey event:', e); }

@@ -11,6 +11,7 @@ import it.unicas.omnimove.repository.UserPreferencesRepository;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.service.ConsentService;
 import it.unicas.omnimove.service.RateLimiterService;
+import it.unicas.omnimove.service.ResearchPipelineService;
 import it.unicas.omnimove.service.SecurityAuditService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +58,7 @@ public class PrivacyController {
     private final JourneyLogRepository journeyLogRepo;
     private final RateLimiterService rateLimiter;
     private final SecurityAuditService securityAuditService;
+    private final ResearchPipelineService researchPipelineService;
 
     // ── POST /api/v1/privacy/consents ─────────────────────────────────────
     @PostMapping("/consents")
@@ -96,10 +98,21 @@ public class PrivacyController {
         consentService.record(userId, subjectKey, body.getType(), body.getGranted(),
                               source, request);
 
+        // An objection to research use must reach data promoted BEFORE it was
+        // raised — art. 21 is not forward-only. The pseudonym is recomputable from
+        // the user id and the salt, so those rows can still be found and removed.
+        long researchRowsRemoved = 0;
+        if (userId != null
+                && UserConsent.TYPE_RESEARCH_USE.equals(body.getType())
+                && Boolean.FALSE.equals(body.getGranted())) {
+            researchRowsRemoved = researchPipelineService.forgetSubject(userId);
+        }
+
         return ResponseEntity.ok(Map.of(
-                "type",          body.getType(),
-                "granted",       body.getGranted(),
-                "policyVersion", consentService.currentPolicyVersion()));
+                "type",                 body.getType(),
+                "granted",              body.getGranted(),
+                "policyVersion",        consentService.currentPolicyVersion(),
+                "researchRowsRemoved",  researchRowsRemoved));
     }
 
     // ── GET /api/v1/privacy/consents ──────────────────────────────────────

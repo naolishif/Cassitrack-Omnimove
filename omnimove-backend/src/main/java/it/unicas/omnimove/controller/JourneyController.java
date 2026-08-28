@@ -269,10 +269,36 @@ public class JourneyController {
                 .greenIndex(greenIndex)
                 .originName(originName)
                 .destName(destName)
+                // Recorded so the journey can later be generalised to a zone for
+                // research. Out-of-area or malformed values are stored as null
+                // rather than rejected: a bad coordinate must not stop a traveller
+                // from starting a journey, it just keeps the row out of research.
+                .originLat(serviceAreaCoord(body.get("origin_lat"), true))
+                .originLon(serviceAreaCoord(body.get("origin_lon"), false))
+                .destLat(serviceAreaCoord(body.get("dest_lat"), true))
+                .destLon(serviceAreaCoord(body.get("dest_lon"), false))
                 .createdAt(java.time.ZonedDateTime.now())
                 .build());
 
         return ResponseEntity.ok(Map.of("message", "Journey recorded"));
+    }
+
+    /**
+     * Accepts a client-supplied coordinate only if it falls inside the service
+     * area, otherwise returns null.
+     *
+     * <p>The bounds match {@code research.zone_of} in V23: a point outside them
+     * would end up alone in its own grid cell, which singles the traveller out
+     * instead of generalising them. Keeping the two in step matters — if one day
+     * the service area grows, both have to change together.
+     */
+    private static Double serviceAreaCoord(Object raw, boolean isLatitude) {
+        if (!(raw instanceof Number n)) return null;
+        double v = n.doubleValue();
+        if (Double.isNaN(v) || Double.isInfinite(v)) return null;
+        boolean inside = isLatitude ? (v >= 41.0 && v <= 42.0)
+                                    : (v >= 13.0 && v <= 14.5);
+        return inside ? v : null;
     }
 
     /**

@@ -35,6 +35,11 @@ const OMNI_T = {
     toast_profiling_off:'Personalised suggestions disabled',
     toast_consent_failed:'Could not save your choice. Please try again.',
     toast_export_failed:'Export failed. Please try again later.',
+    pref_research:'Contribute to University research',
+    desc_research:'Anonymous, aggregated mobility statistics for research by the University of Cassino. Switch off to object: your data is excluded and anything already collected is deleted.',
+    toast_research_on:'Your journeys will contribute to research',
+    toast_research_off:'Your journeys are excluded from research',
+    toast_research_off_n:'Excluded from research — {n} records deleted',
     // Sidebar
     brand_tagline:'Smarter urban mobility',
     nav_section_nav:'Navigation',
@@ -342,6 +347,11 @@ const OMNI_T = {
     toast_profiling_off:'Suggerimenti personalizzati disattivati',
     toast_consent_failed:'Non è stato possibile salvare la scelta. Riprova.',
     toast_export_failed:'Esportazione non riuscita. Riprova più tardi.',
+    pref_research:'Contribuisci alla ricerca dell\'Ateneo',
+    desc_research:'Statistiche di mobilità anonime e aggregate per la ricerca dell\'Università di Cassino. Disattiva per opporti: i tuoi dati vengono esclusi e quelli già raccolti cancellati.',
+    toast_research_on:'I tuoi viaggi contribuiranno alla ricerca',
+    toast_research_off:'I tuoi viaggi sono esclusi dalla ricerca',
+    toast_research_off_n:'Esclusa dalla ricerca — {n} record cancellati',
     // Sidebar
     brand_tagline:'Mobilità urbana intelligente',
     nav_section_nav:'Navigazione',

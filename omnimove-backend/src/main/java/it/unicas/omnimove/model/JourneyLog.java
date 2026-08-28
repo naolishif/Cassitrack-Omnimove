@@ -36,4 +36,20 @@ public class JourneyLog {
 
     @Column(name = "created_at")
     private ZonedDateTime createdAt;
+
+    // Coordinates of the endpoints. originName/destName are free text typed by the
+    // user and cannot be generalised to a zone, so the research pipeline works from
+    // these instead and drops any journey that has none (V23__research_tiers.sql).
+    // Nullable: rows written before V23 have no coordinates and are never promoted.
+    @Column(name = "origin_lat")
+    private Double originLat;
+
+    @Column(name = "origin_lon")
+    private Double originLon;
+
+    @Column(name = "dest_lat")
+    private Double destLat;
+
+    @Column(name = "dest_lon")
+    private Double destLon;
 }
