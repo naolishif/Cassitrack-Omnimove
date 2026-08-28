@@ -276,7 +276,7 @@ async function handleLogin(e) {
 // ════════════════════════════════════════════════════════════
 async function handleRegister(e) {
     e.preventDefault();
-    clearAllFieldErrs('regFirstName', 'regLastName', 'regEmail', 'regPassword', 'regConfirm');
+    clearAllFieldErrs('regFirstName', 'regLastName', 'regEmail', 'regPassword', 'regConfirm', 'regPrivacy');
     hideMsg();
 
     const firstName = document.getElementById('regFirstName').value.trim();
@@ -287,11 +287,17 @@ async function handleRegister(e) {
     const confirm   = document.getElementById('regConfirm').value;
     let hasErr = false;
 
+    const privacyOk  = document.getElementById('regPrivacy').checked;
+    const profiling  = document.getElementById('regProfiling').checked;
+
     if (!firstName) { fieldErr('regFirstName', t('err_required')); hasErr = true; }
     if (!lastName)  { fieldErr('regLastName',  t('err_required')); hasErr = true; }
     if (!email)     { fieldErr('regEmail',     t('err_required')); hasErr = true; }
     if (!pass)      { fieldErr('regPassword',  t('err_required')); hasErr = true; }
     if (!confirm)   { fieldErr('regConfirm',   t('err_required')); hasErr = true; }
+    // The notice must be acknowledged; the profiling box is free either way and
+    // is deliberately not validated.
+    if (!privacyOk) { fieldErr('regPrivacy', t('err_privacy_required')); hasErr = true; }
     if (hasErr) return;
 
     if (!isPasswordValid(pass)) {
@@ -310,7 +316,15 @@ async function handleRegister(e) {
         const r = await fetch(`${OMNIMOVE}/auth/register`, {
             method: 'POST',
             headers: langHeaders(),
-            body: JSON.stringify({ name, email, password: pass, confirmPassword: confirm })
+            body: JSON.stringify({
+                name, email, password: pass, confirmPassword: confirm,
+                // Recorded in the consent ledger so the choice is provable (art. 7(1)).
+                privacyNoticeAccepted: privacyOk,
+                profilingConsent: profiling,
+                // Links any choice already made in the cookie banner to this account.
+                subjectKey: (window.OmniConsent && OmniConsent.state()
+                             && OmniConsent.state().subjectKey) || null
+            })
         });
         const data = await r.json();
 

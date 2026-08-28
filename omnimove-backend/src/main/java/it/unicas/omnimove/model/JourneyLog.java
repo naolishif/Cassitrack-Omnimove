@@ -36,7 +36,10 @@ public class JourneyLog {
 
     // Where the journey actually started and ended. The names above are what the
     // traveller reads; these are what lets a trip be replayed when an end was a
-    // point on the map rather than a stop. Null on everything recorded before.
+    // point on the map rather than a stop, and they are also what the research
+    // pipeline generalises to a zone — free-text names cannot be. A journey with
+    // no coordinates is never promoted out of tier 1. Null on everything
+    // recorded before V26/V28.
     @Column(name = "origin_lat") private Double originLat;
     @Column(name = "origin_lon") private Double originLon;
     @Column(name = "dest_lat")   private Double destLat;
@@ -44,4 +47,5 @@ public class JourneyLog {
 
     @Column(name = "created_at")
     private ZonedDateTime createdAt;
+
 }

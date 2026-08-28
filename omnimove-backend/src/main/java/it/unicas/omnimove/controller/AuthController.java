@@ -3,11 +3,13 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import it.unicas.omnimove.dto.*;
 import it.unicas.omnimove.model.User;
+import it.unicas.omnimove.model.UserConsent;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.security.JwtUtil;
 import it.unicas.omnimove.security.PasswordPolicy;
 import it.unicas.omnimove.util.RequestLang;
 import it.unicas.omnimove.service.ActiveSessionService;
+import it.unicas.omnimove.service.ConsentService;
 import it.unicas.omnimove.service.GoogleTokenVerifier;
 import it.unicas.omnimove.service.LoginHistoryService;
 import it.unicas.omnimove.service.PasswordResetService;
@@ -52,6 +54,12 @@ public class AuthController {
     private final PasswordResetService passwordResetService;
     private final SessionService      sessionService;
     private final RecaptchaService    recaptchaService;
+    private final ConsentService       consentService;
+
+    // false = HTTP (dev + public server without TLS); true = HTTPS only
+    // Controlled via COOKIE_SECURE env var — set to true once Nginx+TLS is in place
+    @Value("${omnimove.cookie.secure:false}")
+    private boolean cookieSecure;
 
     // ── REGISTER ────────────────────────────────────────────────────
 
@@ -70,6 +78,15 @@ public class AuthController {
         if (!req.getPassword().equals(req.getConfirmPassword()))
             return ResponseEntity.badRequest()
                     .body(AuthResponse.builder().message("Passwords do not match").build());
+
+        // GDPR art. 13: the account cannot be created unless the user confirms the
+        // privacy notice was presented. Checked before any write, so a refusal
+        // leaves no trace of the person in the database.
+        if (!Boolean.TRUE.equals(req.getPrivacyNoticeAccepted()))
+            return ResponseEntity.badRequest()
+                    .body(AuthResponse.builder()
+                            .message("You must read and accept the privacy notice to create an account.")
+                            .build());
 
         if (!PasswordPolicy.isValid(req.getPassword())) {
             securityAuditService.weakPasswordRejected(req.getEmail(), getClientIp(request));
@@ -95,6 +112,17 @@ public class AuthController {
                 .failedLoginAttempts(0)
                 .build();
         userRepo.save(user);
+
+        // Consent ledger (art. 7(1)). The notice acknowledgement is always recorded;
+        // profiling is recorded with whatever the user chose, including an explicit
+        // refusal, so "never asked" stays distinguishable from "said no".
+        consentService.record(user.getId(), req.getSubjectKey(),
+                UserConsent.TYPE_PRIVACY_NOTICE, true,
+                UserConsent.SOURCE_REGISTRATION, request);
+        consentService.record(user.getId(), req.getSubjectKey(),
+                UserConsent.TYPE_PROFILING, Boolean.TRUE.equals(req.getProfilingConsent()),
+                UserConsent.SOURCE_REGISTRATION, request);
+        consentService.attachAnonymousConsents(req.getSubjectKey(), user.getId());
 
         emailService.sendVerificationEmail(req.getEmail(), verificationToken, langFrom(request));
         securityAuditService.registration(user.getEmail(), getClientIp(request));

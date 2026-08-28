@@ -224,3 +224,22 @@ body{background:var(--bg);color:var(--text);font-family:var(--display);
     margin-top: 6px;
     min-height: 13px;
 }
+/* ── GDPR consent checkboxes on the registration form ── */
+.consent-row {
+    display: flex; align-items: flex-start; gap: 9px; cursor: pointer;
+    font-family: var(--mono); font-size: 11px; line-height: 1.55; color: var(--dim);
+}
+.consent-row input[type="checkbox"] {
+    flex: 0 0 auto; margin-top: 2px; width: 14px; height: 14px;
+    accent-color: var(--accent); cursor: pointer;
+}
+.consent-row a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.consent-row a:hover { color: #7dabf8; }
+
+/* ── Privacy / cookie links under the card ── */
+.legal-links {
+    display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;
+    margin-top: 18px; font-family: var(--mono); font-size: 10px;
+}
+.legal-links a { color: var(--dim); text-decoration: none; transition: color .18s; }
+.legal-links a:hover { color: var(--accent); }

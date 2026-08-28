@@ -18,6 +18,7 @@ import java.util.List;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -47,7 +48,14 @@ public class SecurityConfig {
                                 "/", "/error", "/omnimove-login.html", "/reset-password.html",
                                 "/favicon.ico", "/omnimove-login.css", "/omnimove-login.js",
                                 "/omnimove-i18n.js", "/omnimove-password.js",
-                                "/reset-password.css","/reset-password.js", "/api/v1/auth/reset-page"
+                                "/reset-password.css","/reset-password.js", "/api/v1/auth/reset-page",
+                                // Consent banner — loaded on every page, including the login page
+                                "/omnimove-consent.js", "/omnimove-consent.css",
+                                // Privacy notice and cookie policy must be readable without an
+                                // account: they have to be consultable before signing up.
+                                "/privacy.html", "/cookie-policy.html", "/legal.css",
+                                // Self-hosted fonts and libraries (replaces Google Fonts / jsDelivr)
+                                "/vendor/**"
                         ).permitAll()
                         .requestMatchers(
                                 "/api/v1/auth/login",
@@ -60,6 +68,10 @@ public class SecurityConfig {
                                 "/api/v1/auth/google/config",
                                 "/api/v1/auth/captcha/config"
                         ).permitAll()
+                        // The cookie banner appears before sign-in, so recording a choice must
+                        // work anonymously. Reading consents back still requires an account.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/privacy/consents").permitAll()
+                        .requestMatchers("/api/v1/privacy/**").authenticated()
                         .requestMatchers( // API docs — require authentication
                                 "/api/docs/**",
                                 "/api/swagger-ui/**",
@@ -109,12 +121,27 @@ public class SecurityConfig {
                         // www.google.com and www.gstatic.com, challenge iframe). Paths are
                         // pinned rather than allowing google.com wholesale.
                         .contentSecurityPolicy(csp -> csp.policyDirectives(
+                                // GDPR: fonts and libraries are served from our own origin, so the
+                                // browser never discloses the user's IP address to Google or
+                                // jsDelivr. The CSP no longer allows those hosts at all — that is
+                                // deliberate, it stops a CDN <script> from being reintroduced by
+                                // accident. Assets live in /static/vendor (see tools/vendor_fonts.py).
+                                // Only OpenStreetMap tiles remain third-party: they are strictly
+                                // necessary to render the map the user asked for, and are disclosed
+                                // in the cookie policy.
                                 "default-src 'self'; " +
-                                        // A08 FIX: standardised on jsdelivr for Leaflet/Chart.js, now loaded with SRI integrity=; unpkg/cdnjs dropped
-                                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://accounts.google.com/gsi/client "
+                                // Merge note: the privacy branch dropped every CDN because
+                                // Leaflet, Chart.js and the fonts are now vendored under
+                                // /static/vendor — nothing loads from jsdelivr or Google
+                                // Fonts any more, so those origins are gone for good.
+                                // Google Sign-In and reCAPTCHA are NOT vendorable: their
+                                // scripts are still fetched from Google by omnimove-login,
+                                // and this branch added both after the privacy branch forked.
+                                // Dropping them here would have blocked the login page.
+                                "script-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/client "
                                         + "https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; " +
-                                        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://accounts.google.com/gsi/style; " +
-                                        "font-src 'self' https://fonts.gstatic.com; " +
+                                        "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; " +
+                                        "font-src 'self'; " +
                                         "img-src 'self' data: https://*.tile.openstreetmap.org; " +
                                         "connect-src 'self' https://accounts.google.com/gsi/; " +
                                         "frame-src https://accounts.google.com/gsi/ https://www.google.com/recaptcha/; " +

@@ -1,0 +1,12 @@
+# Vendored third-party assets must stay byte-for-byte identical to the upstream
+# builds they were downloaded from — that is what lets us verify them against the
+# published SRI hashes. Line-ending conversion would silently change their bytes,
+# so check them out exactly as committed on every platform.
+omnimove-backend/src/main/resources/static/vendor/** -text
+
+# Binary formats: never diff or convert.
+*.woff2 binary
+*.woff  binary
+*.png   binary
+*.jpg   binary
+*.ico   binary

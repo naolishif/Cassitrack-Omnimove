@@ -48,3 +48,7 @@ ENV/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Sync-tool conflict copies (Syncthing / OneDrive) — never source files
+*.sync-conflict-*
+*-conflicted copy*

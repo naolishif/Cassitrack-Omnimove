@@ -18,6 +18,28 @@ const OMNI_T = {
     email_sent_to:"We've sent a verification link to",
     email_sent_p:'Open the email and click the link to activate your account, then come back here to sign in.',
     lang_choose:'Language',
+    // Privacy / consent
+    consent_notice_html:'I have read the <a href="privacy.html" target="_blank" rel="noopener">privacy notice</a>.',
+    consent_profiling:'Optional: use my travel history to suggest personalised routes. I can withdraw this at any time.',
+    err_privacy_required:'You must read and accept the privacy notice to continue',
+    link_privacy:'Privacy notice', link_cookies:'Cookie policy',
+    link_cookie_prefs:'Cookie preferences',
+    label_privacy:'Privacy & your data',
+    pref_profiling:'Personalised suggestions',
+    desc_profiling:'Use my travel history to suggest routes. Optional — the app works exactly the same without it.',
+    pref_export:'Download my data',
+    desc_export:'Get a copy of everything we hold about you, in JSON (GDPR art. 15 and 20).',
+    btn_export:'Download', btn_export_working:'Preparing…',
+    pref_documents:'Documents',
+    toast_profiling_on:'Personalised suggestions enabled',
+    toast_profiling_off:'Personalised suggestions disabled',
+    toast_consent_failed:'Could not save your choice. Please try again.',
+    toast_export_failed:'Export failed. Please try again later.',
+    pref_research:'Contribute to University research',
+    desc_research:'Anonymous, aggregated mobility statistics for research by the University of Cassino. Switch off to object: your data is excluded and anything already collected is deleted.',
+    toast_research_on:'Your journeys will contribute to research',
+    toast_research_off:'Your journeys are excluded from research',
+    toast_research_off_n:'Excluded from research — {n} records deleted',
     // Sidebar
     brand_tagline:'Smarter urban mobility',
     nav_section_nav:'Navigation',
@@ -409,6 +431,28 @@ const OMNI_T = {
     email_sent_to:'Abbiamo inviato un link di verifica a',
     email_sent_p:"Apri l'email e clicca sul link per attivare il tuo account, poi torna qui per accedere.",
     lang_choose:'Lingua',
+    // Privacy / consenso
+    consent_notice_html:'Ho letto l\'<a href="privacy.html" target="_blank" rel="noopener">informativa privacy</a>.',
+    consent_profiling:'Facoltativo: usa il mio storico viaggi per suggerirmi percorsi personalizzati. Posso revocare il consenso in qualsiasi momento.',
+    err_privacy_required:'Per proseguire devi prendere visione dell\'informativa privacy',
+    link_privacy:'Informativa privacy', link_cookies:'Cookie policy',
+    link_cookie_prefs:'Preferenze cookie',
+    label_privacy:'Privacy e i tuoi dati',
+    pref_profiling:'Suggerimenti personalizzati',
+    desc_profiling:'Usa il mio storico viaggi per suggerirmi percorsi. Facoltativo: l\'app funziona esattamente allo stesso modo senza.',
+    pref_export:'Scarica i miei dati',
+    desc_export:'Ottieni una copia di tutto ciò che conserviamo su di te, in formato JSON (artt. 15 e 20 GDPR).',
+    btn_export:'Scarica', btn_export_working:'Preparazione…',
+    pref_documents:'Documenti',
+    toast_profiling_on:'Suggerimenti personalizzati attivati',
+    toast_profiling_off:'Suggerimenti personalizzati disattivati',
+    toast_consent_failed:'Non è stato possibile salvare la scelta. Riprova.',
+    toast_export_failed:'Esportazione non riuscita. Riprova più tardi.',
+    pref_research:'Contribuisci alla ricerca dell\'Ateneo',
+    desc_research:'Statistiche di mobilità anonime e aggregate per la ricerca dell\'Università di Cassino. Disattiva per opporti: i tuoi dati vengono esclusi e quelli già raccolti cancellati.',
+    toast_research_on:'I tuoi viaggi contribuiranno alla ricerca',
+    toast_research_off:'I tuoi viaggi sono esclusi dalla ricerca',
+    toast_research_off_n:'Esclusa dalla ricerca — {n} record cancellati',
     // Sidebar
     brand_tagline:'Mobilità urbana intelligente',
     nav_section_nav:'Navigazione',
@@ -808,6 +852,9 @@ function applyTranslations() {
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.dataset.i18n;
     if (el.tagName === 'INPUT') { el.placeholder = t(key); }
+    // Strings ending in _html hold markup (the privacy checkbox needs a link
+    // inside the sentence). They come from this file, never from user input.
+    else if (key.endsWith('_html')) { el.innerHTML = t(key); }
     else { el.textContent = t(key); }
   });
   // Tooltips / accessible names for icon-only controls

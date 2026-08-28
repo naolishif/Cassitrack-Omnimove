@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>OMNIMOVE — Informativa sul trattamento dei dati personali</title>
+    <link href="legal.css" rel="stylesheet"/>
+    <link href="omnimove-consent.css" rel="stylesheet"/>
+</head>
+<!--
+  ════════════════════════════════════════════════════════════════════════
+  PRIMA DELLA PUBBLICAZIONE — da completare a cura dell'Ateneo:
+
+  1. Sostituire tutti i segnaposto evidenziati in giallo (classe .todo)
+     con i recapiti reali: sede, PEC, contatti del Responsabile della
+     Protezione dei Dati (RPD/DPO) dell'Ateneo.
+  2. Far validare il testo dall'RPD e inserire il trattamento nel registro
+     ex art. 30 GDPR.
+  3. Verificare le tempistiche di conservazione dichiarate al § 7: la
+     cancellazione automatica dello storico viaggi dopo 12 mesi NON è
+     ancora implementata nel codice. O si implementa il job di purge, o
+     si corregge questo paragrafo. Non lasciare il testo in disallineamento
+     con il comportamento reale del sistema.
+  4. Aggiornare la data di "Ultimo aggiornamento" e, contestualmente, la
+     property omnimove.privacy.policy-version in application.yml e la
+     costante POLICY_VERSION in omnimove-consent.js.
+  ════════════════════════════════════════════════════════════════════════
+-->
+<body>
+<div class="wrap">
+    <div class="logo">OMNI<span>MOVE</span></div>
+    <div class="tagline">Smart mobility for Cassino — UNICAS 2025/2026</div>
+
+    <h1>Informativa sul trattamento dei dati personali</h1>
+    <div class="updated">
+        Resa ai sensi degli artt. 13 e 14 del Regolamento (UE) 2016/679 (GDPR) —
+        Ultimo aggiornamento: 28 agosto 2026 — Versione: 2026-08-28
+    </div>
+
+    <p>
+        Questa informativa descrive come vengono trattati i dati personali degli utenti
+        dell'applicazione <strong>OMNIMOVE</strong>, il servizio di pianificazione della
+        mobilità urbana per la città di Cassino.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>1. Titolare del trattamento</h2>
+    <div class="box">
+        <p><strong>Università degli Studi di Cassino e del Lazio Meridionale</strong></p>
+        <p>Sede legale: <span class="todo">indirizzo completo da inserire</span></p>
+        <p>PEC: <span class="todo">indirizzo PEC da inserire</span></p>
+        <p>E-mail per questioni relative alla protezione dei dati:
+           <span class="todo">indirizzo e-mail da inserire</span></p>
+    </div>
+
+    <h2>2. Responsabile della Protezione dei Dati (RPD/DPO)</h2>
+    <p>
+        L'Ateneo ha designato un Responsabile della Protezione dei Dati, contattabile per
+        ogni questione relativa al trattamento dei dati personali e all'esercizio dei
+        diritti descritti al § 8:
+    </p>
+    <div class="box">
+        <p>RPD — <span class="todo">nominativo o struttura di riferimento da inserire</span></p>
+        <p>E-mail: <span class="todo">indirizzo e-mail RPD da inserire</span></p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>3. Quali dati trattiamo</h2>
+
+    <h3>3.1 Dati che ci fornisci direttamente</h3>
+    <ul>
+        <li><strong>Dati dell'account</strong>: nome, cognome, indirizzo e-mail, password
+            (conservata esclusivamente in forma cifrata con algoritmo bcrypt, mai in chiaro),
+            stato di verifica dell'indirizzo e-mail, data di registrazione.</li>
+        <li><strong>Preferenze di viaggio</strong>: modalità di trasporto preferita, scelte
+            sulle notifiche, soglie di percorrenza a piedi e impostazioni analoghe.</li>
+        <li><strong>Preferiti</strong>: fermate e tratte che scegli di salvare.</li>
+        <li><strong>Contenuto delle richieste all'assistente virtuale</strong>, se decidi di
+            utilizzarlo.</li>
+    </ul>
+
+    <h3>3.2 Dati generati dall'uso del servizio</h3>
+    <ul>
+        <li><strong>Storico dei viaggi pianificati</strong>: punto di partenza, destinazione,
+            modalità, distanza, costo stimato, CO₂ stimata, indice ambientale e data/ora.
+            <strong>Si tratta di dati di localizzazione</strong>: li trattiamo con particolare
+            cautela, come indicato al § 6.</li>
+        <li><strong>Posizione geografica</strong>: solo se la autorizzi espressamente tramite il
+            browser e solo nel momento in cui la richiedi (ad esempio per impostare il punto di
+            partenza). La posizione puntuale <strong>non viene conservata</strong> sui nostri
+            sistemi: viene utilizzata per calcolare il percorso e poi scartata. Puoi revocare
+            l'autorizzazione in qualsiasi momento dalle impostazioni del browser.</li>
+        <li><strong>Registri di sicurezza</strong>: eventi quali accesso, disconnessione,
+            tentativi di accesso falliti, modifiche della password, con indirizzo IP e data/ora.
+            Servono a proteggere l'account e a rilevare abusi.</li>
+        <li><strong>Registro dei consensi</strong>: quale scelta hai espresso, in che data, su
+            quale versione dell'informativa, con indirizzo IP e tipo di browser. Serve a
+            dimostrare il consenso, come richiesto dall'art. 7, par. 1, GDPR.</li>
+    </ul>
+
+    <div class="box">
+        <p>
+            <strong>Non trattiamo</strong> dati appartenenti a categorie particolari (art. 9 GDPR)
+            e non effettuiamo pubblicità, marketing o cessione di dati a terzi per finalità
+            commerciali. Il servizio non è destinato a minori di 14 anni.
+        </p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>4. Finalità del trattamento e base giuridica</h2>
+    <div class="table-scroll">
+        <table>
+            <thead>
+            <tr><th>Finalità</th><th>Dati</th><th>Base giuridica</th></tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>Creare e gestire il tuo account, autenticarti, permetterti di recuperare la password</td>
+                <td>Dati dell'account</td>
+                <td>Esecuzione del contratto — art. 6, par. 1, lett. b) GDPR</td>
+            </tr>
+            <tr>
+                <td>Pianificare i percorsi, mostrare orari, fermate e disponibilità dei mezzi</td>
+                <td>Origine, destinazione, preferenze</td>
+                <td>Esecuzione del contratto — art. 6, par. 1, lett. b) GDPR</td>
+            </tr>
+            <tr>
+                <td>Salvare preferiti e preferenze di viaggio</td>
+                <td>Preferiti, preferenze</td>
+                <td>Esecuzione del contratto — art. 6, par. 1, lett. b) GDPR</td>
+            </tr>
+            <tr>
+                <td>Garantire la sicurezza del servizio, prevenire accessi abusivi</td>
+                <td>Registri di sicurezza, indirizzo IP</td>
+                <td>Legittimo interesse — art. 6, par. 1, lett. f) GDPR</td>
+            </tr>
+            <tr>
+                <td>Migliorare il servizio tramite statistiche <strong>aggregate</strong>
+                    (numero di viaggi per tratta, ripartizione modale, indice ambientale medio)</td>
+                <td>Dati aggregati, non riferibili a un singolo utente</td>
+                <td>Legittimo interesse — art. 6, par. 1, lett. f) GDPR</td>
+            </tr>
+            <tr>
+                <td><strong>Suggerimenti personalizzati</strong> basati sulle tue abitudini di
+                    viaggio e sulle risposte al questionario di profilazione</td>
+                <td>Storico dei viaggi, risposte al questionario</td>
+                <td><strong>Consenso</strong> — art. 6, par. 1, lett. a) GDPR.
+                    Facoltativo e revocabile in ogni momento</td>
+            </tr>
+            <tr>
+                <td>Dimostrare i consensi raccolti</td>
+                <td>Registro dei consensi</td>
+                <td>Obbligo legale — art. 7, par. 1, GDPR</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="box">
+        <p>
+            Il conferimento dei dati dell'account è <strong>necessario</strong>: senza di essi non
+            è possibile creare un profilo né utilizzare il servizio. Il consenso ai suggerimenti
+            personalizzati è invece <strong>del tutto facoltativo</strong>: se non lo presti, o se
+            lo revochi, <strong>continuerai a usare OMNIMOVE senza alcuna limitazione</strong>;
+            riceverai semplicemente suggerimenti non personalizzati.
+        </p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>5. A chi comunichiamo i dati</h2>
+    <p>
+        I dati sono accessibili al personale autorizzato dell'Ateneo e ai componenti del gruppo di
+        sviluppo, nei limiti delle rispettive mansioni. Ci avvaliamo inoltre dei seguenti fornitori,
+        che agiscono come <strong>responsabili del trattamento</strong> ai sensi dell'art. 28 GDPR:
+    </p>
+    <div class="table-scroll">
+        <table>
+            <thead>
+            <tr><th>Fornitore</th><th>Finalità</th><th>Dati comunicati</th></tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>Google Ireland Ltd. / Google LLC</td>
+                <td>Calcolo di tempi e distanze di percorrenza (Distance Matrix API)</td>
+                <td>Coordinate di partenza e destinazione. La richiesta parte dai nostri server:
+                    il tuo indirizzo IP non viene comunicato a Google</td>
+            </tr>
+            <tr>
+                <td>Anthropic PBC</td>
+                <td>Assistente virtuale, solo se lo utilizzi</td>
+                <td>Il testo della domanda che poni e il contesto del viaggio in corso</td>
+            </tr>
+            <tr>
+                <td>OpenWeather Ltd.</td>
+                <td>Condizioni meteo utilizzate per suggerire la modalità di viaggio</td>
+                <td>Coordinate approssimative della zona. Nessun identificativo dell'utente</td>
+            </tr>
+            <tr>
+                <td>OpenStreetMap Foundation</td>
+                <td>Fornitura delle mappe visualizzate nell'applicazione</td>
+                <td>Il tuo indirizzo IP e le porzioni di mappa richieste, comunicati
+                    direttamente dal tuo browser</td>
+            </tr>
+            <tr>
+                <td><span class="todo">Fornitore del servizio di posta elettronica</span></td>
+                <td>Invio delle e-mail di verifica dell'account e di reimpostazione password</td>
+                <td>Indirizzo e-mail e contenuto del messaggio</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3>5.1 Trasferimenti verso Paesi terzi</h3>
+    <p>
+        Alcuni dei fornitori sopra indicati hanno sede negli Stati Uniti. I trasferimenti avvengono
+        sulla base della decisione di adeguatezza della Commissione europea del 10 luglio 2023
+        relativa all'EU-U.S. Data Privacy Framework e/o delle Clausole Contrattuali Standard
+        adottate dalla Commissione europea ai sensi dell'art. 46 GDPR. Puoi richiedere copia delle
+        garanzie adottate scrivendo ai recapiti indicati al § 1.
+    </p>
+    <p>
+        Per ridurre al minimo le comunicazioni non necessarie, <strong>i caratteri tipografici e le
+        librerie software utilizzati dall'applicazione sono ospitati sui nostri server</strong>:
+        il tuo browser non contatta reti di distribuzione di contenuti di terze parti e il tuo
+        indirizzo IP non viene quindi comunicato a tali soggetti.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>6. Dati di localizzazione e accesso da parte degli amministratori</h2>
+    <p>
+        Lo storico dei viaggi può rivelare abitudini e luoghi frequentati. Per questo applichiamo
+        misure specifiche:
+    </p>
+    <ul>
+        <li>la console di amministrazione mostra in elenco <strong>solo</strong> i dati di gestione
+            dell'account (nome, cognome, e-mail, ruolo, stato, data di registrazione e ultimo
+            accesso);</li>
+        <li>lo storico dei viaggi di un singolo utente <strong>non</strong> compare negli elenchi:
+            è consultabile solo aprendo la scheda della singola persona, quando ciò sia necessario
+            per fornire assistenza;</li>
+        <li>ogni accesso di un amministratore ai dati personali di un utente viene
+            <strong>registrato</strong> in un log di sicurezza consultabile a posteriori;</li>
+        <li>le statistiche utilizzate per migliorare il servizio sono elaborate in forma
+            <strong>aggregata</strong> e non consentono di risalire alla singola persona.</li>
+    </ul>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>7. Per quanto tempo conserviamo i dati</h2>
+    <div class="table-scroll">
+        <table>
+            <thead>
+            <tr><th>Categoria</th><th>Conservazione</th></tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>Dati dell'account, preferenze e preferiti</td>
+                <td>Fino alla cancellazione dell'account. Gli account non verificati entro
+                    24 ore vengono eliminati</td>
+            </tr>
+            <tr>
+                <td>Storico dei viaggi</td>
+                <td>12 mesi dalla registrazione del viaggio; successivamente i dati vengono
+                    resi anonimi e conservati solo in forma aggregata</td>
+            </tr>
+            <tr>
+                <td>Registri di sicurezza</td>
+                <td>12 mesi</td>
+            </tr>
+            <tr>
+                <td>Registro dei consensi</td>
+                <td>24 mesi dalla revoca o dalla cancellazione dell'account, per poter
+                    dimostrare il consenso a suo tempo raccolto</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    <p>
+        Alla cancellazione dell'account tutti i dati collegati (preferenze, preferiti, storico dei
+        viaggi) vengono eliminati automaticamente, salvo il registro dei consensi nei termini sopra
+        indicati.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>8. I tuoi diritti</h2>
+    <p>In qualità di interessato puoi esercitare in ogni momento i seguenti diritti:</p>
+    <ul>
+        <li><strong>Accesso</strong> (art. 15): ottenere conferma del trattamento e copia dei tuoi
+            dati. Puoi scaricarli autonomamente in formato JSON dalla sezione Privacy del tuo
+            profilo.</li>
+        <li><strong>Rettifica</strong> (art. 16): correggere dati inesatti, anche direttamente
+            dal tuo profilo.</li>
+        <li><strong>Cancellazione</strong> (art. 17): ottenere la rimozione dei tuoi dati.</li>
+        <li><strong>Limitazione</strong> (art. 18) e <strong>opposizione</strong> (art. 21) al
+            trattamento fondato sul legittimo interesse.</li>
+        <li><strong>Portabilità</strong> (art. 20): ricevere i dati in formato strutturato e di uso
+            comune, o chiederne la trasmissione ad altro titolare.</li>
+        <li><strong>Revoca del consenso</strong> (art. 7, par. 3): puoi revocare in qualsiasi
+            momento il consenso ai suggerimenti personalizzati, senza che ciò pregiudichi la
+            liceità del trattamento effettuato prima della revoca e senza alcuna conseguenza
+            sull'utilizzo del servizio.</li>
+    </ul>
+    <p>
+        Per esercitare tali diritti puoi scrivere ai recapiti indicati ai §§ 1 e 2. Riceverai
+        riscontro entro un mese dalla richiesta.
+    </p>
+    <div class="box">
+        <p>
+            <strong>Diritto di reclamo.</strong> Se ritieni che il trattamento violi la normativa,
+            puoi proporre reclamo al <strong>Garante per la protezione dei dati personali</strong>
+            (Piazza Venezia 11, 00187 Roma — <a href="https://www.garanteprivacy.it"
+            rel="noopener noreferrer" target="_blank">www.garanteprivacy.it</a>) o ricorso
+            all'autorità giudiziaria.
+        </p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>9. Processi decisionali automatizzati</h2>
+    <p>
+        Se presti il consenso ai suggerimenti personalizzati, il sistema elabora le tue abitudini di
+        viaggio per proporti percorsi e modalità che potrebbero esserti più utili. Si tratta di
+        <strong>suggerimenti</strong>: non producono effetti giuridici né incidono in modo analogo
+        significativo sulla tua persona, e puoi sempre ignorarli scegliendo liberamente qualsiasi
+        percorso. Non è previsto alcun processo decisionale interamente automatizzato ai sensi
+        dell'art. 22 GDPR.
+    </p>
+
+    <h2>10. Cookie</h2>
+    <p>
+        Le informazioni sui cookie e sugli strumenti di memorizzazione utilizzati sono riportate
+        nella <a href="cookie-policy.html">Cookie policy</a>.
+    </p>
+
+    <h2>11. Modifiche all'informativa</h2>
+    <p>
+        Qualora il testo venga modificato in modo sostanziale, la nuova versione ti verrà
+        ripresentata all'interno dell'applicazione e ti sarà chiesto nuovamente, ove necessario,
+        di esprimere le tue scelte. La versione corrente è indicata in testa a questa pagina.
+    </p>
+
+    <div class="footer-nav">
+        <a href="cookie-policy.html">Cookie policy</a>
+        <a href="omnimove-login.html">← Torna a OMNIMOVE</a>
+        <a href="#" onclick="OmniConsent.open(); return false;">Preferenze cookie</a>
+    </div>
+</div>
+
+<script src="omnimove-consent.js"></script>
+</body>
+</html>

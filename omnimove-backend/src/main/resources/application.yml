@@ -209,3 +209,25 @@ omnimove:
     # moment one of them is edited.
     from: "OMNIMOVE <${spring.mail.username}>"
     base-url: ${APP_BASE_URL:http://localhost:8180}
+  research:
+    # Three-tier research lifecycle — see docs/privacy/DPIA-omnimove-cassitrack.md.
+    # OFF by default: it moves personal data between tiers and deletes it, so it
+    # is enabled deliberately and only after the DPIA has been signed off by the RPD.
+    #
+    # NOTE: while this is false, journeys are kept indefinitely, which contradicts
+    # the 12-month retention stated in privacy.html § 7.
+    enabled: ${RESEARCH_ENABLED:false}
+    # Must be >= 32 chars, STABLE FOREVER, and never stored in the database it
+    # protects. Changing it breaks the link to already-promoted rows and would
+    # leave objections unhonoured.
+    pseudonym-salt: ${RESEARCH_PSEUDONYM_SALT:}
+    operational-retention-days: ${RESEARCH_OPERATIONAL_RETENTION_DAYS:365}
+    tier2-retention-days: ${RESEARCH_TIER2_RETENTION_DAYS:3650}
+    # Small-cell suppression threshold; the migration refuses anything below 5.
+    k-threshold: ${RESEARCH_K_THRESHOLD:10}
+  privacy:
+    # Version of the informativa and cookie policy currently published.
+    # Bump it whenever the text materially changes: consents recorded under an
+    # older version stop counting and are asked again. Keep it in sync with the
+    # "Ultimo aggiornamento" date shown in privacy.html and cookie-policy.html.
+    policy-version: ${PRIVACY_POLICY_VERSION:2026-08-28}

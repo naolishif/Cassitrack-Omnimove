@@ -70,6 +70,93 @@ function togglePref(el) {
     el.classList.toggle('on');
 }
 
+// ── Privacy: consent and data subject rights (GDPR) ────────────────
+// Unlike the journey preferences, these are NOT batched behind "Save
+// Preferences": a consent has to be granted and withdrawn by an explicit act,
+// and withdrawing must be as easy as granting (art. 7(3) GDPR). So each toggle
+// posts immediately and reverts visually if the server refuses.
+
+async function loadPrivacyConsents() {
+    const profiling = document.getElementById('prefProfiling');
+    const research  = document.getElementById('prefResearch');
+    if (!profiling && !research) return;
+    try {
+        const r = await apiFetch('/privacy/consents');
+        if (!r.ok) return;
+        const c = (await r.json()).consents || {};
+        // PROFILING is a consent: absent means not given, so the toggle stays off.
+        if (profiling) profiling.classList.toggle('on', c.PROFILING === true);
+        // RESEARCH_USE is an objection register on a public-interest basis: absent
+        // means included, so the default is on. The server sends true explicitly.
+        if (research) research.classList.toggle('on', c.RESEARCH_USE !== false);
+    } catch (e) {
+        console.warn('Could not load consent state:', e);
+    }
+}
+
+async function toggleProfilingConsent(el) {
+    const granted = !el.classList.contains('on');
+    el.classList.toggle('on', granted);
+    try {
+        const r = await apiFetch('/privacy/consents', {
+            method: 'POST',
+            body: JSON.stringify({ type: 'PROFILING', granted: granted })
+        });
+        if (!r.ok) throw new Error('consent ' + r.status);
+        showToast(granted ? t('toast_profiling_on') : t('toast_profiling_off'));
+    } catch (e) {
+        el.classList.toggle('on', !granted);   // keep the UI honest about what was stored
+        showToast(t('toast_consent_failed'), true);
+    }
+}
+
+async function toggleResearchUse(el) {
+    const included = !el.classList.contains('on');
+    el.classList.toggle('on', included);
+    try {
+        const r = await apiFetch('/privacy/consents', {
+            method: 'POST',
+            body: JSON.stringify({ type: 'RESEARCH_USE', granted: included })
+        });
+        if (!r.ok) throw new Error('consent ' + r.status);
+        const data = await r.json();
+        // Switching off is an objection under art. 21: it also erases what was
+        // already promoted, so tell the user how much was actually removed rather
+        // than letting them assume.
+        if (!included && data.researchRowsRemoved > 0)
+            showToast(tf('toast_research_off_n', { n: data.researchRowsRemoved }));
+        else
+            showToast(included ? t('toast_research_on') : t('toast_research_off'));
+    } catch (e) {
+        el.classList.toggle('on', !included);
+        showToast(t('toast_consent_failed'), true);
+    }
+}
+
+async function downloadMyData(btn) {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = t('btn_export_working');
+    try {
+        const r = await apiFetch('/privacy/export');
+        if (!r.ok) throw new Error('export ' + r.status);
+        const blob = await r.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url;
+        a.download = 'omnimove-my-data.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        showToast(t('toast_export_failed'), true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+    }
+}
+
 async function loadPreferences() {
     try {
         const r = await apiFetch('/traveller/preferences');
@@ -466,6 +553,7 @@ async function loadFavorites() {
 loadEcoStats();
 loadHistory();
 loadPreferences();
+loadPrivacyConsents();
 
 // Re-render dynamic content when language switches
 window._onLangChange = () => {
@@ -2702,9 +2790,12 @@ async function startJourney() {
                     origin_name: origin ? origin.name : null,
                     dest_name:   dest ? dest.name : null,
                     // So the trip can be replayed from Last Routes even when an
-                    // end was a point on the map, which no stop name resolves to
-                    origin_lat:  origin ? origin.lat : null,
-                    origin_lon:  origin ? origin.lon : null,
+                    // end was a point on the map, which no stop name resolves to,
+                    // and so the journey can be generalised to a zone for research.
+                    // When the origin came from GPS, the fix we just took is the
+                    // accurate one — origin.lat still holds the previous position.
+                    origin_lat:  gpsPos ? gpsPos.lat : (origin ? origin.lat : null),
+                    origin_lon:  gpsPos ? gpsPos.lon : (origin ? origin.lon : null),
                     dest_lat:    dest ? dest.lat : null,
                     dest_lon:    dest ? dest.lon : null,
                     // How the kilometres split between modes. A combined trip cannot
@@ -3211,7 +3302,7 @@ function switchProfileTab(tab) {
     if (el) el.classList.add('active');
     if (tab === 'history')   loadHistory();
     if (tab === 'favorites') { loadFavorites(); loadFavoriteStops(); }
-    if (tab === 'settings')  loadPreferences();
+    if (tab === 'settings')  { loadPreferences(); loadPrivacyConsents(); }
     if (tab === 'account') loadAccount();
 }
 

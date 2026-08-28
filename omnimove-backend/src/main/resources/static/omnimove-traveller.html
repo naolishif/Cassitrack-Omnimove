@@ -4,18 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OMNIMOVE — User App</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-          crossorigin="anonymous" />
+    <!-- Fonts and Leaflet are self-hosted so the browser contacts no third-party
+         CDN and no user IP is disclosed. The files under /vendor are byte-identical
+         to the CDN builds these tags used to load (same SRI hashes). Do not put a
+         CDN URL back here: the Content-Security-Policy now blocks it. -->
+    <link href="vendor/fonts/traveller-fonts.css" rel="stylesheet">
+    <link rel="stylesheet" href="vendor/leaflet/leaflet.css"/>
     <link href="omnimove-traveller.css" rel="stylesheet">
+    <link href="omnimove-consent.css" rel="stylesheet">
     <script src="omnimove-session.js"></script>
     <script src="omnimove-password.js"></script>
     <script src="omnimove-i18n.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-            crossorigin="anonymous"></script>
+    <script src="omnimove-consent.js"></script>
+    <script src="vendor/leaflet/leaflet.js"></script>
 </head>
 <body>
 
@@ -561,6 +562,52 @@
                     <div class="settings-section">
                         <span class="section-label" data-i18n="label_save_changes">Save Changes</span>
                         <button class="action-btn btn-green" onclick="savePreferences()" style="width:100%;padding:12px 20px;font-size:14px;font-weight:700" data-i18n="btn_save_prefs">Save Preferences</button>
+                    </div>
+
+                    <!-- Privacy — deliberately below "Save Changes" and saved on its own.
+                         A consent must be granted and withdrawn by an explicit act
+                         (art. 7 GDPR); burying it inside a bulk "save" would make the
+                         withdrawal harder than the grant. -->
+                    <div class="settings-section">
+                        <span class="section-label" data-i18n="label_privacy">Privacy &amp; your data</span>
+
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_profiling">Personalised suggestions</div>
+                                <div class="pref-desc" data-i18n="desc_profiling">Use my travel history to suggest routes. Optional — the app works exactly the same without it.</div>
+                            </div>
+                            <div class="toggle" id="prefProfiling" onclick="toggleProfilingConsent(this)"></div>
+                        </div>
+
+                        <!-- Objection, not consent: the lawful basis for research is
+                             public interest (art. 6(1)(e)), so this starts ON and the
+                             user switches it OFF to object (art. 21(6)). -->
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_research">Contribute to University research</div>
+                                <div class="pref-desc" data-i18n="desc_research">Anonymous, aggregated mobility statistics for research by the University of Cassino. Switch off to object: your data is excluded and anything already collected is deleted.</div>
+                            </div>
+                            <div class="toggle" id="prefResearch" onclick="toggleResearchUse(this)"></div>
+                        </div>
+
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_export">Download my data</div>
+                                <div class="pref-desc" data-i18n="desc_export">Get a copy of everything we hold about you, in JSON (GDPR art. 15 and 20).</div>
+                            </div>
+                            <button class="action-btn" onclick="downloadMyData(this)" data-i18n="btn_export">Download</button>
+                        </div>
+
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_documents">Documents</div>
+                                <div class="pref-desc">
+                                    <a href="privacy.html" target="_blank" rel="noopener" data-i18n="link_privacy">Privacy notice</a> ·
+                                    <a href="cookie-policy.html" target="_blank" rel="noopener" data-i18n="link_cookies">Cookie policy</a> ·
+                                    <a href="#" onclick="OmniConsent.open(); return false;" data-i18n="link_cookie_prefs">Cookie preferences</a>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                 </div>
