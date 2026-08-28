@@ -11,6 +11,7 @@ import it.unicas.omnimove.service.ActiveSessionService;
 import it.unicas.omnimove.service.GoogleTokenVerifier;
 import it.unicas.omnimove.service.LoginHistoryService;
 import it.unicas.omnimove.service.PasswordResetService;
+import it.unicas.omnimove.service.RecaptchaService;
 import it.unicas.omnimove.service.SessionService;
 import it.unicas.omnimove.service.SecurityAuditService;
 import it.unicas.omnimove.service.EmailService;
@@ -50,6 +51,7 @@ public class AuthController {
     private final GoogleTokenVerifier  googleTokenVerifier;
     private final PasswordResetService passwordResetService;
     private final SessionService      sessionService;
+    private final RecaptchaService    recaptchaService;
 
     // ── REGISTER ────────────────────────────────────────────────────
 
@@ -113,6 +115,18 @@ public class AuthController {
     public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest req,
                                               HttpServletRequest httpReq,
                                               HttpServletResponse httpResp) {
+
+        // Before anything touches the account. A failed challenge must not count
+        // as a failed login attempt, or a bot could lock out any address it knows
+        // simply by submitting garbage — turning the defence into the attack.
+        if (recaptchaService.isActive()
+                && !recaptchaService.verify(req.getCaptchaToken(), getClientIp(httpReq))) {
+            securityAuditService.captchaFailed(req.getEmail(), getClientIp(httpReq));
+            return ResponseEntity.status(400)
+                    .body(AuthResponse.builder()
+                            .message("Please complete the \"I'm not a robot\" check and try again.")
+                            .build());
+        }
 
         var userOpt = userRepo.findByEmail(req.getEmail());
         if (userOpt.isEmpty()) {
@@ -183,6 +197,20 @@ public class AuthController {
                 .expiresInMs(expiresInMs)
                 .message("Login successful")
                 .build());
+    }
+
+    // ── CAPTCHA ──────────────────────────────────────────────────────
+
+    @GetMapping("/captcha/config")
+    @Operation(summary = "Whether the login form must show a reCAPTCHA")
+    public ResponseEntity<?> captchaConfig() {
+        // The site key is public by design — it is embedded in the widget. The
+        // page is told nothing when the check is off, so a disabled deployment
+        // does not advertise a key it is not using.
+        return ResponseEntity.ok(java.util.Map.of(
+                "enabled", recaptchaService.isActive(),
+                "siteKey", recaptchaService.siteKey()
+        ));
     }
 
     // ── SIGN IN WITH GOOGLE ──────────────────────────────────────────

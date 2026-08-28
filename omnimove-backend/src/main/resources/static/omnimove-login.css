@@ -210,3 +210,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--display);
     transition: color .15s, background .15s;
 }
 .pwd-reveal-btn:hover { color: #ffffff; background: rgba(255,255,255,.08); }
+
+/* ── reCAPTCHA ── */
+/* The widget is a fixed-size iframe Google will not let us restyle, so all we
+   do is centre it and let it keep its own dimensions. */
+.captcha-box { display: none; justify-content: center; margin-top: 4px; }
+.captcha-box.on { display: flex; }
+.captcha-err {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: #f87171;
+    text-align: center;
+    margin-top: 6px;
+    min-height: 13px;
+}

@@ -33,6 +33,10 @@
                 <input class="input" type="password" id="loginPassword" placeholder="••••••••"/>
                 <span class="field-err" id="err-loginPassword"></span>
             </div>
+            <!-- Rendered by grecaptcha when the administrator has the check on;
+                 stays empty and invisible otherwise. -->
+            <div class="captcha-box" id="captchaBox"></div>
+            <div class="captcha-err" id="captchaErr"></div>
             <button class="btn" type="submit" id="loginBtn" data-i18n="btn_signin">Sign In</button>
             <button type="button" class="btn-ghost" id="forgotBtn"
                     style="display:none" onclick="showForgotPanel()" data-i18n="btn_forgot">
@@ -150,6 +154,7 @@
 </div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://www.google.com/recaptcha/api.js?render=explicit" async defer></script>
 <script src="omnimove-password.js"></script>
 <script src="omnimove-i18n.js"></script>
 <script src="omnimove-login.js"></script>

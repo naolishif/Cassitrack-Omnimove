@@ -266,14 +266,32 @@
                     <div class="setting-title">Journey search</div>
                     <div class="setting-desc">Traffic-aware bus travel time in route planning.</div>
                 </div>
-                <button class="switch" id="swSearch" data-key="google.search" role="switch" aria-checked="true"></button>
+                <button class="switch" id="swSearch" data-key="google.search" data-endpoint="/admin/settings/google" role="switch" aria-checked="true"></button>
             </div>
             <div class="setting-row">
                 <div class="setting-text">
                     <div class="setting-title">Stop arrivals</div>
                     <div class="setting-desc">Real-time delay recomputed from each bus's live position.</div>
                 </div>
-                <button class="switch" id="swStopEta" data-key="google.stop_eta" role="switch" aria-checked="true"></button>
+                <button class="switch" id="swStopEta" data-key="google.stop_eta" data-endpoint="/admin/settings/google" role="switch" aria-checked="true"></button>
+            </div>
+        </div>
+
+        <div class="settings-card">
+            <h2 class="settings-h">Security</h2>
+            <p class="settings-note">
+                Applies to the email + password form. Sign in with Google carries
+                its own bot protection and is not affected.
+            </p>
+            <div class="setting-row">
+                <div class="setting-text">
+                    <div class="setting-title">Login reCAPTCHA</div>
+                    <div class="setting-desc">
+                        Every sign-in must pass the "I'm not a robot" check.
+                        <span id="captchaState"></span>
+                    </div>
+                </div>
+                <button class="switch" id="swCaptcha" data-key="security.recaptcha" data-endpoint="/admin/settings/security" role="switch" aria-checked="false"></button>
             </div>
         </div>
     </div>

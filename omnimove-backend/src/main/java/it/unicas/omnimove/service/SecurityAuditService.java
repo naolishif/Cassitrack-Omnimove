@@ -112,6 +112,17 @@ public class SecurityAuditService {
         persist("LOGIN_FAILURE", email, ip, null);
     }
 
+    /** A login that never got past the robot check. */
+    public void captchaFailed(String email, String ip) {
+        log.warn("CAPTCHA_FAILED email={} ip={}", maskEmail(email), maskIp(ip));
+        persist("CAPTCHA_FAILED", email, ip, null);
+    }
+
+    public void captchaToggled(String adminEmail, boolean enabled) {
+        log.warn("CAPTCHA_TOGGLED admin={} enabled={}", maskEmail(adminEmail), enabled);
+        persist("CAPTCHA_TOGGLED", adminEmail, null, "enabled=" + enabled);
+    }
+
     public void accountLocked(String email) {
         log.warn("ACCOUNT_LOCKED email={}", maskEmail(email));
         persist("ACCOUNT_LOCKED", email, null, null);

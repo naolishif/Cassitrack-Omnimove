@@ -1121,6 +1121,37 @@ async function loadGoogleSettings() {
     } catch (e) {
         console.warn('Could not load Google settings:', e);
     }
+    loadSecuritySettings();
+}
+
+async function loadSecuritySettings() {
+    try {
+        const r = await apiFetch('/admin/settings/security');
+        if (!r.ok) throw new Error('security ' + r.status);
+        applySecuritySettings(await r.json());
+    } catch (e) {
+        console.warn('Could not load security settings:', e);
+    }
+}
+
+function applySecuritySettings(s) {
+    setSwitch('swCaptcha', s['security.recaptcha']);
+
+    // The switch and the reality can disagree: without a key pair the check
+    // cannot run whatever the administrator has chosen, and saying so beats
+    // showing a green switch over an unprotected login form.
+    const state = document.getElementById('captchaState');
+    if (!state) return;
+    if (!s.recaptchaConfigured) {
+        state.textContent = ' — no keys configured, the check is not running.';
+        state.className = 'text-amber';
+    } else if (s.recaptchaActive) {
+        state.textContent = ' — active.';
+        state.className = 'text-green';
+    } else {
+        state.textContent = ' — off.';
+        state.className = '';
+    }
 }
 
 function setSwitch(id, on) {
@@ -1128,21 +1159,35 @@ function setSwitch(id, on) {
     if (el) el.setAttribute('aria-checked', on ? 'true' : 'false');
 }
 
-async function toggleGoogleSetting(btn) {
-    const key = btn.dataset.key;
-    const next = btn.getAttribute('aria-checked') !== 'true';
+// One handler for every switch: the endpoint travels on the button, so a new
+// setting is a line of HTML rather than another branch here.
+async function toggleSetting(btn) {
+    const key      = btn.dataset.key;
+    const endpoint = btn.dataset.endpoint || '/admin/settings/google';
+    const next     = btn.getAttribute('aria-checked') !== 'true';
+
     btn.disabled = true;
     try {
-        const r = await apiFetch('/admin/settings/google', {
+        const r = await apiFetch(endpoint, {
             method: 'PUT',
             body: JSON.stringify({ [key]: next })
         });
         if (!r.ok) throw new Error('save ' + r.status);
         const s = await r.json();
-        setSwitch('swSearch',  s['google.search']);
-        setSwitch('swStopEta', s['google.stop_eta']);
+
+        // Repaint from the server's answer, never from the click: the stored
+        // value is the truth, and for the captcha it can differ from what was
+        // asked when no keys are configured.
+        if ('google.search' in s)      setSwitch('swSearch',  s['google.search']);
+        if ('google.stop_eta' in s)    setSwitch('swStopEta', s['google.stop_eta']);
+        if ('security.recaptcha' in s) applySecuritySettings(s);
+
+        if (key === 'security.recaptcha')
+            toast(next ? 'Login reCAPTCHA enabled.' : 'Login reCAPTCHA disabled.');
+
     } catch (e) {
         console.warn('Could not toggle setting:', e);
+        toast('Could not save the setting.', true);
     } finally {
         btn.disabled = false;
     }
@@ -1150,5 +1195,5 @@ async function toggleGoogleSetting(btn) {
 
 document.addEventListener('click', e => {
     const sw = e.target.closest('.switch');
-    if (sw) toggleGoogleSetting(sw);
+    if (sw) toggleSetting(sw);
 });

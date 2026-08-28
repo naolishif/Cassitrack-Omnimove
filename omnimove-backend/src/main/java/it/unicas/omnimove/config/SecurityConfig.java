@@ -57,7 +57,8 @@ public class SecurityConfig {
                                 "/api/v1/auth/resend-verification",
                                 "/api/v1/auth/reset-password",
                                 "/api/v1/auth/google",
-                                "/api/v1/auth/google/config"
+                                "/api/v1/auth/google/config",
+                                "/api/v1/auth/captcha/config"
                         ).permitAll()
                         .requestMatchers( // API docs — require authentication
                                 "/api/docs/**",
@@ -102,19 +103,21 @@ public class SecurityConfig {
                         .contentTypeOptions(ct -> {})
                         .httpStrictTransportSecurity(hsts ->
                                 hsts.maxAgeInSeconds(31536000).includeSubDomains(true))
-                        // Google Identity Services needs four of its own origins: the
-                        // client script, the stylesheet it injects, the XHRs it makes,
-                        // and the iframe the account chooser renders in. Each is pinned
-                        // to the /gsi/ path rather than to accounts.google.com wholesale.
+                        // Two Google widgets are embedded here and each needs its own
+                        // origins: Identity Services (client script, injected stylesheet,
+                        // XHRs, account-chooser iframe) and reCAPTCHA (script from
+                        // www.google.com and www.gstatic.com, challenge iframe). Paths are
+                        // pinned rather than allowing google.com wholesale.
                         .contentSecurityPolicy(csp -> csp.policyDirectives(
                                 "default-src 'self'; " +
                                         // A08 FIX: standardised on jsdelivr for Leaflet/Chart.js, now loaded with SRI integrity=; unpkg/cdnjs dropped
-                                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://accounts.google.com/gsi/client; " +
+                                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://accounts.google.com/gsi/client "
+                                        + "https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; " +
                                         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://accounts.google.com/gsi/style; " +
                                         "font-src 'self' https://fonts.gstatic.com; " +
                                         "img-src 'self' data: https://*.tile.openstreetmap.org; " +
                                         "connect-src 'self' https://accounts.google.com/gsi/; " +
-                                        "frame-src https://accounts.google.com/gsi/; " +
+                                        "frame-src https://accounts.google.com/gsi/ https://www.google.com/recaptcha/; " +
                                         "frame-ancestors 'none'; " +
                                         "object-src 'none'; " +
                                         "base-uri 'self'; " +

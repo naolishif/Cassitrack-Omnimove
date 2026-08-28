@@ -174,6 +174,16 @@ google:
     client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
     certs-url: https://www.googleapis.com/oauth2/v3/certs
 
+# ── reCAPTCHA v2 on the login form ────────────────────────────
+# google.com/recaptcha/admin → register the site, type "Challenge (v2)",
+# "I'm not a robot" checkbox. Add the app's domain to the allowed list.
+# The switch in the admin dashboard turns the check on and off, but with no
+# keys here it stays off whatever the switch says: a widget nobody can solve
+# would lock every account out.
+recaptcha:
+  site-key:   ${RECAPTCHA_SITE_KEY:}
+  secret-key: ${RECAPTCHA_SECRET_KEY:}
+
 # ── OMNIMOVE App Config ───────────────────────────────────────
 omnimove:
   cors:

@@ -200,6 +200,13 @@ async function handleLogin(e) {
     if (!pass)  { fieldErr('loginPassword', t('err_required')); hasErr = true; }
     if (hasErr) return;
 
+    // Caught here purely to save a round trip — the server refuses an unsolved
+    // login regardless of what this page does
+    if (captchaRequired()) {
+        if (_captchaBroken) { showMsg(t('err_captcha_broken'), 'err'); return; }
+        if (!captchaToken()) { showMsg(t('err_captcha_required'), 'err'); return; }
+    }
+
     const btn = document.getElementById('loginBtn');
     btn.disabled = true; btn.textContent = t('btn_sending');
 
@@ -207,7 +214,7 @@ async function handleLogin(e) {
         const r = await fetch(`${OMNIMOVE}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password: pass })
+            body: JSON.stringify({ email, password: pass, captchaToken: captchaToken() })
         });
         const data = await r.json();
 
@@ -217,6 +224,9 @@ async function handleLogin(e) {
             showMsg(t('msg_welcome_back').replace('{name}', data.name || 'user'), 'ok');
             secureRedirect(data.role || 'TRAVELLER');
         } else {
+            // Google invalidates a token once verified, so the widget has to be
+            // re-solved before the next try
+            resetCaptcha();
             // Remove any existing resend button to avoid duplicates
             document.getElementById('resendVerifyBtn')?.remove();
 
@@ -586,3 +596,81 @@ window._onLangChange = (lang) => {
                   document.getElementById('resetPwdBar'),
                   document.getElementById('resetPwdRules'));
 };
+
+// ════════════════════════════════════════════════════════════
+// reCAPTCHA
+// ════════════════════════════════════════════════════════════
+// Whether the check runs is the administrator's call, taken server-side; this
+// file only asks and obeys. The server verifies the token on every login, so a
+// page that skipped the widget gets a 400 rather than a way in.
+let _captchaId       = null;   // the rendered widget
+let _captchaRequired = false;  // what the server says it will enforce
+let _captchaBroken   = false;  // required, but the widget never appeared
+
+async function initCaptcha() {
+    let cfg;
+    try {
+        const r = await fetch(`${OMNIMOVE}/auth/captcha/config`);
+        if (!r.ok) return;
+        cfg = await r.json();
+    } catch { return; }
+
+    if (!cfg.enabled || !cfg.siteKey) return;
+
+    // From here on the server WILL reject a login without a token, so any
+    // failure below has to be shown rather than swallowed — otherwise the user
+    // meets an error about a checkbox that is not on the page.
+    _captchaRequired = true;
+
+    // api.js carries async+defer and renders explicitly, so wait for it
+    const ready = await waitFor(() => window.grecaptcha?.render);
+    if (!ready) { captchaBroken('reCAPTCHA script did not load'); return; }
+
+    const box = document.getElementById('captchaBox');
+    try {
+        _captchaId = grecaptcha.render(box, {
+            sitekey: cfg.siteKey,
+            theme: 'dark'
+        });
+    } catch (e) {
+        // Most often a key registered as v3 while this page renders a v2
+        // checkbox — grecaptcha throws "Invalid site key type"
+        captchaBroken(e && e.message ? e.message : 'could not render');
+        return;
+    }
+    box.classList.add('on');
+}
+
+function captchaBroken(reason) {
+    _captchaBroken = true;
+    console.error('reCAPTCHA unavailable:', reason);
+    document.getElementById('captchaErr').textContent = t('err_captcha_broken');
+}
+
+/** Polls briefly for a value an async script will eventually define. */
+function waitFor(get, timeoutMs = 6000) {
+    return new Promise(resolve => {
+        const started = Date.now();
+        (function poll() {
+            if (get()) return resolve(true);
+            if (Date.now() - started > timeoutMs) return resolve(false);
+            setTimeout(poll, 100);
+        })();
+    });
+}
+
+/** The solved token, or '' when the widget is not on this page. */
+function captchaToken() {
+    return _captchaId === null ? '' : grecaptcha.getResponse(_captchaId);
+}
+
+/** A token is single-use: after any failed attempt the widget must be re-solved. */
+function resetCaptcha() {
+    if (_captchaId !== null) grecaptcha.reset(_captchaId);
+}
+
+function captchaRequired() {
+    return _captchaRequired;
+}
+
+initCaptcha();

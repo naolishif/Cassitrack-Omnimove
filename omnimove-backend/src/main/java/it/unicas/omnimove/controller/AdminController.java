@@ -12,6 +12,7 @@ import it.unicas.omnimove.service.ActiveSessionService;
 import it.unicas.omnimove.service.AnalyticsService;
 import it.unicas.omnimove.service.GoogleApiSettingsService;
 import it.unicas.omnimove.service.LoginHistoryService;
+import it.unicas.omnimove.service.RecaptchaService;
 import it.unicas.omnimove.service.TravellerProfileService;
 import it.unicas.omnimove.service.SecurityAuditService;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +52,7 @@ public class AdminController {
     private final LoginHistoryService loginHistoryService;
     private final TravellerProfileService travellerProfileService;
     private final ActiveSessionService activeSessionService;
+    private final RecaptchaService recaptchaService;
 
     private UserDTO toDTO(User u) {
         return toDTO(u, null);
@@ -347,6 +349,41 @@ public class AdminController {
         payload.put("topRoutes",        analyticsService.getTopRoutes(range));
 
         return ResponseEntity.ok(payload);
+    }
+
+    // == GET /api/v1/admin/settings/security =============================
+    @GetMapping("/settings/security")
+    @Operation(summary = "Read the security switches")
+    public ResponseEntity<?> getSecuritySettings() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put(RecaptchaService.KEY_ENABLED, recaptchaService.isFlagEnabled());
+        // The switch can be ON while the check is not running, because no key
+        // pair is configured. The dashboard says so rather than claiming the
+        // login form is protected when it is not.
+        body.put("recaptchaConfigured", recaptchaService.isConfigured());
+        body.put("recaptchaActive",     recaptchaService.isActive());
+        return ResponseEntity.ok(body);
+    }
+
+    // == PUT /api/v1/admin/settings/security =============================
+    // Body: { "security.recaptcha": true }
+    @PutMapping("/settings/security")
+    @Operation(summary = "Turn the login reCAPTCHA on or off")
+    public ResponseEntity<?> setSecuritySettings(@RequestBody Map<String, Boolean> body,
+                                                 @AuthenticationPrincipal UserDetails principal) {
+        if (body == null || !body.containsKey(RecaptchaService.KEY_ENABLED))
+            return ResponseEntity.badRequest()
+                    .body(Map.of("message", "Expected " + RecaptchaService.KEY_ENABLED));
+
+        Boolean enabled = body.get(RecaptchaService.KEY_ENABLED);
+        if (enabled == null)
+            return ResponseEntity.badRequest().body(Map.of("message", "Value must be true or false"));
+
+        recaptchaService.setEnabled(enabled);
+        // Turning off a defence for everyone is worth a line in the audit trail
+        securityAuditService.captchaToggled(principal.getUsername(), enabled);
+
+        return getSecuritySettings();
     }
 
     // == GET /api/v1/admin/settings/google ===============================
