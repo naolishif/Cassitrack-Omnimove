@@ -167,3 +167,9 @@ omnimove:
   mail:
     from: "OMNIMOVE <${MAIL_USERNAME:omnimove.noreply@gmail.com}>"
     base-url: ${APP_BASE_URL:http://localhost:8180}
+  privacy:
+    # Version of the informativa and cookie policy currently published.
+    # Bump it whenever the text materially changes: consents recorded under an
+    # older version stop counting and are asked again. Keep it in sync with the
+    # "Ultimo aggiornamento" date shown in privacy.html and cookie-policy.html.
+    policy-version: ${PRIVACY_POLICY_VERSION:2026-08-28}

@@ -4,11 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OMNIMOVE — Administration Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Self-hosted: see the note in omnimove-traveller.html. The vendored
+         chart.umd.js is byte-identical to the CDN build (same SRI hash). -->
+    <link href="vendor/fonts/admin-fonts.css" rel="stylesheet">
     <link href="omnimove-admin.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"
-            integrity="sha256-dEAdc43T4D7l37O2hBIQ/ixOrYqWDEARykugt4qf2PM="
-            crossorigin="anonymous"></script>
+    <link href="omnimove-consent.css" rel="stylesheet">
+    <script src="vendor/chartjs/chart.umd.js"></script>
+    <script src="omnimove-consent.js"></script>
 </head>
 <body>
 

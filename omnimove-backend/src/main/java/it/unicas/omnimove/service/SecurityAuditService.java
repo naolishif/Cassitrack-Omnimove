@@ -145,6 +145,16 @@ public class SecurityAuditService {
     }
 
     /**
+     * A user exercised their right of access (GDPR art. 15) and downloaded every
+     * record we hold about them. Logged because the export is a bulk disclosure of
+     * personal data and must be traceable.
+     */
+    public void dataExported(String email, String ip) {
+        log.info("DATA_EXPORTED email={} ip={}", maskEmail(email), maskIp(ip));
+        persist("DATA_EXPORTED", email, ip, null);
+    }
+
+    /**
      * Traveller changed their own email address from within the profile page.
      * Both old and new email are stored in the DB for forensic tracing.
      */

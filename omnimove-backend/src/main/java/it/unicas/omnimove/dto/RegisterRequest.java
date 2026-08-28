@@ -20,4 +20,23 @@ public class RegisterRequest {
 
     private String password;
     private String confirmPassword;
+
+    /**
+     * The user ticked "I have read the privacy notice". Mandatory: registration is
+     * refused without it, because we cannot process the account lawfully unless the
+     * art. 13 information has actually been presented.
+     *
+     * <p>This is an acknowledgement, not consent under art. 6(1)(a) — the lawful
+     * basis for the account itself is performance of the contract.
+     */
+    private Boolean privacyNoticeAccepted;
+
+    /**
+     * Optional and free: personalised suggestions derived from travel history.
+     * Registration must succeed whether this is true, false or absent.
+     */
+    private Boolean profilingConsent;
+
+    /** Ties any choice already made in the cookie banner to the new account. */
+    private String subjectKey;
 }

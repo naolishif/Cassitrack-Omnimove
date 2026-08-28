@@ -65,6 +65,65 @@ function togglePref(el) {
     el.classList.toggle('on');
 }
 
+// ── Privacy: consent and data subject rights (GDPR) ────────────────
+// Unlike the journey preferences, these are NOT batched behind "Save
+// Preferences": a consent has to be granted and withdrawn by an explicit act,
+// and withdrawing must be as easy as granting (art. 7(3) GDPR). So each toggle
+// posts immediately and reverts visually if the server refuses.
+
+async function loadPrivacyConsents() {
+    const el = document.getElementById('prefProfiling');
+    if (!el) return;
+    try {
+        const r = await apiFetch('/privacy/consents');
+        if (!r.ok) return;
+        const data = await r.json();
+        el.classList.toggle('on', data.consents && data.consents.PROFILING === true);
+    } catch (e) {
+        console.warn('Could not load consent state:', e);
+    }
+}
+
+async function toggleProfilingConsent(el) {
+    const granted = !el.classList.contains('on');
+    el.classList.toggle('on', granted);
+    try {
+        const r = await apiFetch('/privacy/consents', {
+            method: 'POST',
+            body: JSON.stringify({ type: 'PROFILING', granted: granted })
+        });
+        if (!r.ok) throw new Error('consent ' + r.status);
+        showToast(granted ? t('toast_profiling_on') : t('toast_profiling_off'));
+    } catch (e) {
+        el.classList.toggle('on', !granted);   // keep the UI honest about what was stored
+        showToast(t('toast_consent_failed'), true);
+    }
+}
+
+async function downloadMyData(btn) {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = t('btn_export_working');
+    try {
+        const r = await apiFetch('/privacy/export');
+        if (!r.ok) throw new Error('export ' + r.status);
+        const blob = await r.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url;
+        a.download = 'omnimove-my-data.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        showToast(t('toast_export_failed'), true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+    }
+}
+
 async function loadPreferences() {
     try {
         const r = await apiFetch('/traveller/preferences');
@@ -344,6 +403,7 @@ async function loadFavorites() {
 loadEcoStats();
 loadHistory();
 loadPreferences();
+loadPrivacyConsents();
 
 // Re-render dynamic content when language switches
 window._onLangChange = () => {
@@ -2659,7 +2719,7 @@ function switchProfileTab(tab) {
     if (el) el.classList.add('active');
     if (tab === 'history')   loadHistory();
     if (tab === 'favorites') { loadFavorites(); loadFavoriteStops(); }
-    if (tab === 'settings')  loadPreferences();
+    if (tab === 'settings')  { loadPreferences(); loadPrivacyConsents(); }
     if (tab === 'account') {
         const user = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
         document.getElementById('accountName').textContent  = user.name  || '—';

@@ -4,8 +4,11 @@
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
     <title>OMNIMOVE — Sign In</title>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <!-- Fonts are self-hosted: the browser must not disclose the user's IP to
+         Google. Regenerate with tools/vendor_fonts.py, never link a CDN here. -->
+    <link href="vendor/fonts/login-fonts.css" rel="stylesheet">
     <link href="omnimove-login.css" rel="stylesheet">
+    <link href="omnimove-consent.css" rel="stylesheet">
 </head>
 <body>
 <div class="container">
@@ -69,6 +72,26 @@
                 <input class="input" type="password" id="regConfirm" data-i18n="ph_repeat" placeholder="Repeat your password"/>
                 <span class="field-err" id="err-regConfirm"></span>
             </div>
+            <!-- GDPR art. 13: acknowledgement of the privacy notice. Mandatory and
+                 never pre-ticked. Kept separate from the optional consent below —
+                 bundling them into one checkbox would invalidate both. -->
+            <label class="consent-row">
+                <input type="checkbox" id="regPrivacy"/>
+                <span data-i18n="consent_notice_html">
+                    I have read the <a href="privacy.html" target="_blank" rel="noopener">privacy notice</a>.
+                </span>
+            </label>
+            <span class="field-err" id="err-regPrivacy"></span>
+
+            <!-- Optional, free, revocable. The account is created either way. -->
+            <label class="consent-row">
+                <input type="checkbox" id="regProfiling"/>
+                <span data-i18n="consent_profiling">
+                    Optional: use my travel history to suggest personalised routes.
+                    I can withdraw this at any time.
+                </span>
+            </label>
+
             <button class="btn" type="submit" id="regBtn" data-i18n="btn_create">Create Account</button>
         </form>
 
@@ -132,9 +155,16 @@
         <button class="lang-pill lang-pill-active" data-lang="en" onclick="setLanguage('en')">EN</button>
         <button class="lang-pill" data-lang="it" onclick="setLanguage('it')">IT</button>
     </div>
+
+    <div class="legal-links">
+        <a href="privacy.html" data-i18n="link_privacy">Privacy notice</a>
+        <a href="cookie-policy.html" data-i18n="link_cookies">Cookie policy</a>
+        <a href="#" onclick="OmniConsent.open(); return false;" data-i18n="link_cookie_prefs">Cookie preferences</a>
+    </div>
 </div>
 
 <script src="omnimove-i18n.js"></script>
+<script src="omnimove-consent.js"></script>
 <script src="omnimove-login.js"></script>
 </body>
 </html>
