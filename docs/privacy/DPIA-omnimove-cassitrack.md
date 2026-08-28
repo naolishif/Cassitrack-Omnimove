@@ -3,7 +3,7 @@
 
 **Titolare del trattamento:** Università degli Studi di Cassino e del Lazio Meridionale
 **Redatta ai sensi dell'art. 35 del Regolamento (UE) 2016/679**
-**Versione:** 0.1 — BOZZA TECNICA
+**Versione:** 0.2 — BOZZA TECNICA
 **Data:** 28 agosto 2026
 
 ---
@@ -21,9 +21,10 @@
 >    se negativo o parziale;
 > 3. approvata dal titolare, che è l'Ateneo e non il gruppo di progetto.
 >
-> Alcune valutazioni qui contenute (in particolare §5.4 e §5.5) richiedono
+> La valutazione di cui al §5.5 (art. 4 dello Statuto dei Lavoratori) richiede
 > competenze giuridiche e di relazioni sindacali che esulano dal gruppo di
-> sviluppo. Sono segnalate come tali e **vanno riviste da chi ha titolo**.
+> sviluppo: è segnalata come tale e **va rimessa a chi ha titolo**, cioè
+> all'Ateneo e al gestore del servizio in qualità di datore di lavoro.
 
 ---
 
@@ -68,11 +69,12 @@ mobilità per studi scientifici dell'Ateneo, con conservazione prolungata.
 |---|---|
 | Utenti registrati di OMNIMOVE | Prevalentemente studenti e personale dell'Ateneo, oltre a cittadini |
 | Personale amministrativo | Utenti con ruolo `ADMIN` |
-| Autisti | Ruolo `DRIVER` presente in CassiTrack — **v. §5.5** |
-| **Terzi non utenti** | Persone i cui dispositivi Bluetooth vengono rilevati a bordo — **v. §5.4** |
+| Autisti | Ruolo `DRIVER` presente in CassiTrack, **ma nessuna traccia collegata all'identità** — v. §5.5 |
+| Terzi a bordo | Rilevazione Bluetooth **anonima**: nessun identificativo lascia il veicolo — v. §5.4 |
 
-L'ultima categoria è la più critica: sono persone che **non hanno alcun rapporto
-con il servizio, non sono informate e non possono esercitare alcun diritto**.
+Le ultime due categorie erano state indicate come critiche nella versione 0.1.
+Le verifiche del 28/08/2026 (§§5.4 e 5.5) le hanno ridimensionate: dall'unità di
+bordo esce un semplice conteggio, e il sistema non associa gli autisti ai mezzi.
 
 ### 2.3 Categorie di dati
 
@@ -93,8 +95,8 @@ con il servizio, non sono informate e non possono esercitare alcun diritto**.
 | Dato | Tabella | Natura |
 |---|---|---|
 | Posizione, velocità, direzione dei mezzi | `vehicle_positions` | Non personale *di per sé* |
-| `ble_device_count` — conteggio dispositivi Bluetooth | `vehicle_positions` | **V. §5.4** |
-| Utenti di back-office, inclusi ruoli `DRIVER` | `users` | Identificativo |
+| `ble_device_count` — conteggio dispositivi Bluetooth | `vehicle_positions` | **Anonimo**: i MAC restano sull'ESP32, non sono conservati, esce solo un intero (§5.4) |
+| Utenti di back-office, inclusi ruoli `DRIVER` | `users` | Identificativo, ma **non collegato ad alcuna traccia GPS** (§5.5) |
 
 ### 2.4 Criticità strutturale rilevata nel codice
 
@@ -291,55 +293,97 @@ riferimento a fermata o coordinate arrotondate.
 ### 5.4 R4 — Rilevazione Bluetooth di persone non utenti
 
 **Scenario.** `vehicle_positions.ble_device_count` conta i dispositivi Bluetooth a
-bordo come stima dei passeggeri. Il conteggio è aggregato, ma **la rilevazione a
-monte opera su indirizzi MAC, che sono dati personali**. Gli interessati sono
-persone che non usano il servizio, non sono informate e non possono opporsi.
+bordo come stima dei passeggeri. Gli interessati potenziali sono persone che non
+usano il servizio, non sono informate e non potrebbero opporsi.
 
-> `«DA COMPLETARE — VERIFICA TECNICA PRIORITARIA»`
-> Il codice applicativo riceve solo un intero. **Va accertato che cosa fa
-> l'unità di bordo**: se conserva i MAC, se li sottopone ad hash, con quale sale,
-> per quanto tempo, e se il dato esce dal dispositivo. Finché la risposta non è
-> documentata, il rischio non è valutabile e va assunto come elevato.
+**Verifica effettuata (28/08/2026).** Il gruppo di progetto ha chiarito il
+comportamento dell'unità di bordo:
+
+> Gli indirizzi MAC **non sono conservati in alcun modo**. Sono conteggiati sul
+> dispositivo periferico ESP32 e cancellati non appena il dispositivo esce dalla
+> portata del rilevatore. Dall'unità di bordo **esce esclusivamente un numero
+> intero**.
+
+Questo cambia radicalmente la valutazione. Il dato che lascia il veicolo, e
+l'unico che raggiunge la piattaforma, è un **conteggio anonimo**: non consente di
+isolare, collegare o inferire alcunché su una persona determinata.
+
+Resta un trattamento — l'ESP32 deve trattenere gli identificativi in memoria
+volatile per la durata della permanenza a bordo, altrimenti non potrebbe
+distinguere i dispositivi né rilevarne l'uscita dalla portata, e la memorizzazione
+anche temporanea rientra nell'art. 4, punto 2 — ma è un trattamento
+**transitorio, locale, mai trasmesso e mai persistito**: privacy by design nel
+senso dell'art. 25.
 
 | Prob. | Grav. | Rischio |
 |---|---|---|
-| 3 | 4 | **12 — Molto alto** (in assenza di verifica) |
+| 1 | 2 | **2 — Basso** |
 
-**Misure attese.** Nessuna conservazione dei MAC; conteggio calcolato in memoria
-sul dispositivo con hash a sale rotante e finestra breve; informativa a bordo;
-inclusione nel registro dei trattamenti. Se l'unità di bordo conserva i MAC, la
-funzione va **disattivata** fino all'adeguamento.
+**Misure residue.**
 
-**Rischio residuo:** non determinabile prima della verifica.
+- **Documentare il comportamento del firmware** (riferimento al sorgente o nota
+  tecnica firmata) e allegarlo alla presente. L'art. 5, par. 2, richiede di
+  *dimostrare* la conformità: una dichiarazione a voce non è evidenza, e questo
+  è l'unico elemento che oggi sostiene la valutazione «Basso».
+- Vincolo di progettazione: se in futuro il conteggio dovesse essere trasmesso
+  come elenco anziché come intero, o se i MAC venissero persistiti anche solo per
+  deduplicare fra corse diverse, **questa valutazione decade** e va rifatta.
+- Menzione nel registro dei trattamenti come rilevazione anonima di affluenza.
+
+**Nota di qualità del dato, non di conformità.** I sistemi operativi recenti
+randomizzano il MAC BLE con rotazione tipicamente inferiore ai 15 minuti. Ciò
+riduce ulteriormente il rischio privacy, ma **gonfia il conteggio**: un singolo
+telefono che ruota l'indirizzo durante il tragitto può essere contato più volte.
+Rilevante ai fini della validità scientifica del dato di affluenza, se verrà usato
+nella ricerca.
+
+**Rischio residuo:** 2 — Basso.
 
 ### 5.5 R5 — Controllo a distanza dell'attività degli autisti
 
-**Scenario.** CassiTrack prevede il ruolo `DRIVER`. Allo stato **non risulta un
-collegamento fra utente-autista e `vehicle_positions`**, quindi il rischio non è
-attuale. Nel momento in cui un autista venisse associato a un mezzo o a una
-corsa, posizione, velocità e orari diventerebbero strumento di controllo a
-distanza dell'attività lavorativa.
+**Scenario.** CassiTrack prevede il ruolo `DRIVER`. Se un autista fosse associato
+a un mezzo o a una corsa, posizione, velocità e orari diventerebbero strumento di
+controllo a distanza dell'attività lavorativa.
 
-**Quadro normativo.** **Art. 4 della L. 300/1970 (Statuto dei Lavoratori)**: gli
-strumenti da cui derivi la possibilità di controllo a distanza possono essere
-impiegati solo previo **accordo sindacale** o **autorizzazione dell'Ispettorato
-Nazionale del Lavoro**, e comunque previa informativa specifica ai lavoratori. Si
-aggiunge il *Provvedimento del Garante sui metadati e sugli strumenti di lavoro*.
+**Verifica effettuata (28/08/2026).** Il gruppo di progetto ha confermato:
 
-> **Non è una formalità sanabile a posteriori.** L'art. 4 è assistito da sanzione
-> penale e l'autorizzazione deve precedere l'attivazione dello strumento.
-> Questa valutazione **esula dalle competenze del gruppo di sviluppo** e va
-> rimessa all'Ateneo e al gestore del servizio, che è il datore di lavoro.
+> Il sistema **non traccia l'identità degli autisti**. L'autobus rimane anonimo.
+
+Coerente con l'ispezione del codice: non esiste alcuna colonna che colleghi
+`users` con ruolo `DRIVER` a `vehicle_positions`, a `buses` o a `trips`. **Il
+rischio non è attuale.**
+
+**Quadro normativo, per il futuro.** **Art. 4 della L. 300/1970 (Statuto dei
+Lavoratori)**: gli strumenti «dai quali derivi *anche la possibilità* di controllo
+a distanza» dell'attività dei lavoratori possono essere impiegati solo previo
+**accordo sindacale** o **autorizzazione dell'Ispettorato Nazionale del Lavoro**,
+e comunque previa informativa specifica.
+
+> **Punto da sottoporre al gestore del servizio, non risolvibile qui.**
+> La norma guarda alla *possibilità* di controllo, non alla presenza di una
+> chiave esterna nel database. Se il gestore dispone dei turni di servizio —
+> anche solo su carta, come è normale in un'azienda di trasporto — allora
+> «quale mezzo, dove, a che ora» più «chi era in turno su quel mezzo» consente
+> comunque di ricostruire l'attività del singolo autista. La geolocalizzazione di
+> flotta è un caso classico di applicazione dell'art. 4.
+>
+> Non è detto che ci sia un problema: molti gestori hanno già l'accordo sindacale
+> per la gestione della flotta, e in quel caso è sufficiente verificare che
+> copra anche questo impiego. Va però **accertato**, perché l'art. 4 è assistito
+> da sanzione penale e il titolo deve precedere l'attivazione dello strumento.
+> La valutazione compete al datore di lavoro, non al gruppo di sviluppo.
 
 | Prob. | Grav. | Rischio |
 |---|---|---|
-| 2 (oggi) → 4 (se attivato) | 4 | **8 → 16** |
+| 1 (oggi) → 4 (se venisse introdotta l'associazione) | 4 | **4 → 16** |
 
-**Misure.** Vincolo di progettazione: **nessuna associazione persistente fra
-identità dell'autista e traccia GPS** finché non è acquisito il titolo ex art. 4.
-Da recepire come requisito, non come raccomandazione.
+**Misure.** Vincolo di progettazione, da recepire come requisito e non come
+raccomandazione: **nessuna associazione persistente fra identità dell'autista e
+traccia GPS** finché non è acquisito il titolo ex art. 4. Il vincolo è oggi
+rispettato; va mantenuto esplicito perché il ruolo `DRIVER` esiste già e
+l'associazione dista una sola modifica di schema.
 
-**Rischio residuo:** 4 se il vincolo è rispettato.
+**Rischio residuo:** 4 — Medio, riferito alla verifica sui turni di cui sopra.
 
 ### 5.6 R6 — Accesso eccessivo dell'amministratore ai dati di viaggio
 
@@ -425,10 +469,10 @@ utilizzabile in caso di rifiuto.
 | R1 | Re-identificazione da dati di mobilità | 12 | 4 |
 | R2 | Attacco differenziale | 8 | 3 |
 | R3 | Indirizzi in chiaro | 9 | 4 |
-| R4 | Rilevazione BLE di non utenti | 12 | **non determinato** |
-| R5 | Controllo a distanza autisti | 8 → 16 | 4 *se vincolo rispettato* |
+| R4 | Rilevazione BLE di non utenti | 12 | **2** — chiarito il 28/08/2026 |
+| R5 | Controllo a distanza autisti | 8 → 16 | **4** — non attuale; verifica turni aperta |
 | R6 | Accesso amministrativo eccessivo | 9 | 4 |
-| R7 | Assenza di purge | 12 | 3 *se job attivo* |
+| R7 | Assenza di purge | 12 | 3 *solo a pipeline abilitata* |
 | R8 | Violazione dati di ricerca | 8 | 4 |
 | R9 | Contenuti verso LLM | 6 | 3 |
 | R10 | Profilazione | 6 | 2 |
@@ -475,18 +519,34 @@ e ne consente la rimozione dal livello 2, il cui pseudonimo è ricalcolabile.
 L'art. 36 impone la consultazione preventiva del Garante se, **dopo** le misure,
 permane un rischio elevato.
 
-Sulla base della §5.11, i rischi residui sono riconducibili a livello medio o
-basso **a tre condizioni**, tutte oggi non soddisfatte:
+Sulla base della §5.11 **nessun rischio residuo si colloca a livello elevato**.
 
-1. **R4 chiarito** — verifica documentata del comportamento dell'unità di bordo
-   sui MAC address;
-2. **R7 chiuso** — job di purge effettivamente in esecuzione;
-3. **R5 vincolato** — divieto formalizzato di associare identità dell'autista e
-   traccia GPS in assenza di titolo ex art. 4 St. Lav.
+Le tre condizioni indicate nella versione 0.1 hanno avuto il seguente esito:
 
-**Finché queste tre condizioni non sono soddisfatte, il rilascio in produzione
-della componente di ricerca non dovrebbe avere luogo.** Il punto R4, in
-particolare, potrebbe da solo richiedere la consultazione preventiva.
+| Condizione | Stato |
+|---|---|
+| **R4** — chiarire il comportamento dell'unità di bordo sui MAC | **Risolta.** I MAC non sono conservati: conteggio locale sull'ESP32, esce un intero. Rischio da 12 a 2 |
+| **R5** — vincolare l'associazione autista/traccia GPS | **Non attuale.** Il sistema non traccia l'identità degli autisti. Vincolo mantenuto per il futuro |
+| **R7** — purge in esecuzione | **Implementata, non attiva.** Le funzioni esistono (`V23`) e sono schedulate (`ResearchPipelineService`), ma la pipeline è disabilitata per impostazione predefinita |
+
+**La consultazione preventiva ex art. 36 non appare necessaria**, essendo venuto
+meno il presupposto del rischio elevato residuo che la avrebbe imposta.
+
+Restano **due adempimenti prima del rilascio in produzione**, entrambi
+circoscritti:
+
+1. **Attivare la pipeline** (`omnimove.research.enabled=true` con il salt
+   configurato). Finché resta disattivata i viaggi sono conservati a tempo
+   indeterminato e l'informativa, che dichiara 12 mesi, è inesatta. **È l'unico
+   punto in cui il sistema non fa ciò che dichiara agli interessati.**
+2. **Documentare il firmware dell'ESP32** (§5.4). La valutazione «Basso» poggia
+   interamente su questa affermazione: l'art. 5, par. 2, richiede di poterla
+   dimostrare, non solo di sostenerla.
+
+E una verifica che compete al gestore del servizio, non condizionante per il
+rilascio ma da chiudere: se esistono turni di servizio, la combinazione con le
+tracce GPS può ricadere nell'art. 4 St. Lav. anche senza un collegamento nel
+database (§5.5).
 
 `«DA COMPLETARE — determinazione del titolare, sentito l'RPD»`
 
@@ -502,3 +562,4 @@ violazione di dati.
 | Versione | Data | Autore | Modifiche |
 |---|---|---|---|
 | 0.1 | 2026-08-28 | Gruppo di sviluppo | Prima bozza tecnica |
+| 0.2 | 2026-08-28 | Gruppo di sviluppo | Recepite le verifiche su R4 (i MAC non sono conservati: conteggio locale sull'ESP32) e R5 (nessun tracciamento dell'identità degli autisti). Rischi residui rivisti; venuto meno il presupposto della consultazione preventiva ex art. 36. Aperta la verifica sui turni di servizio in relazione all'art. 4 St. Lav. |
