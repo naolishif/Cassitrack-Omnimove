@@ -190,6 +190,33 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     List<String> findRouteShortNamesByStopId(@Param("stopId") String stopId);
 
     /**
+     * Every scheduled call of a whole line, trip by trip and in stop order.
+     *
+     * This is the printed timetable in raw form: one query returns the entire
+     * grid, and the shape of it — which stops, in what order, at what time — is
+     * assembled in the controller. Asking trip by trip would be one round trip
+     * per column of the table.
+     */
+    @Query("""
+    SELECT t.id AS tripId, ss.stopId AS stopId,
+           ss.stopSequence AS sequence, ss.arrivalSeconds AS seconds
+    FROM ScheduledStop ss
+    JOIN ss.trip t
+    JOIN t.route r
+    WHERE r.id = :routeId
+      AND r.active = true
+    ORDER BY t.id, ss.stopSequence
+    """)
+    List<RouteCall> findCallsForRoute(@Param("routeId") String routeId);
+
+    interface RouteCall {
+        String  getTripId();
+        String  getStopId();
+        Integer getSequence();
+        Integer getSeconds();
+    }
+
+    /**
      * One representative trip for a route — used to get the ordered stop list.
      */
     @Query("""

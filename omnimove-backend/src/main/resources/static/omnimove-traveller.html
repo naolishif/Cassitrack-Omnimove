@@ -42,6 +42,9 @@
         <div class="nav-item active" data-pane="map">
             <span class="nav-icon">🗺</span> <span data-i18n="nav_plan">Plan Route</span>
         </div>
+        <div class="nav-item" data-pane="timetable">
+            <span class="nav-icon">🕒</span> <span data-i18n="nav_timetable">Timetable</span>
+        </div>
         <div class="nav-item" data-pane="tickets">
             <span class="nav-icon">🎫</span> <span data-i18n="nav_tickets">My Tickets</span>
         </div>
@@ -190,6 +193,47 @@
         </div>
 
         <!-- ── TICKETS PANE ── -->
+        <!-- ══════════ TIMETABLE PANE ══════════
+             The layout of a printed timetable: stops down the side, runs across
+             the top, times at the intersections. The stop column is frozen so
+             that on a phone you scroll the runs sideways without losing sight of
+             which stop you are reading. -->
+        <div class="pane" id="pane-timetable">
+            <div class="tt-head">
+                <h1 class="tt-title" data-i18n="tt_title">Timetable</h1>
+                <!-- Labelled, and on its own row: beside the title the numbers
+                     read as if 01…21 were the timetables rather than the lines. -->
+                <div class="tt-lines-row">
+                    <span class="tt-lines-label" data-i18n="tt_lines">Lines</span>
+                    <div class="tt-lines" id="ttLines"></div>
+                </div>
+            </div>
+
+            <!-- Direction sits above the grid, not under it. As a swap rather
+                 than a row of buttons because a line has two ways and flipping
+                 between them is the same gesture as swapping origin and
+                 destination — and anchored to the top because below the table
+                 its height would follow the number of stops, moving the control
+                 every time you changed line. -->
+            <div class="tt-dirbar" id="ttDirBar" style="display:none">
+                <button class="tt-swap" id="ttSwapBtn" onclick="swapTimetableDirection()" title="Swap direction">⇄</button>
+                <div class="tt-dirbar-text">
+                    <span class="tt-dirbar-label" data-i18n="tt_direction">Direction</span>
+                    <span class="tt-dirbar-value" id="ttDirLabel">—</span>
+                </div>
+                <span class="tt-hint" data-i18n="tt_hint">Stops down the side, runs across the top.</span>
+            </div>
+
+            <div class="tt-body" id="ttBody">
+                <div class="empty-state" data-i18n="tt_pick">Choose a line to see its timetable.</div>
+            </div>
+
+            <!-- The full sentence is in the bar above and does not fit a phone.
+                 This is its short form, shown only on small screens. -->
+            <p class="tt-hint-mobile" id="ttHintMobile" style="display:none"
+               data-i18n="tt_hint_short">Swipe sideways for later runs →</p>
+        </div>
+
         <div class="pane" id="pane-tickets">
             <div class="tickets-inner">
 

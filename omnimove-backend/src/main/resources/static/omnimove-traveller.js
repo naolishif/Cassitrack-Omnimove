@@ -373,6 +373,7 @@ window._onLangChange = () => {
     // so applyTranslations() cannot reach them
     if (document.getElementById('ptab-account')?.classList.contains('active'))
         applyPasswordMode(_hasPassword);
+    if (_ttData) renderTimetable();
 };
 
 // ── Weather pill on page load ──────────────────────────────────────
@@ -2881,6 +2882,7 @@ document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
         document.getElementById('pane-' + pane).classList.add('active');
         if (pane === 'profile' && tab) switchProfileTab(tab);
         if (pane === 'map') setTimeout(() => map.invalidateSize(), 50);
+        if (pane === 'timetable') timetableOpened();
     });
 });
 
@@ -3762,4 +3764,176 @@ async function savePassword() {
     } finally {
         btn.disabled = false;
     }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TIMETABLE
+// ══════════════════════════════════════════════════════════════════
+// A printed timetable, rebuilt: stops down the side, runs across the top, times
+// at the intersections. The stop column and the header row are frozen, so on a
+// phone you scroll the runs sideways while still seeing which stop each row is.
+let _ttRoutes = [];    // lines that have a timetable
+let _ttRoute  = null;  // routeId currently shown
+let _ttData   = null;  // grid payload
+let _ttDir    = 0;     // which direction of that line
+
+async function timetableOpened() {
+    if (_ttRoutes.length) return;   // already loaded
+    try {
+        const r = await apiFetch('/journeys/timetable/routes');
+        if (!r.ok) throw new Error('routes ' + r.status);
+        _ttRoutes = await r.json();
+        renderTimetableLines();
+        // A single line is not a choice — open it straight away
+        if (_ttRoutes.length === 1) selectTimetableRoute(_ttRoutes[0].routeId);
+    } catch (e) {
+        console.warn('Could not load timetable lines:', e);
+        document.getElementById('ttBody').innerHTML =
+            `<div class="empty-state">${escHtml(t('tt_error'))}</div>`;
+    }
+}
+
+function renderTimetableLines() {
+    document.getElementById('ttLines').innerHTML = _ttRoutes.map(r => `
+        <button class="tt-chip${_ttRoute === r.routeId ? ' on' : ''}"
+                style="${_ttRoute === r.routeId ? ttChipStyle(r) : ''}"
+                onclick="selectTimetableRoute('${escAttr(r.routeId)}')">
+            ${escHtml(r.routeShort)}
+        </button>`).join('');
+}
+
+/** Lines carry their own colour in the network data; use it when selected. */
+function ttChipStyle(r) {
+    if (!r.color) return '';
+    const bg = r.color.startsWith('#') ? r.color : '#' + r.color;
+    const fg = r.textColor ? (r.textColor.startsWith('#') ? r.textColor : '#' + r.textColor) : '#fff';
+    return `background:${bg};color:${fg};border-color:${bg}`;
+}
+
+async function selectTimetableRoute(routeId) {
+    _ttRoute = routeId;
+    _ttDir   = 0;
+    renderTimetableLines();
+
+    document.getElementById('ttDirBar').style.display = 'none';
+    document.getElementById('ttBody').innerHTML =
+        `<div class="empty-state">${escHtml(t('tt_loading'))}</div>`;
+
+    try {
+        const r = await apiFetch('/journeys/timetable/routes/' + encodeURIComponent(routeId));
+        if (!r.ok) throw new Error('timetable ' + r.status);
+        _ttData = await r.json();
+        renderTimetable();
+    } catch (e) {
+        console.warn('Could not load timetable:', e);
+        document.getElementById('ttBody').innerHTML =
+            `<div class="empty-state">${escHtml(t('tt_error'))}</div>`;
+    }
+}
+
+/** Cycles to the next direction — two on a normal line, more on a ring. */
+function swapTimetableDirection() {
+    if (!_ttData?.directions?.length) return;
+    _ttDir = (_ttDir + 1) % _ttData.directions.length;
+    renderTimetable();
+}
+
+function ttFormat(seconds) {
+    // Service days run past midnight as 25:10; wrap for display only
+    const h = Math.floor(seconds / 3600) % 24;
+    const m = Math.floor((seconds % 3600) / 60);
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+function ttNowSeconds() {
+    const n = new Date();
+    return n.getHours() * 3600 + n.getMinutes() * 60 + n.getSeconds();
+}
+
+function renderTimetable() {
+    const body = document.getElementById('ttBody');
+    const bar = document.getElementById('ttDirBar');
+
+    if (!_ttData || !_ttData.directions?.length) {
+        bar.style.display = 'none';
+        document.getElementById('ttHintMobile').style.display = 'none';
+        body.innerHTML = `<div class="empty-state">${escHtml(t('tt_pick'))}</div>`;
+        return;
+    }
+
+    _ttDir = Math.min(_ttDir, _ttData.directions.length - 1);
+    const dir = _ttData.directions[_ttDir];
+
+    // A line with a single direction has nothing to swap to, so the control is
+    // shown but inert rather than hidden — the label still says where it goes
+    bar.style.display = 'flex';
+    document.getElementById('ttHintMobile').style.display = '';
+    document.getElementById('ttSwapBtn').disabled = _ttData.directions.length < 2;
+    document.getElementById('ttDirLabel').textContent = dir.headsign;
+    document.getElementById('ttDirLabel').title = dir.headsign;
+    const now = ttNowSeconds();
+
+    // The next run is the first whose departure is still ahead; its column is
+    // highlighted end to end, which is what people are looking for
+    let nextRun = dir.runs.findIndex(run => {
+        const first = run.times.find(v => v !== null);
+        return first !== undefined && first >= now;
+    });
+
+    const header = dir.runs.map((run, i) => {
+        const first = run.times.find(v => v !== null);
+        return `<th class="${i === nextRun ? 'next-run' : ''}">${first != null ? ttFormat(first) : '—'}</th>`;
+    }).join('');
+
+    const rows = dir.stops.map((stop, row) => `
+        <tr>
+          <td class="tt-stop-col" title="${escAttr(stop.name)}">${escHtml(stop.name)}</td>
+          ${dir.runs.map((run, i) => {
+              const v = run.times[row];
+              const cls = v === null ? 'tt-cell skip'
+                        : (i === nextRun ? 'tt-cell next-run' : 'tt-cell');
+              return `<td class="${cls}">${v === null ? '·' : ttFormat(v)}</td>`;
+          }).join('')}
+        </tr>`).join('');
+
+    // The fade lives outside the scrolling box: inside it, it would scroll away
+    // with the content it is meant to point at.
+    body.innerHTML = `
+      <div class="tt-scroller">
+        <div class="tt-grid-wrap">
+          <table class="tt-grid">
+            <thead>
+              <tr><th class="tt-stop-col">${escHtml(t('tt_stop'))}</th>${header}</tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <span class="tt-fade" aria-hidden="true"></span>
+      </div>`;
+
+    bindTimetableScrollHint();
+}
+
+/**
+ * Marks the grid while runs remain off-screen to the right.
+ *
+ * On a phone the written hint is the first thing that gets cut, and a sentence
+ * nobody reads is not an affordance: the edge itself has to say there is more.
+ * The class drives a fading edge and an arrow, and clears once the last run is
+ * in view so it never points at nothing.
+ */
+function bindTimetableScrollHint() {
+    const scroller = document.querySelector('#ttBody .tt-scroller');
+    const wrap     = scroller?.querySelector('.tt-grid-wrap');
+    if (!wrap) return;
+
+    const sync = () => {
+        const more = wrap.scrollLeft + wrap.clientWidth < wrap.scrollWidth - 1;
+        scroller.classList.toggle('more', more);
+    };
+
+    wrap.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+    // Layout is not settled in the same frame the markup is written
+    requestAnimationFrame(sync);
 }

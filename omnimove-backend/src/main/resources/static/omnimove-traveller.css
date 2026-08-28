@@ -2688,3 +2688,216 @@ body {
 .pwd-forgot:disabled { color: var(--text-soft); cursor: default; text-decoration: none; }
 .pwd-note { font-size: 11px; color: var(--primary-dark); min-height: 14px; }
 .pwd-note.err { color: var(--red); }
+
+/* ── TIMETABLE ── */
+/* .pane is a flex row; without this the header, table and footer line up
+   side by side as narrow columns instead of stacking. */
+#pane-timetable {
+    flex-direction: column;
+    padding: 20px 20px 14px;
+    overflow: hidden;
+    gap: 14px;
+}
+
+/* Title, then the lines under it — carrying their own label, so the numbers
+   are read as line badges and not as a list of timetables. */
+.tt-head { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; min-width: 0; }
+.tt-title { font-size: 22px; font-weight: 800; color: var(--text-dark); margin: 0; }
+
+/* The label stays put while the pills scroll past it */
+.tt-lines-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tt-lines-label {
+    flex-shrink: 0;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--text-soft);
+}
+
+.tt-lines {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+}
+.tt-chip {
+    flex: 0 0 auto;
+    min-width: 40px;
+    padding: 7px 13px;
+    border-radius: 20px;
+    border: 1px solid var(--border-mid);
+    background: var(--bg-white);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-mid);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tt-chip:hover { border-color: var(--text-soft); }
+.tt-chip.on { background: var(--text-dark); color: #fff; border-color: var(--text-dark); }
+
+/* Claims the space left under the direction bar, and gives the wrapper below a
+   definite height to cap itself against — without that, max-height:100% has
+   nothing to resolve to and a long line would spill past the pane. The box only
+   ever draws as tall as its table; the leftover simply stays empty. */
+.tt-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+/* Holds the scrolling box and the fade beside it. The fade cannot live inside
+   the box: it would scroll away with the content it points at. */
+.tt-scroller {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    /* As tall as its table, never taller than the pane. The cap sits here and
+       not on the box inside: a percentage needs a parent with a settled height,
+       and .tt-body has one while the scroller's own is content-driven. */
+    flex: 0 1 auto;
+    max-height: 100%;
+}
+
+.tt-fade {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+    width: 44px;
+    border-radius: 0 13px 13px 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .18s;
+    background: linear-gradient(to right, rgba(255,255,255,0), var(--bg-white) 78%);
+}
+/* An arrow on top of the fade, so the edge says which way to go */
+.tt-fade::after {
+    content: '›';
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    font-size: 22px;
+    line-height: 1;
+    color: var(--text-soft);
+}
+.tt-scroller.more .tt-fade { opacity: 1; }
+
+.tt-grid-wrap {
+    /* Stretched to the scroller, which is what carries the cap */
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--border-mid);
+    border-radius: 14px;
+    background: var(--bg-white);
+    -webkit-overflow-scrolling: touch;
+}
+.tt-grid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+
+.tt-grid th, .tt-grid td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.tt-grid tbody tr:last-child td { border-bottom: none; }
+
+.tt-grid thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-app);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-soft);
+    text-align: center;
+    border-bottom: 1px solid var(--border-mid);
+}
+/* Frozen stop column — the whole point on a narrow screen */
+.tt-grid th.tt-stop-col,
+.tt-grid td.tt-stop-col {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg-white);
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-dark);
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-right: 1px solid var(--border-mid);
+}
+/* The corner belongs to both sticky axes, so it sits above both */
+.tt-grid thead th.tt-stop-col { z-index: 3; background: var(--bg-app); }
+
+.tt-grid td.tt-cell {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    text-align: center;
+    color: var(--text-mid);
+}
+/* A run that skips this stop: an empty cell, not a shifted column */
+.tt-grid td.tt-cell.skip { color: var(--border-mid); }
+
+.tt-grid td.tt-cell.next-run,
+.tt-grid thead th.next-run {
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    font-weight: 700;
+}
+
+/* ── Direction swap, above the grid ── */
+/* Anchored under the line pills rather than after the last row: below the table
+   its height would follow the number of stops, so the control jumped up and
+   down every time you switched line. Here it never moves. */
+.tt-dirbar { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.tt-swap {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--border-mid);
+    background: var(--bg-app);
+    color: var(--text-dark);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+.tt-swap:hover { background: var(--bg-white); border-color: var(--text-soft); }
+.tt-swap:disabled { opacity: .35; cursor: default; }
+
+.tt-dirbar-text { display: flex; flex-direction: column; min-width: 0; }
+.tt-dirbar-label { font-size: 9px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-soft); }
+.tt-dirbar-value {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-dark);
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tt-hint { margin-left: auto; font-size: 11px; color: var(--text-soft); text-align: right; }
+
+.tt-hint-mobile { display: none; }
+
+@media (max-width: 768px) {
+    #pane-timetable { padding: 14px 12px 10px; gap: 10px; }
+    /* One short line is affordable; the full sentence never was */
+    .tt-hint-mobile {
+        display: block;
+        margin: 0;
+        font-size: 11px;
+        color: var(--text-soft);
+        text-align: center;
+        flex-shrink: 0;
+    }
+    .tt-head { gap: 6px; }
+    .tt-title { font-size: 18px; }
+    .tt-grid th, .tt-grid td { padding: 7px 8px; }
+    .tt-grid th.tt-stop-col, .tt-grid td.tt-stop-col { max-width: 118px; font-size: 11px; }
+    /* Replaced by .tt-hint-mobile above: the full sentence does not fit */
+    .tt-hint { display: none; }
+}

@@ -6,6 +6,7 @@ import it.unicas.omnimove.dto.JourneyRequest;
 import it.unicas.omnimove.dto.JourneyResponse;
 import it.unicas.omnimove.dto.StopArrivalDTO;
 import it.unicas.omnimove.model.JourneyLog;
+import it.unicas.omnimove.model.Route;
 import it.unicas.omnimove.model.Stop;
 import it.unicas.omnimove.model.User;
 import it.unicas.omnimove.repository.JourneyLogRepository;
@@ -38,10 +39,15 @@ import it.unicas.omnimove.repository.TripRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import it.unicas.omnimove.repository.ScheduledStopRepository;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -94,6 +100,114 @@ public class JourneyController {
                 ))
                 .toList();
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/timetable/routes")
+    @Operation(summary = "Lines that have a timetable")
+    public ResponseEntity<List<Map<String, Object>>> timetableRoutes() {
+        List<Map<String, Object>> result = routeRepository.findAll().stream()
+                .filter(Route::isActive)
+                .sorted(Comparator.comparing(r -> r.getShortName() != null ? r.getShortName() : r.getId(),
+                                             String.CASE_INSENSITIVE_ORDER))
+                .<Map<String, Object>>map(r -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("routeId",    r.getId());
+                    m.put("routeShort", r.getShortName() != null ? r.getShortName() : r.getId());
+                    m.put("routeLong",  r.getLongName());
+                    m.put("color",      r.getColor());
+                    m.put("textColor",  r.getTextColor());
+                    return m;
+                })
+                .toList();
+        return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/timetable/routes/{routeId}")
+    @Operation(summary = "Timetable grid for one line",
+               description = "Stops down the side, runs across the top, times at the "
+                           + "intersections — the layout of a printed timetable. One "
+                           + "block per direction.")
+    public ResponseEntity<?> routeTimetable(@PathVariable String routeId) {
+
+        if (!STOP_ID_RE.matcher(routeId).matches())
+            return ResponseEntity.badRequest().build();
+
+        Route route = routeRepository.findById(routeId).orElse(null);
+        if (route == null || !route.isActive()) return ResponseEntity.notFound().build();
+
+        var calls = scheduledStopRepository.findCallsForRoute(routeId);
+        if (calls.isEmpty()) return ResponseEntity.notFound().build();
+
+        // Rows arrive grouped by trip and ordered by sequence, so one pass rebuilds
+        // each run in the order it is actually driven
+        Map<String, List<ScheduledStopRepository.RouteCall>> byTrip = new LinkedHashMap<>();
+        for (var c : calls)
+            byTrip.computeIfAbsent(c.getTripId(), k -> new ArrayList<>()).add(c);
+
+        // A line usually runs two ways, and mixing them into one table would put
+        // times in the wrong order down the column. The terminus is what tells
+        // them apart — it is also what the traveller reads on the bus.
+        Map<String, List<List<ScheduledStopRepository.RouteCall>>> byDirection = new LinkedHashMap<>();
+        for (var trip : byTrip.values()) {
+            String terminus = trip.get(trip.size() - 1).getStopId();
+            byDirection.computeIfAbsent(terminus, k -> new ArrayList<>()).add(trip);
+        }
+
+        Map<String, String> stopNames = new HashMap<>();
+        for (Stop st : stopRepository.findAll())
+            stopNames.put(st.getId(), st.getName() != null ? st.getName() : st.getId());
+
+        List<Map<String, Object>> directions = new ArrayList<>();
+        for (var entry : byDirection.entrySet()) {
+            List<List<ScheduledStopRepository.RouteCall>> trips = entry.getValue();
+
+            // The run calling at most stops defines the rows; a short working that
+            // skips a few then leaves those cells empty rather than shifting the
+            // whole column up by one stop.
+            List<ScheduledStopRepository.RouteCall> longest = trips.stream()
+                    .max(Comparator.comparingInt(List::size)).orElse(trips.get(0));
+            List<String> stopOrder = longest.stream()
+                    .map(ScheduledStopRepository.RouteCall::getStopId).toList();
+            Map<String, Integer> rowOf = new HashMap<>();
+            for (int i = 0; i < stopOrder.size(); i++) rowOf.putIfAbsent(stopOrder.get(i), i);
+
+            // Columns read left to right in departure order, like a printed table
+            trips.sort(Comparator.comparingInt(t -> t.get(0).getSeconds()));
+
+            List<Map<String, Object>> runs = new ArrayList<>();
+            for (var trip : trips) {
+                Integer[] times = new Integer[stopOrder.size()];
+                for (var c : trip) {
+                    Integer row = rowOf.get(c.getStopId());
+                    if (row != null) times[row] = c.getSeconds();
+                }
+                Map<String, Object> run = new LinkedHashMap<>();
+                run.put("tripId", trip.get(0).getTripId());
+                run.put("times",  Arrays.asList(times));
+                runs.add(run);
+            }
+
+            List<Map<String, Object>> stops = stopOrder.stream()
+                    .<Map<String, Object>>map(id -> Map.of(
+                            "stopId", id,
+                            "name",   stopNames.getOrDefault(id, id)))
+                    .toList();
+
+            Map<String, Object> dir = new LinkedHashMap<>();
+            dir.put("headsign", stopNames.getOrDefault(entry.getKey(), entry.getKey()));
+            dir.put("stops",    stops);
+            dir.put("runs",     runs);
+            directions.add(dir);
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("routeId",    route.getId());
+        body.put("routeShort", route.getShortName() != null ? route.getShortName() : route.getId());
+        body.put("routeLong",  route.getLongName());
+        body.put("color",      route.getColor());
+        body.put("textColor",  route.getTextColor());
+        body.put("directions", directions);
+        return ResponseEntity.ok(body);
     }
 
     @GetMapping("/weather")
