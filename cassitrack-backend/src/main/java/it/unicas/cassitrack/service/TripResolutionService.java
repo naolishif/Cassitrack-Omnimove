@@ -38,6 +38,7 @@ public class TripResolutionService {
     private final ScheduledStopRepository scheduledStopRepo;
     private final StopRepository          stopRepository;
     private final RouteMatchingService    routeMatchingService;
+    private final RoutePatternService     routePatternService;
 
     private static final ZoneId ITALY_TZ = ZoneId.of("Europe/Rome");
 
@@ -195,11 +196,31 @@ public class TripResolutionService {
         return best;
     }
 
+    /**
+     * La linea di una corsa, letta dalla prima riga di orario.
+     *
+     * Le query che alimentano questi percorsi usano JOIN FETCH su trip e route
+     * proprio perché qui non c'è una sessione Hibernate aperta: il gestore MQTT
+     * non è transazionale, e una navigazione pigra fallirebbe.
+     */
+    private static String routeIdOf(List<ScheduledStop> calls) {
+        if (calls.isEmpty()) return null;
+        ScheduledStop first = calls.get(0);
+        return first.getTrip() != null && first.getTrip().getRoute() != null
+                ? first.getTrip().getRoute().getId() : null;
+    }
+
     /** Distance from the fix to the nearest stop of this trip. */
     private double distanceToTrip(String tripId, double lat, double lon) {
         double nearest = Double.MAX_VALUE;
-        for (ScheduledStop ss : scheduledStopRepo.findByTripIdOrderByStopSequenceAsc(tripId)) {
-            Optional<Stop> stopOpt = stopRepository.findById(ss.getStopId());
+        List<ScheduledStop> calls = scheduledStopRepo.findByTripIdOrderByStopSequenceAsc(tripId);
+        // Tutte le righe appartengono alla stessa corsa, quindi alla stessa
+        // linea: risolverla una volta invece che a ogni fermata.
+        String routeId = routeIdOf(calls);
+        for (ScheduledStop ss : calls) {
+            String patternStopId = routePatternService.stopIdAt(routeId, ss.getStopSequence());
+            if (patternStopId == null) continue;
+            Optional<Stop> stopOpt = stopRepository.findById(patternStopId);
             if (stopOpt.isEmpty()) continue;
             Stop stop = stopOpt.get();
             if (stop.getLat() == null || stop.getLon() == null) continue;

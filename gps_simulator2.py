@@ -133,15 +133,22 @@ def load_trip_stops(conn, trip_id):
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
+            -- Da V24 scheduled_stops porta solo il TEMPO. Quale fermata
+            -- occupi ogni posizione lo dice route_stops, attraverso la linea
+            -- della corsa: e' la stessa informazione di prima, letta dove ora
+            -- vive una volta sola invece che duplicata in ogni corsa.
             SELECT
                 ss.stop_sequence,
                 ss.arrival_seconds,
-                ss.stop_id,
+                rs.stop_id,
                 s.name,
                 s.lat,
                 s.lon
             FROM scheduled_stops ss
-            JOIN stops s ON s.id = ss.stop_id
+            JOIN trips t       ON t.id = ss.trip_id
+            JOIN route_stops rs ON rs.route_id = t.route_id
+                               AND rs.stop_sequence = ss.stop_sequence
+            JOIN stops s       ON s.id = rs.stop_id
             WHERE ss.trip_id = %s
             ORDER BY ss.stop_sequence ASC
         """, (trip_id,))

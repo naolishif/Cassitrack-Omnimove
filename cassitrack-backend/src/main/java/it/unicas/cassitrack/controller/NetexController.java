@@ -5,6 +5,7 @@ import it.unicas.cassitrack.model.*;
 import it.unicas.cassitrack.model.Route;
 import it.unicas.cassitrack.model.Stop;
 import it.unicas.cassitrack.repository.*;
+import it.unicas.cassitrack.service.RoutePatternService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -32,6 +33,7 @@ public class NetexController {
     private final BusRepository busRepository;
     private final RouteShapeRepository routeShapeRepository;
     private final DataVersionRepository dataVersionRepository;
+    private final RoutePatternService routePatternService;
 
     public NetexController(StopRepository stopRepository,
                            RouteRepository routeRepository,
@@ -39,7 +41,8 @@ public class NetexController {
                            ScheduledStopRepository scheduledStopRepository,
                            BusRepository busRepository,
                            RouteShapeRepository routeShapeRepository,
-                           DataVersionRepository dataVersionRepository) {
+                           DataVersionRepository dataVersionRepository,
+                           RoutePatternService routePatternService) {
         this.stopRepository = stopRepository;
         this.routeRepository = routeRepository;
         this.tripRepository = tripRepository;
@@ -47,6 +50,7 @@ public class NetexController {
         this.busRepository = busRepository;
         this.routeShapeRepository = routeShapeRepository;
         this.dataVersionRepository = dataVersionRepository;
+        this.routePatternService = routePatternService;
     }
 
     // ── helper: converti secondi in formato NeTEx HH:mm:ss ──────────────────
@@ -194,14 +198,27 @@ public class NetexController {
                         new ServiceJourneyExtensionsDTO("CASSITRACK:Vehicle:" + trip.getBus().getBusId()));
             }
 
-            List<ScheduledStop> stopsForThisTrip = scheduledStopRepository.findByTripId(trip.getId());
+            // Ordinata: le Call di una ServiceJourney descrivono un percorso, e
+            // pubblicarle nell'ordine in cui il database le restituisce non è
+            // una garanzia che il consumatore possa dare per buona.
+            List<ScheduledStop> stopsForThisTrip =
+                    scheduledStopRepository.findByTripIdOrderByStopSequenceAsc(trip.getId());
+            // Da V24 la fermata arriva dal pattern della linea. Il formato sul
+            // filo NON cambia: si continuano a emettere Call che portano sia la
+            // fermata sia l'orario. Emettere un vero ServiceJourneyPattern
+            // sarebbe ora possibile e più aderente allo standard, ma è un
+            // cambio di contratto verso OmniMove e va concordato, non subito.
+            String patternRouteId = trip.getRoute() != null ? trip.getRoute().getId() : null;
             if (!stopsForThisTrip.isEmpty()) {
                 int totalStops = stopsForThisTrip.size();
                 List<CallDTO> netexCalls = stopsForThisTrip.stream().map(sStop -> {
                     CallDTO callDto = new CallDTO();
                     callDto.setOrder(sStop.getStopSequence());
-                    callDto.setScheduledStopPointRef(
-                            new RefDTO("CASSITRACK:ScheduledStopPoint:" + sStop.getStopId()));
+                    String patternStopId = routePatternService.stopIdAt(
+                            patternRouteId, sStop.getStopSequence());
+                    callDto.setScheduledStopPointRef(new RefDTO(
+                            "CASSITRACK:ScheduledStopPoint:"
+                            + (patternStopId != null ? patternStopId : "UNKNOWN")));
                     String time = secondsToTime(sStop.getArrivalSeconds());
                     if (time != null) {
                         int pos = sStop.getStopSequence();

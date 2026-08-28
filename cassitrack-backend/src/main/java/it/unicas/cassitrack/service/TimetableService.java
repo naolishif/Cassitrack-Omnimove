@@ -2,10 +2,12 @@ package it.unicas.cassitrack.service;
 
 import it.unicas.cassitrack.model.Bus;
 import it.unicas.cassitrack.model.Route;
+import it.unicas.cassitrack.model.RouteStop;
 import it.unicas.cassitrack.model.ScheduledStop;
 import it.unicas.cassitrack.model.Trip;
 import it.unicas.cassitrack.repository.BusRepository;
 import it.unicas.cassitrack.repository.RouteRepository;
+import it.unicas.cassitrack.repository.RouteStopRepository;
 import it.unicas.cassitrack.repository.ScheduledStopRepository;
 import it.unicas.cassitrack.repository.StopRepository;
 import it.unicas.cassitrack.repository.TripRepository;
@@ -40,6 +42,8 @@ public class TimetableService {
     private final RouteRepository routeRepository;
     private final BusRepository busRepository;
     private final StopRepository stopRepository;
+    private final RoutePatternService routePatternService;
+    private final RouteStopRepository routeStopRepository;
 
     // ── DTOs ────────────────────────────────────────────────────────
 
@@ -143,6 +147,20 @@ public class TimetableService {
                 .toList();
     }
 
+    /**
+     * La fermata di una riga di orario, risolta dal pattern della sua linea.
+     *
+     * Da V24 scheduled_stops porta solo il tempo; il "quale fermata" sta in
+     * route_stops. Restituisce "?" invece di null perché i chiamanti la usano
+     * come chiave e in etichette: un buco visibile è meglio di un NPE.
+     */
+    private String patternStopId(ScheduledStop ss) {
+        String routeId = ss.getTrip() != null && ss.getTrip().getRoute() != null
+                ? ss.getTrip().getRoute().getId() : null;
+        String id = routePatternService.stopIdAt(routeId, ss.getStopSequence());
+        return id != null ? id : "?";
+    }
+
     @Transactional(readOnly = true)
     public TripDetail detail(String tripId) {
         Trip trip = tripRepository.findById(tripId)
@@ -151,8 +169,8 @@ public class TimetableService {
         Map<String, String> stopNames = stopNameMap();
         List<TripStop> stops = scheduledStopRepository.findByTripIdOrderByStopSequenceAsc(tripId)
                 .stream()
-                .map(ss -> new TripStop(ss.getStopId(),
-                        stopNames.getOrDefault(ss.getStopId(), ss.getStopId()),
+                .map(ss -> new TripStop(patternStopId(ss),
+                        stopNames.getOrDefault(patternStopId(ss), patternStopId(ss)),
                         ss.getStopSequence(), ss.getArrivalSeconds(),
                         hhmm(ss.getArrivalSeconds())))
                 .toList();
@@ -192,16 +210,23 @@ public class TimetableService {
         if (manual) {
             buildManualCalls(req.stops(), stopIds, times);
         } else {
+            // Da V24 gli orari si propongono dagli scarti di default della
+            // linea, non copiandoli da una corsa presa a campione. Cambia due
+            // cose: una linea appena disegnata può avere la sua prima corsa
+            // senza che ne esista già una, e la proposta non eredita più le
+            // stranezze di quell'unica corsa scelta per caso.
+            //
+            // Sono valori di partenza: una volta scritti appartengono a questa
+            // corsa e il gestore li corregge fermata per fermata, così la corsa
+            // del rientro da scuola può essere più lenta di quella serale.
             int departure = parseHhmm(req.departure());
-            List<ScheduledStop> pattern =
-                    scheduledStopRepository.findRepresentativeSequence(route.getId());
+            var pattern = routePatternService.pattern(route.getId());
             if (pattern.isEmpty())
-                throw bad("Line '" + route.getId() + "' has no existing run to copy from. "
-                        + "Use \"Build stop by stop\" to create its first run.");
-            int shift = departure - pattern.get(0).getArrivalSeconds();
-            for (ScheduledStop p : pattern) {
-                stopIds.add(p.getStopId());
-                times.add(p.getArrivalSeconds() + shift);
+                throw bad("Line '" + route.getId() + "' has no stops yet. "
+                        + "Draw its route first, or use \"Build stop by stop\".");
+            for (var ps : pattern) {
+                stopIds.add(ps.stopId());
+                times.add(departure + ps.defaultOffsetSeconds());
             }
         }
 
@@ -215,14 +240,46 @@ public class TimetableService {
 
         ensureBusIsFree(bus.getBusId(), departure, arrival, null);
 
+        // ── La corsa deve stare dentro il pattern della sua linea (V24) ──
+        //
+        // Da quando le fermate appartengono alla linea, una corsa non può più
+        // fermarsi dove vuole: sarebbe di nuovo possibile che due corse della
+        // stessa linea divergano, che è precisamente ciò che la normalizzazione
+        // ha eliminato. Restano due casi legittimi, e sono diversi:
+        //
+        //   · la linea non ha ancora un percorso — allora questa prima corsa
+        //     lo DEFINISCE, ed è il modo naturale di disegnare una linea nuova
+        //     costruendola fermata per fermata;
+        //   · la linea ce l'ha già — allora la corsa può scegliere solo gli
+        //     orari, e un elenco di fermate diverso è un errore da segnalare,
+        //     non da assecondare scrivendo dati incoerenti.
+        List<String> pattern = routePatternService.stopIds(route.getId());
+        if (pattern.isEmpty()) {
+            List<RouteStop> newPattern = new ArrayList<>();
+            for (int i = 0; i < stopIds.size(); i++) {
+                newPattern.add(RouteStop.builder()
+                        .routeId(route.getId())
+                        .stopSequence(i + 1)
+                        .stopId(stopIds.get(i))
+                        .defaultOffsetSeconds(times.get(i) - departure)
+                        .build());
+            }
+            routeStopRepository.saveAll(newPattern);
+            routePatternService.invalidate(route.getId());
+        } else if (!pattern.equals(stopIds)) {
+            throw conflict("Line " + route.getId() + " already has a route: "
+                    + pattern.size() + " stops, and this run lists " + stopIds.size()
+                    + " different ones. A run can set its own times, but not its own "
+                    + "stops — change the line's route instead.");
+        }
+
         Trip trip = Trip.builder().id(tripId).route(route).bus(bus).build();
         tripRepository.save(trip);
 
         List<ScheduledStop> calls = new ArrayList<>();
-        for (int i = 0; i < stopIds.size(); i++) {
+        for (int i = 0; i < times.size(); i++) {
             calls.add(ScheduledStop.builder()
                     .trip(trip)
-                    .stopId(stopIds.get(i))
                     .stopSequence(i + 1)          // 1-based, matches the seed data
                     .arrivalSeconds(times.get(i))
                     .build());

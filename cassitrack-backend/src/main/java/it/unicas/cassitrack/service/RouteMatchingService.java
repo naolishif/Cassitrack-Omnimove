@@ -25,11 +25,12 @@ public class RouteMatchingService {
 
     private final ScheduledStopRepository scheduledStopRepo;
     private final StopRepository stopRepository;
+    private final RoutePatternService routePatternService;
 
     /** A stop identified by both its id and its human-readable name. */
     public record NamedStop(String id, String name) {}
 
-    /** Una riga di scheduled_stops, appiattita. */
+    /** Una riga di orario con la sua fermata, risolta dal pattern della linea. */
     public record StopOnTrip(String stopId, int stopSequence, int arrivalSeconds) {}
 
     public List<ScheduledStop> tripSequence(String tripId) {
@@ -37,11 +38,21 @@ public class RouteMatchingService {
                 : scheduledStopRepo.findByTripIdOrderByStopSequenceAsc(tripId);
     }
 
-    /** La fermata in posizione {@code stopSequence}, o null oltre il capolinea. */
+    /**
+     * La fermata in posizione {@code stopSequence}, o null oltre il capolinea.
+     *
+     * Da V24 lo stopId arriva dal pattern della linea. Il pattern è in cache,
+     * quindi questo metodo — che gira a ogni messaggio GPS — non paga più una
+     * query per risolvere la fermata.
+     */
     public StopOnTrip stopAtSequence(String tripId, int stopSequence) {
         for (ScheduledStop ss : tripSequence(tripId)) {
             if (ss.getStopSequence() == stopSequence) {
-                return new StopOnTrip(ss.getStopId(), ss.getStopSequence(), ss.getArrivalSeconds());
+                String routeId = ss.getTrip() != null && ss.getTrip().getRoute() != null
+                        ? ss.getTrip().getRoute().getId() : null;
+                String stopId  = routePatternService.stopIdAt(routeId, stopSequence);
+                if (stopId == null) return null;   // pattern più corto dell'orario
+                return new StopOnTrip(stopId, ss.getStopSequence(), ss.getArrivalSeconds());
             }
         }
         return null;

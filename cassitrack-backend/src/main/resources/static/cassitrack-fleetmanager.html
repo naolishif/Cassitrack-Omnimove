@@ -513,6 +513,22 @@
                          are what the rest of the system reads as "the line's path"
                          (findRepresentativeSequence). Say so explicitly, so the bus
                          and the times don't look out of place here. -->
+                    <!-- Modifica del percorso di una linea esistente.
+                         Nascosto in creazione (dove il percorso si disegna
+                         comunque) e in modifica finché non lo si chiede: chi
+                         vuole solo rinominare una linea non deve trovarsi
+                         davanti una mappa. -->
+                    <div id="rtPathEdit" hidden>
+                        <div class="tt-manual-head">
+                            <span class="bm-lbl">Route path</span>
+                            <button type="button" class="bm-btn-ghost" id="rtEditPathBtn">🗺 Edit path &amp; stops</button>
+                        </div>
+                        <div class="rt-itn-hint" id="rtPathHint">
+                            Changing the stops of this line re-times all of its runs.
+                            You will see exactly what changes before anything is saved.
+                        </div>
+                    </div>
+
                     <div id="rtItinerary">
                         <div class="tt-manual-head">
                             <span class="bm-lbl">First run of this line — stops and times</span>
@@ -530,9 +546,14 @@
                              so the dropdown form stays the default. -->
                         <div id="rtDrawWrap" hidden>
                             <div class="rt-draw-hint">
-                                <b>Left click</b> adds a point along the road ·
-                                <b>Right click</b> marks a stop ·
-                                <b>Click a marker</b> removes it
+                                <b>Left click</b> adds a point at the end ·
+                                <b>Right click</b> adds a stop at the end ·
+                                <b>Click the line</b> inserts a point there ·
+                                <b>Drag a blue point</b> reshapes the path ·
+                                <b>Click a marker</b> removes it ·
+                                <b>Right click a marker</b> turns it into a stop, or back
+                                <br><span class="rt-hint-dim">Stops (amber) cannot be dragged: their position is the
+                                stop's own. Right click one to turn it back into a plain point.</span>
                             </div>
                             <div id="rtMap" class="rt-map"></div>
                             <div class="rt-draw-bar">
@@ -544,6 +565,11 @@
 
                         <div class="tt-stops" id="rtStops"></div>
                     </div>
+
+                    <!-- Riempito dall'anteprima: cosa cambierebbe salvando.
+                         Sta sopra i pulsanti perche' e' cio' che si sta per
+                         confermare, non un esito da leggere dopo. -->
+                    <div id="rtPreview" class="rt-preview" hidden></div>
 
                     <div class="bm-form-actions">
                         <span class="bm-msg" id="rtFormMsg"></span>

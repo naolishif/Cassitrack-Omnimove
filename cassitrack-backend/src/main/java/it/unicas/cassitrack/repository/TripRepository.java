@@ -19,4 +19,7 @@ public interface TripRepository extends JpaRepository<Trip, String> {
     // CASCADE — deleting a route would silently wipe its trips (and their
     // scheduled_stops), so the controller counts and refuses instead.
     long countByRouteId(String routeId);
+
+    /** Tutte le corse di una linea, per la cascata sul cambio di percorso (V24). */
+    java.util.List<Trip> findAllByRouteId(String routeId);
 }

@@ -175,11 +175,15 @@ def fetch_routes(conn, only=None):
         if only and r["id"] not in only:
             continue
         cur.execute("""
-            SELECT ss.stop_id, ss.stop_sequence, s.name, s.lat, s.lon
-            FROM scheduled_stops ss
-            JOIN stops s ON s.id = ss.stop_id
-            WHERE ss.trip_id = (SELECT MIN(t.id) FROM trips t WHERE t.route_id = %s)
-            ORDER BY ss.stop_sequence
+            -- V24: le fermate di una linea non si deducono piu' da una corsa
+            -- presa a campione, stanno in route_stops. Ne segue che una linea
+            -- senza corse programmate ha comunque un percorso da cui generare
+            -- la geometria — prima veniva saltata.
+            SELECT rs.stop_id, rs.stop_sequence, s.name, s.lat, s.lon
+            FROM route_stops rs
+            JOIN stops s ON s.id = rs.stop_id
+            WHERE rs.route_id = %s
+            ORDER BY rs.stop_sequence
         """, (r["id"],))
         stops = cur.fetchall()
         if len(stops) >= 2:

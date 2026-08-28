@@ -193,11 +193,17 @@ def load_network(conn):
                 continue                      # no geometry imported for this route
 
             cur.execute("""
-                SELECT stop_id, stop_sequence, arrival_seconds
-                FROM scheduled_stops
-                WHERE trip_id = %s
-                ORDER BY stop_sequence
-            """, (t["trip_id"],))
+                -- V24: la fermata arriva dal pattern della linea, il tempo
+                -- dalla corsa. Il route_id serve alla join ed e' gia' in
+                -- trip_rows, ma si passa esplicitamente per non dipendere
+                -- dall'ordine delle colonne del cursore.
+                SELECT rs.stop_id, ss.stop_sequence, ss.arrival_seconds
+                FROM scheduled_stops ss
+                JOIN route_stops rs ON rs.route_id = %s
+                                   AND rs.stop_sequence = ss.stop_sequence
+                WHERE ss.trip_id = %s
+                ORDER BY ss.stop_sequence
+            """, (t["route_id"], t["trip_id"]))
             sched = cur.fetchall()
             if len(sched) < 2:
                 continue

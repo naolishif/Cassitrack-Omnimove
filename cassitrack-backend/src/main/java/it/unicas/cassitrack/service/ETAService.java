@@ -42,6 +42,7 @@ public class ETAService {
     private final VehicleStateCache       vehicleStateCache;
     private final ScheduledStopRepository scheduledStopRepository;
     private final RouteRepository         routeRepository;
+    private final RoutePatternService     routePatternService;
 
     private static final ZoneId ITALY_TZ =
             ZoneId.of("Europe/Rome");
@@ -127,14 +128,23 @@ public class ETAService {
         // sempre a "UNKNOWN_ROUTE". Ci appoggiamo quindi a tripId/routeId, che il
         // simulatore pubblica leggendoli dal DB e sono affidabili.
         List<ScheduledStop> seq;
+        String routeId;
         if (bus.getTripId() != null) {
             seq = scheduledStopRepository.findByTripIdOrderByStopSequenceAsc(bus.getTripId());
+            // Da V24 la fermata di una riga di orario arriva dal pattern della
+            // linea, quindi serve sapere di quale linea si tratta. La corsa la
+            // conosce; se il caricamento pigro non l'ha portata, ci si appoggia
+            // a quella pubblicata dal bus.
+            routeId = (!seq.isEmpty() && seq.get(0).getTrip() != null
+                                      && seq.get(0).getTrip().getRoute() != null)
+                    ? seq.get(0).getTrip().getRoute().getId()
+                    : bus.getRouteId();
         } else {
-            String routeId = bus.getRouteId() != null ? bus.getRouteId() : bus.getMatchedRouteId();
+            routeId = bus.getRouteId() != null ? bus.getRouteId() : bus.getMatchedRouteId();
             if (routeId == null) return null;
             seq = scheduledStopRepository.findRepresentativeSequence(routeId);
         }
-        if (seq.isEmpty()) return null;
+        if (seq.isEmpty() || routeId == null) return null;
 
         // L'ancora è la posizione nella sequenza, non l'ID della fermata.
         // ScheduleAdherenceService la mantiene: è la stessa che produce il ritardo.
@@ -147,10 +157,13 @@ public class ETAService {
         }
         if (anchorIdx < 0) return null;
 
-        if (targetStopId.equals(seq.get(anchorIdx).getStopId())) return 0L;
+        if (targetStopId.equals(
+                routePatternService.stopIdAt(routeId, seq.get(anchorIdx).getStopSequence()))) {
+            return 0L;
+        }
 
         // Find the next occurrence of targetStopId after the anchor.
-        int targetIdx = indexOfStop(seq, targetStopId, anchorIdx + 1);
+        int targetIdx = indexOfStop(seq, routeId, targetStopId, anchorIdx + 1);
         if (targetIdx < 0) return null;
 
         long eta = (long) seq.get(targetIdx).getArrivalSeconds()
@@ -160,10 +173,12 @@ public class ETAService {
 
 
 
-    private int indexOfStop(List<ScheduledStop> seq, String stopId, int from) {
+    private int indexOfStop(List<ScheduledStop> seq, String routeId, String stopId, int from) {
         if (stopId == null) return -1;
         for (int i = Math.max(0, from); i < seq.size(); i++) {
-            if (seq.get(i).getStopId().equals(stopId)) return i;
+            if (stopId.equals(routePatternService.stopIdAt(routeId, seq.get(i).getStopSequence()))) {
+                return i;
+            }
         }
         return -1;
     }
