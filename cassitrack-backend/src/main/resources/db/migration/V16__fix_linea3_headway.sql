@@ -116,5 +116,5 @@ BEGIN
     PERFORM pg_temp.gen_line('LINEA_3', bus3, bus3,
         ARRAY['PSB','ING','OSR','SFF','VGA','IMA','EDN','XXS','OSS','XXS','GIA','PSB'],
         ARRAY[0,120,60,120,60,60,120,120,300,300,60,120],
-        ARRAY(SELECT generate_series(28800, 68400, 2400)));   -- 08:00, every 40 min continuing until 19:00 (last departure at 18:40)
+        ARRAY(SELECT generate_series(28800, 68400, 2400)));   -- 08:00, every 40 min
 END $$;
