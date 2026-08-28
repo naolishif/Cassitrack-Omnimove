@@ -16,6 +16,26 @@ public class ChatRequest {
      */
     private List<ChatTurn> history;
 
+    /**
+     * What the traveller has on screen when they ask.
+     *
+     * "When is the next bus?" has no answer without a stop, and "how do I get
+     * to the campus?" none without a starting point. The page knows both; the
+     * assistant did not, so it either guessed or answered in general terms.
+     * Optional: absent means the questions have to be asked back.
+     */
+    private ChatContext context;
+
+    @Data
+    public static class ChatContext {
+        /** Origin and destination currently in the search fields, if any. */
+        private String originName;
+        private String destName;
+        /** The stop whose arrivals panel is open, if any. */
+        private String stopId;
+        private String stopName;
+    }
+
     @Data
     public static class ChatTurn {
         private String role;     // "user" or "assistant"

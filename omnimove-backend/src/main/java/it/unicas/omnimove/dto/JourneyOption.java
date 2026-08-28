@@ -40,6 +40,16 @@ public class JourneyOption {
     @JsonProperty("reliability_score") private Double reliabilityScore;
 
     /**
+     * When this option starts, as epoch milliseconds.
+     *
+     * The card used to draw its departure from the time picked in the search
+     * bar, which assumes every option leaves at the same moment. That holds for
+     * "depart at", and breaks for "arrive by": there the deadline is fixed and
+     * each option leaves at its own time, a quicker one later than a slower one.
+     */
+    @JsonProperty("departs_at") private Long departsAt;
+
+    /**
      * Where the traveller boards and which line they board, so a journey that
      * has been started can be watched for delays. Null on options with no bus
      * leg — there is no timetable to slip.

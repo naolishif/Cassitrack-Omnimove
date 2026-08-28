@@ -2585,9 +2585,10 @@ body {
     padding: 22px 0 8px;
     border-top: 1px solid var(--border-mid);
 }
-/* Height-capped, width free: the two marks have very different aspect ratios,
-   and constraining the width would shrink the taller one to nothing. */
-.about-logos img { height: 58px; width: auto; max-width: 100%; object-fit: contain; }
+/* Height-capped so the tall marks keep their presence, with a width ceiling for
+   the very wide ones (Seeweb is 5:1) that would otherwise run away with the row.
+   object-fit: contain letterboxes whichever bound bites first. */
+.about-logos img { height: 58px; width: auto; max-width: min(160px, 100%); object-fit: contain; }
 
 /* ── PASSWORD (account tab) ── */
 .pwd-form { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }

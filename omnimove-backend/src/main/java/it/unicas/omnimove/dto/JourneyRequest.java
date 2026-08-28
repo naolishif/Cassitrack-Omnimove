@@ -43,6 +43,18 @@ public class JourneyRequest {
      */
     @JsonProperty("sort_preset") private String sortPreset;
 
+    /**
+     * An exact moment to plan from, overriding departure_time.
+     *
+     * Set only by the planner itself while working backwards from an arrival
+     * deadline: "HH:mm" cannot express the departure it needs, because
+     * resolveDepartureBase rolls a time that has already passed to tomorrow and
+     * a deadline an hour away is planned from a departure in the recent past.
+     * Never accepted from a client — @JsonIgnore keeps it off the API.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private java.time.Instant baseOverride;
+
     public boolean isItalian() { return "it".equalsIgnoreCase(lang); }
     public boolean isDestGps() { return Boolean.TRUE.equals(destIsGps); }
     public boolean isArriveBy() { return Boolean.TRUE.equals(arriveBy); }

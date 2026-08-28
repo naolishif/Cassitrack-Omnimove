@@ -87,7 +87,120 @@ public class JourneyPlannerService {
     @Value("${elerent.scooter.deposit:5.00}")
     private double scooterDeposit;
 
+    /** How far before the deadline the first pass starts looking. */
+    private static final int ARRIVE_BY_WINDOW_MIN = 120;
+
+    /**
+     * Plans a journey. With "arrive by", plans it backwards from the deadline.
+     *
+     * WHAT THIS USED TO DO
+     * "Arrive by" moved the departure back by a flat 45 minutes and printed
+     * "planned to arrive by HH:mm". Nothing checked the claim: a twenty-minute
+     * trip arrived twenty-five minutes early, and an hour-long one arrived
+     * fifteen minutes LATE under a message promising the opposite.
+     *
+     * HOW IT WORKS NOW
+     * Two passes. The first starts a window before the deadline and exists only
+     * to learn how long each option takes. The second is planned from
+     * deadline − (longest of those), so the slowest option lands on the
+     * deadline rather than an arbitrary distance from it. Options that still
+     * arrive late are dropped: an option that misses the deadline is not an
+     * answer to "get me there by then".
+     *
+     * WHY TWO PASSES AND NOT MORE
+     * Only the bus depends on when you leave, and only through which run you
+     * catch. A third pass would shift the base by minutes and could equally
+     * well catch an earlier bus, so it converges on nothing. Each option
+     * carries its own departure in the answer, so a quick option leaves late
+     * and a slow one leaves early — which is what an arrival deadline means.
+     */
     public JourneyResponse plan(JourneyRequest req) {
+        if (!req.isArriveBy() || req.getDepartureTime() == null || req.getDepartureTime().isBlank())
+            return planOnce(req);
+
+        java.time.Instant deadline = resolveDepartureBase(req.getDepartureTime(), null, req.isItalian());
+
+        JourneyRequest probe = copyRequest(req);
+        probe.setArriveBy(false);
+        probe.setBaseOverride(deadline.minus(ARRIVE_BY_WINDOW_MIN, java.time.temporal.ChronoUnit.MINUTES));
+        JourneyResponse first = planOnce(probe);
+
+        int longest = first.getOptions().stream()
+                .map(JourneyOption::getDurationMinutes)
+                .filter(java.util.Objects::nonNull)
+                .max(Integer::compareTo).orElse(0);
+
+        if (longest == 0) return first;   // nothing to plan backwards from
+
+        JourneyRequest run = copyRequest(req);
+        run.setArriveBy(false);
+        run.setBaseOverride(deadline.minus(longest, java.time.temporal.ChronoUnit.MINUTES));
+        JourneyResponse second = planOnce(run);
+
+        return applyDeadline(second, deadline, run.getBaseOverride(), req);
+    }
+
+    /**
+     * Stamps each option with its own departure and removes the ones that miss
+     * the deadline.
+     *
+     * An option whose duration does not depend on when it starts — walking,
+     * a bike, a scooter — is moved to leave exactly late enough to arrive on
+     * time. A bus cannot be moved that way: its departure is the timetable's,
+     * so it keeps the one it was planned with and is judged on whether that
+     * gets the traveller there.
+     */
+    private JourneyResponse applyDeadline(JourneyResponse res, java.time.Instant deadline,
+                                          java.time.Instant base, JourneyRequest req) {
+        List<JourneyOption> kept = new ArrayList<>();
+        boolean droppedAny = false;
+
+        for (JourneyOption o : res.getOptions()) {
+            Integer dur = o.getDurationMinutes();
+            if (dur == null) { kept.add(o); continue; }
+
+            if (hasBusLeg(o.getMode())) {
+                java.time.Instant arrival = base.plus(dur, java.time.temporal.ChronoUnit.MINUTES);
+                if (arrival.isAfter(deadline)) { droppedAny = true; continue; }
+                o.setDepartsAt(base.toEpochMilli());
+            } else {
+                // Leave as late as the deadline allows
+                o.setDepartsAt(deadline.minus(dur, java.time.temporal.ChronoUnit.MINUTES).toEpochMilli());
+            }
+            kept.add(o);
+        }
+
+        List<String> msgs = new ArrayList<>(res.getMessages() == null ? List.of() : res.getMessages());
+        String hhmm = req.getDepartureTime();
+
+        if (kept.isEmpty()) {
+            msgs.add(req.isItalian()
+                    ? "⏰ Nessuna soluzione arriva entro le " + hhmm + ". Prova un orario più tardi."
+                    : "⏰ Nothing gets you there by " + hhmm + ". Try a later time.");
+        } else {
+            msgs.add(req.isItalian()
+                    ? "⏰ Soluzioni che arrivano entro le " + hhmm + ", con l'orario di partenza di ciascuna."
+                    : "⏰ Options that arrive by " + hhmm + ", each with its own departure time.");
+            if (droppedAny)
+                msgs.add(req.isItalian()
+                        ? "Alcune soluzioni sono state escluse perché arrivavano dopo l'orario richiesto."
+                        : "Some options were left out because they arrived after the time you asked for.");
+        }
+
+        return JourneyResponse.builder()
+                .options(kept)
+                .messages(msgs)
+                .origin(res.getOrigin())
+                .destination(res.getDestination())
+                .totalOptions(kept.size())
+                .realtimeAvailable(res.isRealtimeAvailable())
+                .weatherSummary(res.getWeatherSummary())
+                .weatherCondition(res.getWeatherCondition())
+                .temperatureCelsius(res.getTemperatureCelsius())
+                .build();
+    }
+
+    private JourneyResponse planOnce(JourneyRequest req) {
         log.info("Planning: {} → {}", req.getOriginName(), req.getDestName());
 
         WeatherService.WeatherData weather = weatherService.getCurrentWeather();
@@ -317,16 +430,11 @@ public class JourneyPlannerService {
                 : findNearestStopId(req.getDestLat(), req.getDestLon());
 
         // Punto 3: base oraria del viaggio e stato del flag google.search.
-        boolean isNow = (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
-        java.time.Instant departureBase = resolveDepartureBase(req.getDepartureTime(), msgs, req.isItalian());
-
-        // "Arrive by" mode: shift search window back by 45 min so found routes arrive near target time
-        if (req.isArriveBy() && !isNow) {
-            departureBase = departureBase.minus(45, java.time.temporal.ChronoUnit.MINUTES);
-            msgs.add(req.isItalian()
-                ? "ℹ️ Percorso pianificato per arrivare entro le " + req.getDepartureTime() + "."
-                : "ℹ️ Route planned to arrive by " + req.getDepartureTime() + ".");
-        }
+        boolean isNow = req.getBaseOverride() == null
+                && (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
+        java.time.Instant departureBase = req.getBaseOverride() != null
+                ? req.getBaseOverride()
+                : resolveDepartureBase(req.getDepartureTime(), msgs, req.isItalian());
 
         boolean useGoogle = googleApiSettings.isSearchEnabled();
 
@@ -1209,6 +1317,7 @@ public class JourneyPlannerService {
         c.setUserId(r.getUserId());         c.setLang(r.getLang());
         c.setDepartureTime(r.getDepartureTime());
         c.setArriveBy(r.getArriveBy());
+        c.setBaseOverride(r.getBaseOverride());
         c.setModes(r.getModes());
         return c;
     }

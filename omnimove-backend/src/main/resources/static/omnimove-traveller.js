@@ -514,6 +514,21 @@ let _pickerMin  = null;
 let _pickerMode = 'depart'; // 'depart' | 'arrive'
 
 /** Returns a Date for the user's chosen departure time (or now if nothing chosen). */
+/**
+ * When one option actually starts.
+ *
+ * The picked time is the whole answer for "depart at", where every option
+ * leaves together. It is the wrong answer for "arrive by": there the fixed
+ * point is the arrival, and the server sends each option its own departure —
+ * a quick option leaving later than a slow one. Falls back to the picked time
+ * for anything the server did not stamp.
+ */
+function _optionStart(opt) {
+    return (opt && typeof opt.departs_at === 'number')
+        ? new Date(opt.departs_at)
+        : _getPickerTripStart();
+}
+
 function _getPickerTripStart() {
     if (_pickerHour === null) return new Date();
     const d = new Date();
@@ -2036,7 +2051,7 @@ function renderRoutes(data) {
         const bikeWarn = opt.bike_warning
             ? `<span class="status-badge s-delay">${escHtml(opt.bike_warning)}</span>` : '';
         // Departure / arrival time labels for the card
-        const _depDate = _getPickerTripStart();
+        const _depDate = _optionStart(opt);
         const _arrDate = new Date(_depDate.getTime() + (opt.duration_minutes || 0) * 60000);
         const _depTime = _fmtHHMM(_depDate);
         const _arrTime = _fmtHHMM(_arrDate);
@@ -2277,7 +2292,7 @@ function _openRouteDetail(key, label, greenIndex, distanceMetres, costEuros) {
     const modeEmoji   = MODE_ICONS[mode] || '🚗';
     const co2g        = opt.co2_grams ?? selectedJourney.co2Grams ?? 0;
 
-    const depDate = _getPickerTripStart();
+    const depDate = _optionStart(opt);
     const arrDate = new Date(depDate.getTime() + durationMin * 60000);
 
     const isBusMode  = mode === 'BUS' && selectedJourney.legs?.length > 0;
@@ -2399,8 +2414,9 @@ function buildTimeline(legs, totalMin, greenIdx, opt) {
     let html = '';
     let busIndex = 0;
 
-    // Running clock — starts at the user's chosen departure time (or now)
-    const _tripStart = _getPickerTripStart();
+    // Running clock — starts when this option starts, which under "arrive by"
+    // is its own departure and not the time in the picker
+    const _tripStart = _optionStart(window._routeOptions?.[selectedJourney.key || selectedJourney.mode]);
     let   _runMs     = 0;
     function _tick(min) { _runMs += (min || 0) * 60000; }
     function _fmtTime(offsetMs) {
@@ -2603,8 +2619,8 @@ function buildSingleLegTimeline(mode, legs, distKm, co2g) {
     const durMin = leg?.duration_minutes;
     const durStr = durMin ? `${durMin} min` : '';
 
-    // Departure / arrival timestamps from picker
-    const depDate = _getPickerTripStart();
+    // Departure / arrival timestamps for the option this row belongs to
+    const depDate = _optionStart(window._routeOptions?.[selectedJourney.key || selectedJourney.mode]);
     const arrDate = new Date(depDate.getTime() + (durMin || 0) * 60000);
     const depTime = _fmtHHMM(depDate);
     const arrTime = _fmtHHMM(arrDate);
@@ -3411,12 +3427,18 @@ async function sendAI(presetText) {
             body: JSON.stringify({
                 message: text,
                 language: getLang(),
-                history: aiHistory.slice(-AI_HISTORY_LIMIT)
+                history: aiHistory.slice(-AI_HISTORY_LIMIT),
+                // "The next bus" has no answer without a stop, and "the campus"
+                // none without a starting point. The page knows both.
+                context: aiScreenContext()
             })
         });
         const data = await r.json();
         const answer = data.answer || t('ai_no_answer');
-        waitMsg.textContent = answer;
+        // The model is asked for plain text; this is what happens when it
+        // forgets. Escaped first, then a fixed handful of marks are turned into
+        // real formatting — never raw HTML from the model.
+        waitMsg.innerHTML = renderAiText(answer);
 
         // Save exchange to memory
         aiHistory.push({ role: 'user',      content: text });
@@ -3432,6 +3454,47 @@ async function sendAI(presetText) {
         aiThinking = false;
         msgs.scrollTop = msgs.scrollHeight;
     }
+}
+
+/**
+ * Turns a model reply into safe HTML.
+ *
+ * Everything is escaped first, so nothing the model writes can become markup.
+ * Only then is a small, fixed set of Markdown marks converted: bold, bullets,
+ * headings and line breaks. Anything else — tables, links, code fences — has
+ * its marks stripped rather than rendered, because a half-supported syntax
+ * looks worse than none.
+ */
+function renderAiText(text) {
+    let out = escHtml(String(text || ''));
+
+    // Headings become bold lines: a chat bubble has no document structure
+    out = out.replace(/^\s{0,3}#{1,6}\s*(.+)$/gm, '<strong>$1</strong>');
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, '$1<em>$2</em>');
+    // Bullets: a real marker instead of the asterisk or dash
+    out = out.replace(/^\s*[-*+]\s+/gm, '• ');
+    // Horizontal rules carry nothing in a bubble
+    out = out.replace(/^\s*[-*_]{3,}\s*$/gm, '');
+    // Leftover marks the rules above did not claim
+    out = out.replace(/[*_\x60]{1,2}/g, '');
+
+    return out.replace(/\n{3,}/g, '\n\n').trim().replace(/\n/g, '<br>');
+}
+
+/** What the traveller is looking at, sent with every question. */
+function aiScreenContext() {
+    const originEl = document.getElementById('originSelect');
+    const destEl   = document.getElementById('destSelect');
+    return {
+        originName: originEl?.dataset.id ? originEl.value : null,
+        destName:   destEl?.dataset.id   ? destEl.value   : null,
+        // The sheet already tracks which stop is open; the title is its name
+        stopId:     _sheetCurrentStopId || null,
+        stopName:   _sheetCurrentStopId
+                        ? (document.getElementById('stopSheetTitle')?.textContent || null)
+                        : null
+    };
 }
 
 function renderSuggestions(suggestions) {

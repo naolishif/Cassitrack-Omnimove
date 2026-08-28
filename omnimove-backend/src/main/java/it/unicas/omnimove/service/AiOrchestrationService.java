@@ -1,6 +1,7 @@
 package it.unicas.omnimove.service;
 
 import it.unicas.omnimove.client.CassitrackClient;
+import it.unicas.omnimove.dto.BikeVehicleDTO;
 import it.unicas.omnimove.dto.ChatRequest;
 import it.unicas.omnimove.dto.ChatResponse;
 import it.unicas.omnimove.dto.StopArrivalDTO;
@@ -43,6 +44,14 @@ public class AiOrchestrationService {
     private final JourneyLogRepository journeyLogRepository;
     private final WeatherService weatherService;
     private final GreenIndexService greenIndexService;
+    private final BikeSharingService bikeSharingService;
+
+    // The shared-mobility tariffs, quoted verbatim rather than guessed
+    @Value("${elerent.bike.unlock:1.00}")      private double bikeUnlock;
+    @Value("${elerent.bike.per-minute:0.29}")  private double bikePerMin;
+    @Value("${elerent.scooter.unlock:1.00}")   private double scooterUnlock;
+    @Value("${elerent.scooter.per-minute:0.25}") private double scooterPerMin;
+    @Value("${elerent.scooter.deposit:5.00}")  private double scooterDeposit;
 
     @Value("${ai.api.key:}")
     private String apiKey;
@@ -55,12 +64,14 @@ public class AiOrchestrationService {
                                   StopRepository stopRepository,
                                   JourneyLogRepository journeyLogRepository,
                                   WeatherService weatherService,
-                                  GreenIndexService greenIndexService) {
+                                  GreenIndexService greenIndexService,
+                                  BikeSharingService bikeSharingService) {
         this.cassitrackClient = cassitrackClient;
         this.stopRepository = stopRepository;
         this.journeyLogRepository = journeyLogRepository;
         this.weatherService = weatherService;
         this.greenIndexService = greenIndexService;
+        this.bikeSharingService = bikeSharingService;
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -92,7 +103,7 @@ public class AiOrchestrationService {
         String lang = detectLanguage(question, req.getLanguage());
 
         try {
-            String context = buildContext(userId);
+            String context = buildContext(userId) + onScreenContext(req.getContext());
             String system = buildSystem(lang, context);
             String answer = callModel(system, req.getHistory(), question);
 
@@ -100,7 +111,7 @@ public class AiOrchestrationService {
                     .answer(answer)
                     .success(true)
                     .detectedLanguage(lang)
-                    .suggestions(buildSuggestions(lang))
+                    .suggestions(buildSuggestions(lang, req.getContext()))
                     .build();
 
         } catch (Exception e) {
@@ -110,7 +121,7 @@ public class AiOrchestrationService {
                     .answer(getFallbackResponse(question, lang))
                     .success(true)              // still "success" so UI renders it nicely
                     .detectedLanguage(lang)
-                    .suggestions(buildSuggestions(lang))
+                    .suggestions(buildSuggestions(lang, req.getContext()))
                     .build();
         }
     }
@@ -209,15 +220,61 @@ public class AiOrchestrationService {
                         long etaMin = Math.max(0,
                                 (a.getEstimatedArrival().getEpochSecond()
                                         - System.currentTimeMillis() / 1000) / 60);
-                        sb.append("    - Bus ").append(a.getVehicleId())
-                                .append(": arrives in ").append(etaMin > 0 ? etaMin + " min" : "<1 min")
-                                .append(" (").append(a.getScheduleStatus()).append(")\n");
+                        // The LINE is what a passenger waits for. This used to
+                        // print the vehicle id — BUS29 is a coach in the depot,
+                        // not something anyone can catch — and the assistant
+                        // repeated it back as though it were a route number.
+                        String line = a.getRouteShortName() != null ? a.getRouteShortName()
+                                    : (a.getRouteName() != null ? a.getRouteName() : "?");
+                        sb.append("    - Line ").append(line);
+                        if (a.getRouteName() != null && !a.getRouteName().equals(line))
+                            sb.append(" (").append(a.getRouteName()).append(")");
+                        sb.append(": arrives in ").append(etaMin > 0 ? etaMin + " min" : "<1 min")
+                                .append(", ").append(a.getScheduleStatus());
+                        if (a.getCrowdingLevel() != null)
+                            sb.append(", crowding ").append(a.getCrowdingLevel());
+                        sb.append(" [vehicle ").append(a.getVehicleId()).append("]\n");
                     });
                 }
             } catch (Exception e) {
                 sb.append("    ETA unavailable.\n");
             }
         }
+
+        // ── Shared mobility: who actually operates here ─────────────────
+        // Without this the assistant had nothing to answer "where do I rent a
+        // bike" with, and filled the gap from its training data — recommending
+        // BikeMi, Lime, Bird and TIER, none of which exist in Cassino. A model
+        // asked a question it has no data for will invent an answer; the fix is
+        // to give it the data, and to say plainly that this is the only operator.
+        sb.append("\n=== SHARED BIKES AND E-SCOOTERS ===\n");
+        sb.append("  Operator: Elerent. It is the ONLY bike and e-scooter sharing service in Cassino.\n");
+        // The division of labour, stated exactly. OMNIMOVE reads the Elerent
+        // fleet and never writes to it: no unlock, no payment. Saying otherwise
+        // sends the traveller looking for a button this app does not have.
+        sb.append("  WHAT OMNIMOVE DOES: plans the journey and shows which Elerent vehicle is free\n")
+          .append("    and where it is parked, how far it is on foot and its battery level.\n");
+        sb.append("  WHAT OMNIMOVE DOES NOT DO: it cannot book, unlock or pay for a vehicle.\n")
+          .append("    The rental itself is done with Elerent, through their own service.\n");
+        sb.append(String.format(java.util.Locale.ROOT,
+                "  Bike: %.2f EUR to unlock, then %.2f EUR per minute.%n", bikeUnlock, bikePerMin));
+        sb.append(String.format(java.util.Locale.ROOT,
+                "  E-scooter: %.2f EUR to unlock, then %.2f EUR per minute, plus a %.2f EUR hold%n"
+              + "    that is returned at the end of the ride.%n",
+                scooterUnlock, scooterPerMin, scooterDeposit));
+        try {
+            List<BikeVehicleDTO> fleet = bikeSharingService.getAvailableBikes();
+            long bikes    = fleet.stream().filter(v -> !"SCOOTER".equalsIgnoreCase(v.getVehicleType())).count();
+            long scooters = fleet.size() - bikes;
+            sb.append("  Available right now: ").append(bikes).append(" bikes, ")
+              .append(scooters).append(" e-scooters.\n");
+            if (fleet.isEmpty())
+                sb.append("  None free at the moment — say so rather than suggesting another service.\n");
+        } catch (Exception e) {
+            sb.append("  Live availability unavailable right now.\n");
+        }
+        sb.append("  Rides must end inside the Elerent operating area; outside it the app\n")
+          .append("    routes the last stretch on foot.\n");
 
         // ── 3. Weather (proactive mode advice) ──────────────────────────
         try {
@@ -300,13 +357,38 @@ public class AiOrchestrationService {
                 between Cassino city centre and the UNICAS Engineering Campus (Folcara).
 
                 You have live real-time data from the CASSITRACK fleet system below.
-                Guidelines:
-                - Be concise, friendly and practical. Two or three sentences is usually enough.
-                - When you have live ETA or crowding data, quote it specifically.
-                - If the weather is bad, proactively warn about bike/scooter/walk modes.
-                - If you know the traveller's recent journeys, personalise your suggestions
-                  (e.g. reference their preferred mode), but never invent data you weren't given.
-                - If asked about something outside Cassino transport, politely steer back.
+
+                HOW TO WRITE
+                - PLAIN TEXT ONLY. No Markdown: no asterisks for bold, no ###
+                  headings, no bullet lists, no tables. The chat panel prints
+                  your reply exactly as you write it, so any markup shows up as
+                  the characters themselves.
+                - Two or three sentences. This is a chat bubble on a phone, not
+                  a document. If you must list two or three options, write them
+                  as short separate sentences.
+                - No emoji decoration beyond at most one.
+
+                WHAT TO SAY
+                - Name the LINE, never the vehicle. Lines are numbers such as 05
+                  or 11; the "vehicle" in the data below is a coach in the depot
+                  and means nothing to a passenger.
+                - Quote live times and crowding exactly as given.
+                - Never invent a line, a stop, a time or a distance. If the data
+                  below does not contain the answer, say what you do not know
+                  and ask which stop or which destination they mean.
+                - Shared bikes and e-scooters in Cassino are Elerent, and only
+                  Elerent. Never name another operator — no BikeMi, Lime, Bird,
+                  TIER or anything else.
+                - Be exact about what this app does. OMNIMOVE PLANS the journey and
+                  SHOWS which Elerent vehicle is free and where; it does NOT book,
+                  unlock or pay for it. The rental is done with Elerent. Do not
+                  promise a booking button that does not exist here, and do not
+                  claim the traveller must go elsewhere to plan the trip.
+                - The traveller's question may be missing its context: "the next
+                  bus" from which stop, "the campus" from where. Ask rather than
+                  assume, unless the context section below already says.
+                - If the weather is bad, warn about bike, scooter and walking.
+                - If asked about something outside Cassino transport, steer back.
                 """ + " " + lang + "\n\nLive data:\n" + context;
     }
 
@@ -423,18 +505,69 @@ public class AiOrchestrationService {
     //  FOLLOW-UP SUGGESTIONS
     // ════════════════════════════════════════════════════════════════════
 
-    private List<String> buildSuggestions(String lang) {
-        if ("it".equals(lang)) {
-            return List.of(
-                    "Quando arriva il prossimo autobus?",
-                    "L'autobus è affollato?",
-                    "Come arrivo al Campus?"
-            );
+    /**
+     * Tells the model what the traveller is looking at, so a question that omits
+     * its subject still has one.
+     */
+    private String onScreenContext(ChatRequest.ChatContext ctx) {
+        if (ctx == null) return "";
+        StringBuilder sb = new StringBuilder();
+        if (ctx.getStopName() != null && !ctx.getStopName().isBlank())
+            sb.append("  The traveller is looking at the stop: ")
+              .append(ctx.getStopName()).append("\n");
+        if (ctx.getOriginName() != null && !ctx.getOriginName().isBlank())
+            sb.append("  Origin currently chosen: ").append(ctx.getOriginName()).append("\n");
+        if (ctx.getDestName() != null && !ctx.getDestName().isBlank())
+            sb.append("  Destination currently chosen: ").append(ctx.getDestName()).append("\n");
+        if (sb.length() == 0) return "";
+        return "\n=== WHAT THE TRAVELLER HAS ON SCREEN ===\n" + sb;
+    }
+
+    /**
+     * Follow-up chips, written around what is actually on screen.
+     *
+     * They used to be three fixed sentences — "when is the next bus?", "is the
+     * bus crowded?", "how do I get to the Campus?" — none of which names a
+     * stop, a line or a starting point. Tapping one asked a question that could
+     * not be answered, and the assistant either guessed or asked back. A
+     * suggestion should be a question worth asking.
+     */
+    private List<String> buildSuggestions(String lang, ChatRequest.ChatContext ctx) {
+        boolean it = "it".equals(lang);
+        List<String> out = new ArrayList<>();
+
+        String stop   = ctx == null ? null : blankToNull(ctx.getStopName());
+        String origin = ctx == null ? null : blankToNull(ctx.getOriginName());
+        String dest   = ctx == null ? null : blankToNull(ctx.getDestName());
+
+        if (stop != null) {
+            out.add(it ? "Quali linee passano da " + stop + "?"
+                       : "Which lines stop at " + stop + "?");
+            out.add(it ? "Quando arriva il prossimo bus a " + stop + "?"
+                       : "When is the next bus at " + stop + "?");
         }
-        return List.of(
-                "When is the next bus?",
-                "Is the bus crowded?",
-                "How do I get to the Campus?"
-        );
+        if (origin != null && dest != null) {
+            out.add(it ? "Come arrivo da " + origin + " a " + dest + "?"
+                       : "How do I get from " + origin + " to " + dest + "?");
+            out.add(it ? "Qual è il modo più economico per " + dest + "?"
+                       : "What is the cheapest way to " + dest + "?");
+        } else if (dest != null) {
+            out.add(it ? "Come arrivo a " + dest + "?" : "How do I get to " + dest + "?");
+        }
+
+        // Nothing on screen to hang a question on: ask about the network itself,
+        // which is answerable without knowing where the traveller stands
+        if (out.isEmpty()) {
+            out.add(it ? "Quali linee ci sono a Cassino?"  : "Which lines run in Cassino?");
+            out.add(it ? "Come arrivo al Campus Folcara dal centro?"
+                       : "How do I get to the Folcara campus from the centre?");
+            out.add(it ? "Conviene la bici o il bus con questo tempo?"
+                       : "Bike or bus in this weather?");
+        }
+        return out.size() > 3 ? out.subList(0, 3) : out;
+    }
+
+    private static String blankToNull(String v) {
+        return (v == null || v.isBlank()) ? null : v;
     }
 }
