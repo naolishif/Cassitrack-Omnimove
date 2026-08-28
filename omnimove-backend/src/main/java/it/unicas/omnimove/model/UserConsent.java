@@ -25,6 +25,19 @@ public class UserConsent {
     /** Optional: non-technical third-party assets (only relevant if a CDN is ever reintroduced). */
     public static final String TYPE_THIRD_PARTY        = "THIRD_PARTY_CONTENT";
 
+    /**
+     * Reuse of mobility data for the University's scientific research.
+     *
+     * <p><b>This is an objection register, not a consent register.</b> The lawful
+     * basis is art. 6(1)(e) — public interest — not consent, so the absence of any
+     * row means the subject IS included. Only a row with {@code granted = false}
+     * excludes them, exercising the right to object under art. 21(6).
+     *
+     * <p>Consequence: unlike a real consent, this must NOT expire when the privacy
+     * notice is reworded. See {@code V23__research_tiers.sql} and DPIA §3.2.
+     */
+    public static final String TYPE_RESEARCH_USE       = "RESEARCH_USE";
+
     public static final String SOURCE_REGISTRATION = "REGISTRATION";
     public static final String SOURCE_BANNER       = "BANNER";
     public static final String SOURCE_SETTINGS     = "SETTINGS";

@@ -40,7 +40,18 @@ public class ConsentService {
     private static final Set<String> KNOWN_TYPES = Set.of(
             UserConsent.TYPE_PRIVACY_NOTICE,
             UserConsent.TYPE_PROFILING,
-            UserConsent.TYPE_THIRD_PARTY);
+            UserConsent.TYPE_THIRD_PARTY,
+            UserConsent.TYPE_RESEARCH_USE);
+
+    /**
+     * Types whose validity does not lapse when the policy version changes.
+     *
+     * <p>An objection to research use is not a consent: rewording the notice must
+     * not quietly re-include someone who asked to be left out. Everything else is
+     * a genuine consent and is re-collected on a new policy version.
+     */
+    private static final Set<String> VERSION_INDEPENDENT = Set.of(
+            UserConsent.TYPE_RESEARCH_USE);
 
     public String currentPolicyVersion() {
         return policyVersion;
@@ -82,9 +93,21 @@ public class ConsentService {
     public Map<String, Boolean> currentStateFor(Long userId) {
         Map<String, Boolean> state = new HashMap<>();
         for (String type : KNOWN_TYPES) {
-            consentRepo.findFirstByUserIdAndConsentTypeOrderByRecordedAtDesc(userId, type)
-                    .ifPresent(c -> state.put(type,
-                            c.isGranted() && policyVersion.equals(c.getPolicyVersion())));
+            var latest = consentRepo
+                    .findFirstByUserIdAndConsentTypeOrderByRecordedAtDesc(userId, type);
+
+            if (latest.isEmpty()) {
+                // RESEARCH_USE is an objection register on an art. 6(1)(e) basis:
+                // having never spoken means included. A real consent, by contrast,
+                // stays absent until it is actually given.
+                if (UserConsent.TYPE_RESEARCH_USE.equals(type)) state.put(type, true);
+                continue;
+            }
+
+            UserConsent c = latest.get();
+            boolean stillCurrent = VERSION_INDEPENDENT.contains(type)
+                                || policyVersion.equals(c.getPolicyVersion());
+            state.put(type, c.isGranted() && stillCurrent);
         }
         return state;
     }
