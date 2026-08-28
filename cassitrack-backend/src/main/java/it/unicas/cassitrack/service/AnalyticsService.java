@@ -171,6 +171,9 @@ public class AnalyticsService {
             Double liveDelay = v.getDelayMinutes() != null ? v.getDelayMinutes().doubleValue() : null;
             info.put("delay_minutes", avgDelaysByBus.getOrDefault(v.getVehicleId(), liveDelay));
             info.put("crowding",      v.getCrowdingLevel());
+            // Which line the bus is working. The dashboard table shows it so a
+            // late vehicle can be traced back to the line it is delaying.
+            info.put("route_name",    v.getRouteName());
             return info;
         }).collect(Collectors.toList());
 
@@ -497,5 +500,229 @@ public class AnalyticsService {
         }
 
         return new ArrayList<>(byRoute.values());
+    }
+
+    // ── Network overview (GET /api/v1/analytics/network) ──────────────────────
+
+    /**
+     * Everything the Analytics dashboard's four panels need, in one round trip.
+     *
+     * They are grouped here rather than split into four endpoints because they
+     * share the same expensive step: a single Flux scan of vehicle_position over
+     * the selected period. Splitting them would run that scan four times for
+     * data that must agree with itself anyway — a delay figure in the KPI band
+     * that disagrees with the per-line bars below it is worse than a slow page.
+     *
+     * Two of the four are historical and honour the period filter (delay by
+     * weekday, occupancy by hour, delay by line); "buses on road" is live by
+     * definition and ignores it, which the NOW chip in its header states.
+     */
+    public Map<String, Object> getNetworkOverview(String startTime, String endTime, String busId) {
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        Scan scan = scanPeriod(startTime, endTime, busId);
+
+        // ── KPI 1: how many lines actually ran ────────────────────────────
+        // Distinct routes observed beats routeRepo.count(): a line that exists
+        // in the catalogue but ran nothing today is not an "active" line. Fall
+        // back to the catalogue only when telemetry is empty, so a fresh
+        // install shows the fleet size instead of a bare zero.
+        int activeLines = scan.routeIds.size();
+        if (activeLines == 0) activeLines = (int) routeRepo.count();
+        out.put("active_lines", activeLines);
+
+        // ── KPI 2: average delay, and the change against the previous window ──
+        out.put("avg_delay_minutes", round1(scan.avgDelay()));
+        out.put("delay_delta",       previousWindowDelta(startTime, endTime, busId, scan.avgDelay()));
+
+        // ── Panel 1: buses on road per line, right now ────────────────────
+        out.put("buses_on_road", busesOnRoadByLine());
+
+        // ── Panel 2: average delay per weekday ────────────────────────────
+        // Always all seven days, in calendar order, with null for days the
+        // period never covered. A gap in the line is honest; silently dropping
+        // Sunday would make a 6-day week look like a 7-day one.
+        Map<String, Object> byWeekday = new LinkedHashMap<>();
+        for (java.time.DayOfWeek d : java.time.DayOfWeek.values()) {
+            List<Double> vals = scan.delayByWeekday.get(d);
+            byWeekday.put(
+                d.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH),
+                (vals == null || vals.isEmpty()) ? null : round1(average(vals)));
+        }
+        out.put("delay_by_weekday", byWeekday);
+
+        // ── Panel 3: occupancy per hour ───────────────────────────────────
+        // Weighted by capacity (sum of passengers / sum of seats), not an
+        // average of per-reading percentages: a 50-seat bus at 90% and a
+        // 10-seat one at 10% is not "50% full" across the hour.
+        List<Map<String, Object>> occupancy = new ArrayList<>();
+        for (Map.Entry<Integer, long[]> e : new TreeMap<>(scan.paxCapByHour).entrySet()) {
+            long pax = e.getValue()[0], cap = e.getValue()[1];
+            if (cap <= 0) continue;
+            Map<String, Object> slot = new LinkedHashMap<>();
+            slot.put("slot", String.format("%02d-%02d", e.getKey(), (e.getKey() + 1) % 24));
+            slot.put("pct",  (int) Math.round(100.0 * pax / cap));
+            occupancy.add(slot);
+        }
+        out.put("occupancy_by_hour", occupancy);
+
+        // ── Panel 4: average delay per line, worst first ──────────────────
+        Map<String, Route> routes = routeRepo.findAllById(scan.delayByRoute.keySet())
+                .stream().collect(Collectors.toMap(Route::getId, r -> r));
+
+        List<Map<String, Object>> delayByLine = scan.delayByRoute.entrySet().stream()
+                .map(e -> {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("route_id",      e.getKey());
+                    row.put("label",         routeLabel(routes.get(e.getKey()), e.getKey()));
+                    row.put("delay_minutes", round1(average(e.getValue())));
+                    return row;
+                })
+                .sorted((a, b) -> Double.compare(
+                        (Double) b.get("delay_minutes"), (Double) a.get("delay_minutes")))
+                .collect(Collectors.toList());
+        out.put("delay_by_line", delayByLine);
+
+        out.put("generated_at", Instant.now().toString());
+        return out;
+    }
+
+    /** One pass over vehicle_position, accumulating every figure the panels need. */
+    private static final class Scan {
+        final Set<String>                       routeIds       = new HashSet<>();
+        final List<Double>                      allDelays      = new ArrayList<>();
+        final Map<java.time.DayOfWeek, List<Double>> delayByWeekday = new EnumMap<>(java.time.DayOfWeek.class);
+        final Map<String, List<Double>>         delayByRoute   = new LinkedHashMap<>();
+        /** hour → {passengers, seats} */
+        final Map<Integer, long[]>              paxCapByHour   = new HashMap<>();
+
+        double avgDelay() {
+            return allDelays.isEmpty() ? 0.0
+                 : allDelays.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+        }
+    }
+
+    private Scan scanPeriod(String startTime, String endTime, String busId) {
+        Scan s = new Scan();
+
+        String flux = String.format(
+            "from(bucket: \"%s\") " +
+            "|> range(%s) " +
+            "|> filter(fn: (r) => r[\"_measurement\"] == \"vehicle_position\") " +
+            "|> filter(fn: (r) => r[\"_field\"] == \"delay\" or r[\"_field\"] == \"passengers\" " +
+            "                  or r[\"_field\"] == \"capacity\")%s",
+            bucket, buildFluxRange(startTime, endTime), buildVehicleFilter(busId));
+
+        try {
+            for (FluxTable table : influxDBClient.getQueryApi().query(flux))
+                for (FluxRecord rec : table.getRecords()) {
+                    Instant t = rec.getTime();
+                    Object  v = rec.getValue();
+                    if (t == null || !(v instanceof Number)) continue;
+
+                    ZonedDateTime zdt = t.atZone(ZoneId.systemDefault());
+                    String field   = String.valueOf(rec.getField());
+                    double value   = ((Number) v).doubleValue();
+                    String routeId = rec.getValueByKey("route_id") != null
+                                   ? rec.getValueByKey("route_id").toString() : null;
+                    boolean realRoute = routeId != null && !"UNKNOWN".equals(routeId);
+
+                    switch (field) {
+                        case "delay" -> {
+                            s.allDelays.add(value);
+                            s.delayByWeekday
+                             .computeIfAbsent(zdt.getDayOfWeek(), k -> new ArrayList<>())
+                             .add(value);
+                            if (realRoute) {
+                                s.routeIds.add(routeId);
+                                s.delayByRoute.computeIfAbsent(routeId, k -> new ArrayList<>()).add(value);
+                            }
+                        }
+                        case "passengers" -> bump(s.paxCapByHour, zdt.getHour(), 0, (long) value);
+                        case "capacity"   -> bump(s.paxCapByHour, zdt.getHour(), 1, (long) value);
+                        default -> { }
+                    }
+                }
+        } catch (Exception e) {
+            log.error("Network overview scan failed: {}", e.getMessage());
+        }
+        return s;
+    }
+
+    private static void bump(Map<Integer, long[]> acc, int hour, int slot, long by) {
+        acc.computeIfAbsent(hour, k -> new long[2])[slot] += by;
+    }
+
+    /**
+     * Average delay over the window immediately before this one, expressed as a
+     * delta. Null — not zero — when there is nothing to compare against: an
+     * open-ended period has no "previous", and a genuine 0.0 change is a
+     * different statement from "unknown".
+     */
+    private Double previousWindowDelta(String startTime, String endTime, String busId, double current) {
+        if (startTime == null || startTime.isBlank() || endTime == null || endTime.isBlank()) return null;
+        try {
+            Instant from = Instant.parse(startTime), to = Instant.parse(endTime);
+            long span = to.toEpochMilli() - from.toEpochMilli();
+            if (span <= 0) return null;
+
+            Scan prev = scanPeriod(from.minusMillis(span).toString(), from.toString(), busId);
+            if (prev.allDelays.isEmpty()) return null;
+            return round1(current - prev.avgDelay());
+        } catch (Exception e) {
+            log.debug("No comparable previous window: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Buses currently transmitting, counted per line.
+     *
+     * Vehicles with no resolved route are skipped rather than bucketed under
+     * "Unknown": the panel answers "how is each line staffed", and a column for
+     * buses we cannot attribute would not help answer it.
+     */
+    private List<Map<String, Object>> busesOnRoadByLine() {
+        Map<String, Long> counts = vehicleService.getAllActiveVehicles().stream()
+                .filter(v -> v.getRouteId() != null && !v.getRouteId().isBlank())
+                .collect(Collectors.groupingBy(VehicleStatusDTO::getRouteId, Collectors.counting()));
+
+        Map<String, Route> routes = routeRepo.findAllById(counts.keySet())
+                .stream().collect(Collectors.toMap(Route::getId, r -> r));
+
+        return counts.entrySet().stream()
+                .map(e -> {
+                    Route r = routes.get(e.getKey());
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("route_id", e.getKey());
+                    row.put("label",    r != null && r.getShortName() != null ? r.getShortName() : e.getKey());
+                    row.put("name",     routeLabel(r, e.getKey()));
+                    row.put("buses",    e.getValue());
+                    return row;
+                })
+                .sorted(Comparator.comparing(
+                        (Map<String, Object> m) -> lineSortKey(String.valueOf(m.get("label")))))
+                .collect(Collectors.toList());
+    }
+
+    /** "14" sorts before "3" as text; pad the numeric part so lines read 1,2,3…14. */
+    private static String lineSortKey(String label) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\d+)(.*)$").matcher(label.trim());
+        return m.matches() ? String.format("%04d%s", Integer.parseInt(m.group(1)), m.group(2)) : "9999" + label;
+    }
+
+    private static String routeLabel(Route r, String fallbackId) {
+        if (r == null) return fallbackId;
+        String s = r.getShortName(), l = r.getLongName();
+        if (s != null && l != null) return s + " — " + l;
+        return s != null ? s : (l != null ? l : fallbackId);
+    }
+
+    private static double average(List<Double> xs) {
+        return xs.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+    }
+
+    private static double round1(double v) {
+        return Math.round(v * 10.0) / 10.0;
     }
 }
