@@ -201,26 +201,26 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 
 /* Dark thin scrollbars for all analytics panels — both vertical and horizontal */
 .analytics-dashboard::-webkit-scrollbar,
-#hours-chart-wrap::-webkit-scrollbar,
+.chart-wrap::-webkit-scrollbar,
 .an-bars::-webkit-scrollbar,
 .filter-bar::-webkit-scrollbar { width:4px; height:4px }
 
 .analytics-dashboard::-webkit-scrollbar-track,
-#hours-chart-wrap::-webkit-scrollbar-track,
+.chart-wrap::-webkit-scrollbar-track,
 .an-bars::-webkit-scrollbar-track,
 .filter-bar::-webkit-scrollbar-track { background:transparent }
 
 .analytics-dashboard::-webkit-scrollbar-thumb,
-#hours-chart-wrap::-webkit-scrollbar-thumb,
+.chart-wrap::-webkit-scrollbar-thumb,
 .an-bars::-webkit-scrollbar-thumb,
 .filter-bar::-webkit-scrollbar-thumb { background:rgba(59,130,246,.25); border-radius:4px }
 
 .analytics-dashboard::-webkit-scrollbar-thumb:hover,
-#hours-chart-wrap::-webkit-scrollbar-thumb:hover,
+.chart-wrap::-webkit-scrollbar-thumb:hover,
 .an-bars::-webkit-scrollbar-thumb:hover { background:rgba(59,130,246,.5) }
 
 /* Firefox */
-.analytics-dashboard, #hours-chart-wrap,
+.analytics-dashboard, .chart-wrap,
 .an-bars { scrollbar-width:thin; scrollbar-color:rgba(59,130,246,.25) transparent }
 
 #loading{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9999;transition:opacity .6s}
@@ -404,11 +404,16 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     overflow-y:auto;
 }
 
-/* Six KPIs across the top, the way the mockup reads them */
+/* KPI band. The mockup reads two headline figures, so they get half the
+   width each and a bigger number than a six-across band could carry. */
 .kpi-band{
     display:grid;
     grid-template-columns:repeat(6,1fr);
     gap:14px;
+}
+
+.kpi-band-duo{
+    grid-template-columns:repeat(2,1fr);
 }
 
 .kpi-card{
@@ -444,11 +449,31 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     letter-spacing:-1px;
 }
 
+.kpi-band-duo .kpi-value{
+    font-size:34px;
+}
+
+/* "min" rides along with the number but must not compete with it */
+.kpi-unit{
+    font-family:var(--mono);
+    font-size:14px;
+    font-weight:500;
+    letter-spacing:0;
+    color:var(--dim);
+    margin-left:4px;
+}
+
 .kpi-sub{
     font-family:var(--mono);
     font-size:9px;
     color:var(--dim);
 }
+
+/* Delay rising is bad news and falling is good news, so the trend line
+   colours by direction rather than by sign. */
+.kpi-band-duo .kpi-sub{font-size:10px}
+.kpi-sub.kpi-up{color:var(--amber)}
+.kpi-sub.kpi-down{color:var(--green)}
 
 .chart-card{
     background:linear-gradient(180deg,#081120,#09162A);
@@ -1377,13 +1402,6 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .kpi-value.purple{color:var(--purple)}
 .kpi-value.red{color:var(--red)}
 
-/* Doughnut: fixed box, or Chart.js keeps growing on every resize */
-.donut-wrapper{
-    width:150px;
-    height:150px;
-    flex-shrink:0;
-}
-
 /* Paired panels, mirroring the mockup's two-column rows */
 .an-row{
     display:grid;
@@ -1391,25 +1409,11 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     gap:14px;
 }
 
-/* The activity chart carries more detail than the donut, so it gets more room */
+/* Both rows now pair two charts of equal weight, so they split evenly.
+   The 1.15fr split was there to give the activity chart room next to a
+   narrow donut; with the donut gone it would just lopside the grid. */
 .an-row-wide{
-    grid-template-columns:1.15fr 1fr;
-}
-
-/* Doughnut and its legend share a line */
-.an-donut{
-    display:flex;
-    align-items:center;
-    gap:20px;
-}
-
-.an-donut .donut-wrapper{
-    flex:1;
-    width:auto;
-}
-
-.an-donut .status-legend{
-    min-width:150px;
+    grid-template-columns:1fr 1fr;
 }
 
 /* Both charts on that row line up at the same height */
@@ -1517,6 +1521,11 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     .kpi-band{
         grid-template-columns:repeat(3,1fr);
     }
+    /* Two cards must not be laid out on a three-column grid: the second
+       one would sit two thirds of the way across with a hole beside it. */
+    .kpi-band-duo{
+        grid-template-columns:repeat(2,1fr);
+    }
 }
 
 @media(max-width:1200px){
@@ -1524,15 +1533,14 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
     .an-row-wide{
         grid-template-columns:1fr;
     }
-    .an-donut{
-        flex-direction:column;
-        align-items:stretch;
-    }
 }
 
 @media(max-width:900px){
     .kpi-band{
         grid-template-columns:repeat(2,1fr);
+    }
+    .kpi-band-duo{
+        grid-template-columns:1fr;
     }
 }
 

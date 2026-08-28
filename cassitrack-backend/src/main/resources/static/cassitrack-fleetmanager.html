@@ -160,128 +160,108 @@
 
         </div>
 
-        <!-- Layout taken from the analytics mockup: a KPI band across the top,
-             then two paired rows, the vehicle table, and the export footer.
+        <!-- Layout taken from the analytics mockup: a two-KPI band, two paired
+             rows of panels, then the vehicle table and the export footer.
              Painted with this app's tokens rather than the mockup's own
              palette/fonts, and with no style="" anywhere — style-src drops
              'unsafe-inline', so per-bar colour and width travel on
              data-fg / data-bg / data-width-pct for applyDynStyles(). -->
         <div class="analytics-dashboard">
 
-            <!-- KPI BAND — /analytics/summary, live and today by design.
-                 The NOW chips further down mark the other panels the period
-                 filter cannot reach either. -->
-            <div class="kpi-band">
+            <!-- KPI BAND — the two headline figures. Both come from
+                 /analytics/network and honour the period filter. -->
+            <div class="kpi-band kpi-band-duo">
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Active buses</div>
-                    <div class="kpi-value" id="kpiActiveBuses">—</div>
-                    <div class="kpi-sub">right now on the network</div>
+                    <div class="kpi-label">Active bus lines</div>
+                    <div class="kpi-value" id="kpiActiveLines">—</div>
+                    <div class="kpi-sub" id="kpiActiveLinesSub">lines with recorded service</div>
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">On-time rate</div>
-                    <div class="kpi-value green" id="kpiOnTimePct">—</div>
-                    <div class="kpi-sub" id="kpiOnTimeSub">across active buses</div>
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">Buses today</div>
-                    <div class="kpi-value cyan" id="kpiBusesToday">—</div>
-                    <div class="kpi-sub">distinct vehicles seen</div>
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">GPS reports</div>
-                    <div class="kpi-value purple" id="kpiReports">—</div>
-                    <div class="kpi-sub">received today</div>
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">Delayed buses</div>
-                    <div class="kpi-value amber" id="kpiLate">—</div>
-                    <div class="kpi-sub" id="kpiLateSub">—</div>
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">Running early</div>
-                    <div class="kpi-value cyan" id="kpiEarly">—</div>
-                    <div class="kpi-sub">ahead of schedule</div>
+                    <div class="kpi-label">Avg delay (all lines)</div>
+                    <div class="kpi-value teal" id="kpiAvgDelay">—<span class="kpi-unit">min</span></div>
+                    <!-- Filled with the change against the previous window of the
+                         same length; stays neutral when there is nothing to
+                         compare against, rather than implying "no change". -->
+                    <div class="kpi-sub" id="kpiAvgDelaySub">—</div>
                 </div>
 
             </div>
 
-            <!-- ACTIVITY BY HOUR + SCHEDULE ADHERENCE -->
+            <!-- BUSES ON ROAD + DELAY BY WEEKDAY -->
             <div class="an-row an-row-wide">
 
                 <div class="chart-card">
                     <div class="chart-header">
                         <div>
-                            <div class="chart-title">Activity by hour</div>
-                            <div class="chart-subtitle" id="hoursChartSub">GPS reports · Today</div>
+                            <div class="chart-title">Active buses on road</div>
+                            <div class="chart-subtitle">Vehicles transmitting, per line</div>
                         </div>
-                        <span class="chip chip-blue" id="peakLbl">Peak hour: —</span>
+                        <span class="chip chip-green">NOW</span>
                     </div>
-                    <div id="hours-chart-wrap" class="chart-wrap an-h-chart">
-                        <canvas id="hoursChart" class="chart-canvas"></canvas>
+                    <div id="lines-chart-wrap" class="chart-wrap an-h-chart">
+                        <canvas id="linesChart" class="chart-canvas"></canvas>
                     </div>
-                    <div id="hoursChartEmpty" class="chart-empty">
-                        No activity recorded for the selected period — try a wider range or another bus.
+                    <div id="linesChartEmpty" class="chart-empty">
+                        No bus is currently transmitting a position.
                     </div>
                 </div>
 
                 <div class="chart-card">
                     <div class="chart-header">
                         <div>
-                            <div class="chart-title">Schedule adherence</div>
-                            <div class="chart-subtitle">Across active buses</div>
+                            <div class="chart-title">Avg delay by day of week</div>
+                            <div class="chart-subtitle" id="weekdayChartSub">Minutes · Today</div>
                         </div>
-                        <span class="chip chip-green">NOW</span>
+                        <span class="chip chip-blue" id="worstDayLbl">Worst day: —</span>
                     </div>
-                    <div class="an-donut">
-                        <div class="donut-wrapper an-h-chart">
-                            <canvas id="adherenceChart"></canvas>
-                        </div>
-                        <div class="status-legend" id="adherenceLegend">
-                            <div class="legend-item">Loading…</div>
-                        </div>
+                    <div id="weekday-chart-wrap" class="chart-wrap an-h-chart">
+                        <canvas id="weekdayChart" class="chart-canvas"></canvas>
+                    </div>
+                    <div id="weekdayChartEmpty" class="chart-empty">
+                        No delay measured in this period — widen the range or pick another bus.
                     </div>
                 </div>
 
             </div>
 
-            <!-- DELAY PER BUS + FLEET SNAPSHOT -->
-            <div class="an-row">
+            <!-- OCCUPANCY BY HOUR + DELAY BY LINE -->
+            <div class="an-row an-row-wide">
 
                 <div class="chart-card">
                     <div class="chart-header">
                         <div>
-                            <div class="chart-title">Delay by bus</div>
-                            <div class="chart-subtitle">Worst offenders first · minutes</div>
+                            <div class="chart-title">Peak hour occupancy</div>
+                            <div class="chart-subtitle">Seats taken, per hour of day</div>
                         </div>
-                        <span class="chip chip-green">NOW</span>
+                        <span class="chip chip-blue" id="peakLbl">Peak hour: —</span>
+                    </div>
+                    <div id="peak-chart-wrap" class="chart-wrap an-h-chart">
+                        <canvas id="peakChart" class="chart-canvas"></canvas>
+                    </div>
+                    <div id="peakChartEmpty" class="chart-empty">
+                        No occupancy recorded for the selected period.
+                    </div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <div class="chart-title">Delay by bus line</div>
+                            <div class="chart-subtitle">Worst offenders first · average minutes</div>
+                        </div>
                     </div>
                     <div class="an-bars" id="delayList">
                         <div class="chart-empty an-shown">Loading…</div>
                     </div>
                 </div>
 
-                <div class="chart-card">
-                    <div class="chart-header">
-                        <div>
-                            <div class="chart-title">Fleet snapshot</div>
-                            <div class="chart-subtitle">Status distribution</div>
-                        </div>
-                        <span class="chip chip-green">NOW</span>
-                    </div>
-                    <div class="an-bars" id="snapshotList">
-                        <div class="chart-empty an-shown">Loading…</div>
-                    </div>
-                </div>
-
             </div>
 
-            <!-- ACTIVE VEHICLES -->
+            <!-- ACTIVE VEHICLES — kept below the mockup's panels because it is
+                 what the CSV export writes: the export and the table on screen
+                 must be the same rows. -->
             <div class="chart-card">
                 <div class="chart-header">
                     <div>
@@ -295,6 +275,7 @@
                         <thead>
                         <tr>
                             <th>Bus ID</th>
+                            <th>Line</th>
                             <th>Status</th>
                             <th>Speed</th>
                             <th>Delay</th>
@@ -302,7 +283,7 @@
                         </tr>
                         </thead>
                         <tbody id="vehicleTable">
-                        <tr><td colspan="5" class="an-cell-empty">Loading…</td></tr>
+                        <tr><td colspan="6" class="an-cell-empty">Loading…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -320,7 +301,6 @@
             </div>
 
         </div>
-
     </div>
 
     <!-- ========================================= -->

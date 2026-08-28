@@ -93,6 +93,19 @@ public class AnalyticsController {
             analyticsService.getDelayByRouteAndHour(startTime, endTime, routes, busId, groupBy));
     }
 
+    @GetMapping("/network")
+    @Operation(summary = "Everything the Analytics dashboard needs, in one call",
+        description = "Active lines, average delay and its change vs the previous window, "
+                    + "buses on road per line (live), delay by weekday, occupancy by hour "
+                    + "and delay by line. Filter by startTime/endTime/busId.")
+    public ResponseEntity<Map<String, Object>> getNetworkOverview(
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime,
+            @RequestParam(required = false) String busId) {
+        validateAnalyticsParams(startTime, endTime, busId, null, Collections.emptyList());
+        return ResponseEntity.ok(analyticsService.getNetworkOverview(startTime, endTime, busId));
+    }
+
     // ── New endpoints ─────────────────────────────────────────────────────────
 
     @GetMapping("/co2")

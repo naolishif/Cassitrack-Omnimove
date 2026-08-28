@@ -1700,156 +1700,273 @@ function populateBusDropdown(vehicles) {
         ids.map(id => `<option value="${escHtml(id)}" ${prev === id ? 'selected' : ''}>${escHtml(id)}</option>`).join('');
 }
 
-// ── 1) SUMMARY → the KPI column ────────────────────────────
+// ── 1) NETWORK OVERVIEW → the KPI band and three of the four panels ──
+//
+// One request, four panels. They must agree with each other — a headline
+// "avg delay +3.4 min" above a per-line chart computed from a different scan
+// is a bug waiting to be reported — so the backend derives them all from a
+// single pass and returns them together.
 
-async function loadSummary() {
+let linesChartInstance   = null;
+let weekdayChartInstance = null;
+let peakChartInstance    = null;
+
+// Chart.js defaults shared by the three canvases below.
+const AN_TICK  = { color: '#4B5563', font: { family: 'DM Mono', size: 9 } };
+const AN_GRID_X = { grid: { display: false }, ticks: AN_TICK };
+const AN_GRID_Y = { grid: { color: 'rgba(255,255,255,.04)' }, ticks: AN_TICK };
+
+/** Show a canvas or the "nothing here" note in its place, never both. */
+function anToggleChart(wrapId, emptyId, hasData) {
+    const wrap  = document.getElementById(wrapId);
+    const empty = document.getElementById(emptyId);
+    if (wrap)  wrap.style.display  = hasData ? ''      : 'none';
+    if (empty) empty.style.display = hasData ? 'none'  : 'block';
+}
+
+async function loadNetwork() {
     try {
-        const r = await fetch(`${API}/analytics/summary`);
+        const r = await fetch(`${API}/analytics/network?${buildFilterParams()}`);
         if (!r.ok) throw new Error(r.status);
         const d = await r.json();
 
-        const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
-
-        set('kpiActiveBuses', d.active_buses_now ?? '—');
-        set('kpiOnTimePct',   d.on_time_percentage != null ? `${d.on_time_percentage}%` : '—');
-        set('kpiOnTimeSub',   `${d.on_time_count ?? 0} on time · ${d.late_count ?? 0} late`);
-        set('kpiBusesToday',  d.buses_today ?? '—');
-        set('kpiReports',     d.position_reports_today ?? '—');
-        set('kpiLate',        d.late_count ?? '—');
-        set('kpiLateSub',     d.late_count > 0 ? 'attention needed' : 'all running well');
-        set('kpiEarly',       d.early_count ?? '—');
-        set('reportName',     `CASSITRACK Analytics · ${new Date().toLocaleDateString('it-IT')}`);
+        renderNetworkKpis(d);
+        renderLinesChart(d.buses_on_road   || []);
+        renderWeekdayChart(d.delay_by_weekday || {});
+        renderPeakChart(d.occupancy_by_hour   || []);
+        renderDelayByLine(d.delay_by_line     || []);
     } catch (e) {
-        console.error('Failed to load analytics summary', e);
+        console.error('Failed to load network overview', e);
+        anToggleChart('lines-chart-wrap',   'linesChartEmpty',   false);
+        anToggleChart('weekday-chart-wrap', 'weekdayChartEmpty', false);
+        anToggleChart('peak-chart-wrap',    'peakChartEmpty',    false);
     }
 }
 
-// ── 2) ADHERENCE → doughnut, legend, delay bars, snapshot, table ──
+function renderNetworkKpis(d) {
+    const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
 
-let adherenceChartInstance = null;
+    set('kpiActiveLines', d.active_lines ?? '—');
 
-// Order is deliberate: best status first, so the doughnut reads clockwise
-// from "fine" to "we should look at this".
-const ADHERENCE_ORDER = ['ON_TIME', 'EARLY', 'SLIGHTLY_LATE', 'SIGNIFICANTLY_LATE', 'UNKNOWN'];
+    // The delay value keeps its "min" suffix in a child span, so write only
+    // the number node rather than clobbering the markup.
+    const delayEl = document.getElementById('kpiAvgDelay');
+    if (delayEl && delayEl.firstChild) {
+        const v = d.avg_delay_minutes;
+        const num = v == null ? '—' : (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1));
+        delayEl.firstChild.nodeValue = num;
+    }
 
-async function loadAdherence() {
-    try {
-        const r = await fetch(`${API}/analytics/adherence`);
-        if (!r.ok) throw new Error(r.status);
-        const d = await r.json();
+    // Late is bad, early is not good — so the arrow colours by direction of
+    // change, and a missing comparison says so instead of showing "0.0".
+    const sub = document.getElementById('kpiAvgDelaySub');
+    if (sub) {
+        const delta = d.delay_delta;
+        sub.classList.remove('kpi-up', 'kpi-down');
+        if (delta == null) {
+            sub.textContent = 'no comparable previous period';
+        } else if (Math.abs(delta) < 0.05) {
+            sub.textContent = 'unchanged vs previous period';
+        } else {
+            const worse = delta > 0;
+            sub.classList.add(worse ? 'kpi-up' : 'kpi-down');
+            sub.textContent = `${worse ? '▲' : '▼'} ${worse ? '+' : ''}${delta.toFixed(1)} vs previous period`;
+        }
+    }
 
-        const counts   = d.status_counts || {};
-        const total    = d.total_active  || 0;
-        const vehicles = d.vehicles      || [];
-        lastAdherenceVehicles = vehicles;
-
-        renderAdherenceDonut(counts);
-        renderAdherenceLegend(counts);
-        renderSnapshot(counts, total);
-        renderDelayBars(vehicles);
-        renderVehicleTable(vehicles);
-    } catch (e) {
-        console.error('Failed to load adherence', e);
+    const linesSub = document.getElementById('kpiActiveLinesSub');
+    if (linesSub) {
+        const busTxt = activeFilters.busId ? ` · ${activeFilters.busId}` : '';
+        linesSub.textContent = `lines with recorded service${busTxt}`;
     }
 }
 
-function renderAdherenceDonut(counts) {
-    const canvas = document.getElementById('adherenceChart');
+// ── Panel 1: buses on road, per line ───────────────────────
+
+function renderLinesChart(rows) {
+    const canvas = document.getElementById('linesChart');
     if (!canvas) return;
 
-    const keys = ADHERENCE_ORDER.filter(k => (counts[k] || 0) > 0);
-    if (adherenceChartInstance) adherenceChartInstance.destroy();
-    if (!keys.length) { adherenceChartInstance = null; return; }
+    if (linesChartInstance) linesChartInstance.destroy();
+    anToggleChart('lines-chart-wrap', 'linesChartEmpty', rows.length > 0);
+    if (!rows.length) { linesChartInstance = null; return; }
 
-    adherenceChartInstance = new Chart(canvas, {
-        type: 'doughnut',
+    const values = rows.map(r => r.buses);
+    // Highlight the lines carrying the most vehicles: at a glance, where the
+    // fleet is concentrated right now.
+    const busiest = Math.max(...values);
+
+    linesChartInstance = new Chart(canvas, {
+        type: 'bar',
         data: {
-            labels:   keys.map(k => SL[k] || k),
+            labels: rows.map(r => r.label),
             datasets: [{
-                data:            keys.map(k => counts[k]),
-                backgroundColor: keys.map(k => SC[k] || SC.UNKNOWN),
-                // Same ink as the card gradient's top stop, so the ring reads
-                // as separated slices rather than one continuous band
-                borderColor: '#081120',
-                borderWidth: 2
+                data: values,
+                backgroundColor: values.map(v => v >= busiest && busiest > 1 ? '#06B6D4' : '#3B82F6'),
+                borderRadius: 4,
+                maxBarThickness: 18
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            cutout: '62%',
-            plugins: { legend: { display: false } }   // the legend lives in the markup, with counts
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: {
+                    title: ctx => rows[ctx[0].dataIndex].name || rows[ctx[0].dataIndex].label,
+                    label: ctx => `${ctx.parsed.y} bus${ctx.parsed.y === 1 ? '' : 'es'} on road`
+                } }
+            },
+            scales: {
+                x: AN_GRID_X,
+                y: { ...AN_GRID_Y, beginAtZero: true,
+                     ticks: { ...AN_TICK, precision: 0 },
+                     title: { display: true, text: 'Buses',
+                              color: '#4B5563', font: { family: 'DM Mono', size: 10 } } }
+            }
         }
     });
 }
 
-function renderAdherenceLegend(counts) {
-    const el = document.getElementById('adherenceLegend');
-    if (!el) return;
+// ── Panel 2: average delay per weekday ─────────────────────
 
-    el.innerHTML = ADHERENCE_ORDER.map(k => `
-        <div class="legend-item">
-            <span class="legend-dot" data-bg="${SC[k] || SC.UNKNOWN}"></span>
-            ${escHtml(SL[k] || k)}
-            <span class="legend-count">${counts[k] || 0}</span>
-        </div>`).join('');
-    applyDynStyles(el);
-}
+function renderWeekdayChart(byDay) {
+    const canvas = document.getElementById('weekdayChart');
+    if (!canvas) return;
 
-function renderSnapshot(counts, total) {
-    const el = document.getElementById('snapshotList');
-    if (!el) return;
+    const labels = Object.keys(byDay);
+    const values = labels.map(k => byDay[k]);
+    const measured = values.filter(v => v != null);
 
-    if (!total) {
-        el.innerHTML = `<div class="chart-empty an-shown">No buses running.</div>`;
-        return;
+    if (weekdayChartInstance) weekdayChartInstance.destroy();
+    anToggleChart('weekday-chart-wrap', 'weekdayChartEmpty', measured.length > 0);
+    if (!measured.length) { weekdayChartInstance = null; return; }
+
+    // Name the worst day in the header chip — the one thing an operator wants
+    // out of this chart without reading it.
+    const worstEl = document.getElementById('worstDayLbl');
+    if (worstEl) {
+        const worst = labels.reduce((a, b) =>
+            (byDay[b] ?? -Infinity) > (byDay[a] ?? -Infinity) ? b : a, labels[0]);
+        worstEl.textContent = byDay[worst] != null
+            ? `Worst day: ${worst} (+${byDay[worst].toFixed(1)} min)`
+            : 'Worst day: —';
     }
 
-    el.innerHTML = ADHERENCE_ORDER.map(k => {
-        const c   = counts[k] || 0;
-        const pct = Math.round(c / total * 100);
-        const col = SC[k] || SC.UNKNOWN;
-        return `
-        <div class="an-bar-row">
-            <div class="an-bar-top">
-                <span class="an-bar-name">${escHtml(SL[k] || k)}</span>
-                <span class="an-bar-val" data-fg="${col}">${c} · ${pct}%</span>
-            </div>
-            <div class="an-bar-track">
-                <div class="an-bar-fill" data-bg="${col}" data-width-pct="${pct}"></div>
-            </div>
-        </div>`;
-    }).join('');
-    applyDynStyles(el);
+    weekdayChartInstance = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Avg delay (min)',
+                data: values,
+                borderColor: '#F59E0B',
+                backgroundColor: 'rgba(245,158,11,.12)',
+                borderWidth: 2.4,
+                tension: 0.4,
+                pointRadius: 3,
+                pointBackgroundColor: '#F59E0B',
+                pointBorderColor: '#F59E0B',
+                fill: true,
+                // Days the period never covered come through as null. Leaving
+                // the line broken there is the honest reading: we did not
+                // measure a low delay, we measured nothing.
+                spanGaps: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: {
+                    label: ctx => ctx.parsed.y == null ? 'no data'
+                                : `${ctx.parsed.y > 0 ? '+' : ''}${ctx.parsed.y.toFixed(1)} min`
+                } }
+            },
+            scales: { x: AN_GRID_X, y: { ...AN_GRID_Y, suggestedMin: 0 } }
+        }
+    });
 }
 
-function renderDelayBars(vehicles) {
+// ── Panel 3: occupancy per hour ────────────────────────────
+
+function renderPeakChart(rows) {
+    const canvas = document.getElementById('peakChart');
+    if (!canvas) return;
+
+    if (peakChartInstance) peakChartInstance.destroy();
+    anToggleChart('peak-chart-wrap', 'peakChartEmpty', rows.length > 0);
+    if (!rows.length) { peakChartInstance = null; return; }
+
+    const values = rows.map(r => r.pct);
+
+    const peakEl = document.getElementById('peakLbl');
+    if (peakEl) {
+        const i = values.indexOf(Math.max(...values));
+        peakEl.textContent = `Peak hour: ${rows[i].slot} (${values[i]}%)`;
+    }
+
+    // Thresholds, not a gradient: 88% is where a bus starts leaving people at
+    // the stop, 50% is comfortable. The colour answers "is this a problem?".
+    const colourOf = p => p >= 88 ? SC.SIGNIFICANTLY_LATE
+                        : p >= 50 ? SC.SLIGHTLY_LATE
+                        : SC.EARLY;
+
+    peakChartInstance = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: rows.map(r => r.slot),
+            datasets: [{
+                data: values,
+                backgroundColor: values.map(colourOf),
+                borderRadius: 4,
+                maxBarThickness: 18
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => `${ctx.parsed.y}% of seats taken` } }
+            },
+            scales: {
+                x: { ...AN_GRID_X, ticks: { ...AN_TICK, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+                y: { ...AN_GRID_Y, beginAtZero: true, suggestedMax: 100,
+                     ticks: { ...AN_TICK, callback: v => `${v}%` } }
+            }
+        }
+    });
+}
+
+// ── Panel 4: average delay per line ────────────────────────
+
+function renderDelayByLine(rows) {
     const el = document.getElementById('delayList');
     if (!el) return;
 
-    const withDelay = vehicles
-        .filter(v => v.delay_minutes != null)
-        .sort((a, b) => (b.delay_minutes || 0) - (a.delay_minutes || 0));
-
-    if (!withDelay.length) {
-        el.innerHTML = `<div class="chart-empty an-shown">No measured delays yet — a bus reports one once it passes its first stop.</div>`;
+    if (!rows.length) {
+        el.innerHTML = `<div class="chart-empty an-shown">No measured delays in this period — a line reports one once a bus passes a stop.</div>`;
         return;
     }
 
-    // Scale against the worst bus, with a floor of 6 minutes so a fleet that
-    // is barely late does not render as if it were falling apart
-    const maxDelay = Math.max(6, ...withDelay.map(v => Math.abs(v.delay_minutes) || 0));
-    const colourOf = m => m >= 4 ? SC.SIGNIFICANTLY_LATE : (m >= 2 ? SC.SLIGHTLY_LATE : SC.ON_TIME);
+    // Scale against the worst line, with a floor of 6 minutes so a network
+    // that is barely late does not render as if it were falling apart.
+    const maxDelay = Math.max(6, ...rows.map(r => Math.abs(r.delay_minutes) || 0));
+    const colourOf = m => m >= 4 ? SC.SIGNIFICANTLY_LATE
+                        : m >= 2 ? SC.SLIGHTLY_LATE
+                        : SC.ON_TIME;
 
-    el.innerHTML = withDelay.map(v => {
-        const val = v.delay_minutes;
-        const col = colourOf(val);
-        const pct = Math.min(100, (Math.abs(val) / maxDelay) * 100);
+    el.innerHTML = rows.map(r => {
+        const val  = r.delay_minutes;
+        const col  = colourOf(val);
+        const pct  = Math.min(100, (Math.abs(val) / maxDelay) * 100);
         const sign = val > 0 ? '+' : '';
         return `
         <div class="an-bar-row">
             <div class="an-bar-top">
-                <span class="an-bar-name">${escHtml(v.vehicle_id)}</span>
+                <span class="an-bar-name">${escHtml(r.label)}</span>
                 <span class="an-bar-val" data-fg="${col}">${sign}${val.toFixed(1)} min</span>
             </div>
             <div class="an-bar-track">
@@ -1860,12 +1977,32 @@ function renderDelayBars(vehicles) {
     applyDynStyles(el);
 }
 
+// ── 2) ADHERENCE → the Active vehicles table ───────────────
+//
+// Live by definition, so it ignores the period filter. It survives the move
+// to a line-oriented dashboard because it is the one per-vehicle view left,
+// and because it is what the CSV export writes: what you download is what
+// you were looking at.
+
+async function loadAdherence() {
+    try {
+        const r = await fetch(`${API}/analytics/adherence`);
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json();
+
+        lastAdherenceVehicles = d.vehicles || [];
+        renderVehicleTable(lastAdherenceVehicles);
+    } catch (e) {
+        console.error('Failed to load adherence', e);
+    }
+}
+
 function renderVehicleTable(vehicles) {
     const tbody = document.getElementById('vehicleTable');
     if (!tbody) return;
 
     if (!vehicles.length) {
-        tbody.innerHTML = `<tr><td colspan="5" class="an-cell-empty">No buses transmitting right now.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="an-cell-empty">No buses transmitting right now.</td></tr>`;
         return;
     }
 
@@ -1878,6 +2015,7 @@ function renderVehicleTable(vehicles) {
         return `
         <tr>
             <td>${escHtml(v.vehicle_id)}</td>
+            <td>${escHtml(v.route_name) || '—'}</td>
             <td><span class="chip" data-status="${escHtml(status)}">${escHtml(SL[status] || status)}</span></td>
             <td>${v.speed_kmh != null ? v.speed_kmh.toFixed(1) + ' km/h' : '—'}</td>
             <td data-fg="${delayCol}">${delay}</td>
@@ -1887,98 +2025,12 @@ function renderVehicleTable(vehicles) {
     applyDynStyles(tbody);
 }
 
-// ── 3) BUSIEST HOURS → Network Activity ────────────────────
-
-let hoursChartInstance = null;
-
-async function loadBusiestHours() {
-    const canvas  = document.getElementById('hoursChart');
-    const emptyEl = document.getElementById('hoursChartEmpty');
-    const wrap    = document.getElementById('hours-chart-wrap');
-    if (!canvas) return;
-
-    try {
-        const qs = buildFilterParams();
-        const r  = await fetch(`${API}/analytics/busiest-hours?${qs}`);
-        if (!r.ok) throw new Error(r.status);
-        const d = await r.json();
-
-        const rows   = d.hourly_activity || [];
-        const labels = rows.map(h => h.hour);
-        const values = rows.map(h => h.count);
-        const peak   = values.some(v => v > 0);
-
-        const peakEl = document.getElementById('peakLbl');
-        if (peakEl) peakEl.textContent = `Peak hour: ${d.peak_hour || 'N/A'}`;
-
-        if (hoursChartInstance) hoursChartInstance.destroy();
-
-        if (!peak) {
-            if (wrap) wrap.style.display = 'none';
-            if (emptyEl) emptyEl.style.display = 'block';
-            hoursChartInstance = null;
-            return;
-        }
-
-        if (wrap) wrap.style.display = '';
-        if (emptyEl) emptyEl.style.display = 'none';
-
-        // Colour by intensity rather than by series: one bar per hour, so a
-        // legend would say nothing a reader cannot already see
-        const max = Math.max(...values, 1);
-        const barColour = c => {
-            const share = c / max;
-            return share > 0.7 ? SC.SIGNIFICANTLY_LATE
-                 : share > 0.4 ? SC.SLIGHTLY_LATE
-                 : '#3B82F6';
-        };
-
-        hoursChartInstance = new Chart(canvas, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    data: values,
-                    backgroundColor: values.map(barColour),
-                    borderRadius: 4,
-                    maxBarThickness: 14
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend:  { display: false },
-                    tooltip: { callbacks: { label: ctx => `${ctx.parsed.y ?? 0} reports` } }
-                },
-                scales: {
-                    x: {
-                        ticks: { color: '#4B5563', font: { family: 'DM Mono', size: 9 },
-                            maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
-                        grid: { display: false }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        title: { display: true, text: 'GPS reports',
-                            color: '#4B5563', font: { family: 'DM Mono', size: 10 } },
-                        ticks: { color: '#4B5563', font: { family: 'DM Mono', size: 9 } },
-                        grid: { color: 'rgba(255,255,255,.04)' }
-                    }
-                }
-            }
-        });
-    } catch (e) {
-        console.error('Failed to load busiest hours', e);
-        if (wrap) wrap.style.display = 'none';
-        if (emptyEl) emptyEl.style.display = 'block';
-    }
-}
-
 // ── CSV export — the table as shown ────────────────────────
 
 function exportAnalyticsCsv() {
     downloadCsv(`fleet-analytics-${csvStamp()}.csv`, [
         {header:'Bus',      get:v=>v.vehicle_id},
+        {header:'Line',     get:v=>v.route_name || ''},
         {header:'Status',   get:v=>SL[v.status] || v.status},
         {header:'Speed',    get:v=>v.speed_kmh != null ? v.speed_kmh.toFixed(1) : ''},
         {header:'Delay',    get:v=>v.delay_minutes != null ? v.delay_minutes : ''},
@@ -2001,15 +2053,17 @@ function applyFilters() {
 }
 
 function loadAllAnalytics() {
-    const sub = document.getElementById('hoursChartSub');
-    if (sub) {
-        const busTxt = activeFilters.busId ? ` · ${activeFilters.busId}` : '';
-        sub.textContent = `GPS reports · ${PRESET_LABEL[activeFilters.preset] || ''}${busTxt}`;
-    }
+    const period = PRESET_LABEL[activeFilters.preset] || '';
+    const busTxt = activeFilters.busId ? ` · ${activeFilters.busId}` : '';
 
-    loadSummary();
+    const sub = document.getElementById('weekdayChartSub');
+    if (sub) sub.textContent = `Minutes · ${period}${busTxt}`;
+
+    const report = document.getElementById('reportName');
+    if (report) report.textContent = `CASSITRACK Analytics — ${period}`;
+
+    loadNetwork();
     loadAdherence();
-    loadBusiestHours();
 }
 
 // ── Wire up the Analytics nav button ──────────────────────
