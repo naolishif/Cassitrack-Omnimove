@@ -250,7 +250,13 @@ public class NetexImportService {
                 // shape untouched rather than wiping it — older CassiTrack
                 // builds simply do not publish the element.
                 for (LineDTO dto : serviceFrame.getLines()) {
-                    importRouteShape(localId(dto.getId()), dto.getLineString());
+                    // resolveLineString(): la geometria e' passata da figlio
+                    // diretto di <Line> (non conforme) a <Extensions>. Il DTO
+                    // legge entrambe le posizioni, quindi questo import
+                    // funziona sia col CassiTrack aggiornato che con quello
+                    // precedente, e i due sistemi non devono essere rilasciati
+                    // nello stesso momento.
+                    importRouteShape(localId(dto.getId()), dto.resolveLineString());
                 }
             }
 
