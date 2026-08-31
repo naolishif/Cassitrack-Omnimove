@@ -29,7 +29,7 @@ import java.util.HexFormat;
  * business holding credentials it never needs to read back.
  *
  * Fail-soft like {@link RateLimiterService}: a Redis outage must never break a
- * login, so every call swallows its errors and the count reports -1 (unknown)
+ * login; so every call swallows its errors and the count reports -1 (unknown)
  * rather than a wrong number.
  */
 @Service
