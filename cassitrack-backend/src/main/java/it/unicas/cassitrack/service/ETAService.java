@@ -131,7 +131,7 @@ public class ETAService {
         String routeId;
         if (bus.getTripId() != null) {
             seq = scheduledStopRepository.findByTripIdOrderByStopSequenceAsc(bus.getTripId());
-            // Da V26 la fermata di una riga di orario arriva dal pattern della
+            // Da V27 la fermata di una riga di orario arriva dal pattern della
             // linea, quindi serve sapere di quale linea si tratta. La corsa la
             // conosce; se il caricamento pigro non l'ha portata, ci si appoggia
             // a quella pubblicata dal bus.

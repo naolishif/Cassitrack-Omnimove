@@ -20,6 +20,6 @@ public interface TripRepository extends JpaRepository<Trip, String> {
     // scheduled_stops), so the controller counts and refuses instead.
     long countByRouteId(String routeId);
 
-    /** Tutte le corse di una linea, per la cascata sul cambio di percorso (V26). */
+    /** Tutte le corse di una linea, per la cascata sul cambio di percorso (V27). */
     java.util.List<Trip> findAllByRouteId(String routeId);
 }

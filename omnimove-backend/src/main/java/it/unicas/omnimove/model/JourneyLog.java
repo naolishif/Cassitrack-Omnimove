@@ -28,6 +28,12 @@ public class JourneyLog {
     @Column(name = "green_index")
     private Integer greenIndex;
 
+    // How long the accepted itinerary was expected to take, in minutes. Null on
+    // everything recorded before V34, and left out of the averages rather than
+    // counted as a journey that took no time at all.
+    @Column(name = "duration_minutes")
+    private Integer durationMinutes;
+
     @Column(name = "origin_name")
     private String originName;
 

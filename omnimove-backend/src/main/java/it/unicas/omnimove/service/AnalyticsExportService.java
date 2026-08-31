@@ -84,6 +84,59 @@ public class AnalyticsExportService {
         sections.add(new Section("Average green index",
                 List.of("Date", "Index"), giRows));
 
+        // ── Combined journeys. The MaaS question the report exists to answer. ──
+        Map<String, Object> combined = analytics.getCombinedStats(range);
+
+        List<List<String>> combinedSummary = new ArrayList<>();
+        combinedSummary.add(List.of("Combined journeys", str(combined.get("combinedJourneys"))));
+        combinedSummary.add(List.of("Share of all journeys", str(combined.get("combinedShare")) + "%"));
+        combinedSummary.add(List.of("Average duration (min)", str(combined.get("avgDurationMin"))));
+        combinedSummary.add(List.of("Median duration (min)", str(combined.get("medianDurationMin"))));
+        combinedSummary.add(List.of("Average distance (km)", str(combined.get("avgDistanceKm"))));
+        combinedSummary.add(List.of("Average cost (EUR)", str(combined.get("avgCostEuros"))));
+        combinedSummary.add(List.of("Average green index", str(combined.get("avgGreenIndex"))));
+        combinedSummary.add(List.of("Average legs", str(combined.get("avgLegs"))));
+        combinedSummary.add(List.of("CO2 saved (kg)", str(combined.get("co2SavedKg"))));
+        sections.add(new Section("Combined journeys — summary",
+                List.of("Measure", "Value"), combinedSummary));
+
+        // Order matters: a scooter before the bus is a different offer from a
+        // scooter after it, and collapsing the two would erase the finding.
+        List<List<String>> chainRows = new ArrayList<>();
+        for (Map<String, Object> c : asRows(combined.get("chains"))) {
+            chainRows.add(List.of(
+                    str(c.get("label")),
+                    str(c.get("journeys")),
+                    str(c.get("share")) + "%",
+                    str(c.get("avgDurationMin")),
+                    str(c.get("avgDistanceKm")),
+                    str(c.get("avgCostEuros")),
+                    str(c.get("avgGreenIndex"))));
+        }
+        sections.add(new Section("Combined journeys — composition",
+                List.of("Chain", "Journeys", "Share", "Avg minutes", "Avg km", "Avg EUR", "Avg green index"),
+                chainRows));
+
+        List<List<String>> durationRows = new ArrayList<>();
+        asCounts(combined.get("durationBuckets"))
+                .forEach((band, n) -> durationRows.add(List.of(band, str(n))));
+        sections.add(new Section("Combined journeys — time taken",
+                List.of("Duration", "Journeys"), durationRows));
+
+        List<List<String>> compareRows = new ArrayList<>();
+        for (Map<String, Object> c : asRows(combined.get("comparison"))) {
+            compareRows.add(List.of(
+                    str(c.get("label")),
+                    str(c.get("journeys")),
+                    str(c.get("avgDurationMin")),
+                    str(c.get("avgDistanceKm")),
+                    str(c.get("minutesPerKm")),
+                    str(c.get("avgGreenIndex"))));
+        }
+        sections.add(new Section("Combined against single modes",
+                List.of("Mode", "Journeys", "Avg minutes", "Avg km", "Min per km", "Avg green index"),
+                compareRows));
+
         // ── Busiest routes. Stop names, never a traveller. ──
         List<List<String>> routeRows = new ArrayList<>();
         for (Map<String, Object> r : analytics.getTopRoutes(range)) {
@@ -99,6 +152,12 @@ public class AnalyticsExportService {
     }
 
     private static String rangeLabel(String range) {
+        // A custom period names its own dates: "Last month" on a report covering
+        // 3-17 March would be a caption that contradicts its own figures.
+        if (range != null && range.toUpperCase().startsWith("CUSTOM:")) {
+            String[] parts = range.substring("CUSTOM:".length()).split(":");
+            if (parts.length == 2) return parts[0].trim() + " to " + parts[1].trim();
+        }
         return switch (range == null ? "1M" : range.toUpperCase()) {
             case "1W" -> "Last week";
             case "3M" -> "Last 3 months";
@@ -106,6 +165,21 @@ public class AnalyticsExportService {
             case "1Y" -> "Last year";
             default   -> "Last month";
         };
+    }
+
+    /** "—" for a figure that was never recorded, so a gap does not read as a zero. */
+    private static String str(Object v) {
+        return v == null ? "—" : String.valueOf(v);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> asRows(Object v) {
+        return v instanceof List<?> l ? (List<Map<String, Object>>) l : List.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asCounts(Object v) {
+        return v instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
     }
 
     /** camelCase key -> "Camel case", so the report reads as prose not as JSON. */

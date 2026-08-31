@@ -41,7 +41,7 @@ public class RouteMatchingService {
     /**
      * La fermata in posizione {@code stopSequence}, o null oltre il capolinea.
      *
-     * Da V26 lo stopId arriva dal pattern della linea. Il pattern è in cache,
+     * Da V27 lo stopId arriva dal pattern della linea. Il pattern è in cache,
      * quindi questo metodo — che gira a ogni messaggio GPS — non paga più una
      * query per risolvere la fermata.
      */

@@ -12,7 +12,7 @@ import java.io.Serializable;
  * {@link ScheduledStop}, una riga per corsa, così che la corsa del rientro da
  * scuola possa impiegare 22 minuti dove quella serale ne usa 18.
  *
- * Prima di V26 questa entità non esisteva e la sequenza viveva duplicata in
+ * Prima di V27 questa entità non esisteva e la sequenza viveva duplicata in
  * ogni corsa: 1884 copie per 142 posizioni reali, senza nulla che impedisse a
  * due corse della stessa linea di divergere.
  */

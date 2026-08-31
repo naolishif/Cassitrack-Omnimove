@@ -226,7 +226,7 @@ public class NetexController {
             // una garanzia che il consumatore possa dare per buona.
             List<ScheduledStop> stopsForThisTrip =
                     scheduledStopRepository.findByTripIdOrderByStopSequenceAsc(trip.getId());
-            // Da V26 la fermata arriva dal pattern della linea. Il formato sul
+            // Da V27 la fermata arriva dal pattern della linea. Il formato sul
             // filo NON cambia: si continuano a emettere Call che portano sia la
             // fermata sia l'orario. Emettere un vero ServiceJourneyPattern
             // sarebbe ora possibile e più aderente allo standard, ma è un

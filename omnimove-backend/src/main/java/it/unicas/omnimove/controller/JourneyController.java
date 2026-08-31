@@ -63,6 +63,26 @@ import java.util.stream.Stream;
 @Tag(name="Journey Planner", description="Multimodal journey planning")
 public class JourneyController {
 
+    /**
+     * Suffix marking the return direction of a line.
+     *
+     * <p>CassiTrack's V26 split each line's return runs onto a route of their
+     * own — {@code LINEA_16_R} beside {@code LINEA_16} — because the stop
+     * pattern introduced by V27 allows a route only one sequence of stops, and
+     * a line that goes there and back has two.
+     *
+     * <p>That is a storage decision and the traveller should not meet it: to
+     * them line 16 is line 16, both ways. So the return routes are folded back
+     * into their outbound line here — hidden from the pickers, read together
+     * with it in the timetable — and the direction is worked out the way it
+     * always was, from the terminus of each run.
+     */
+    private static final String RETURN_SUFFIX = "_R";
+
+    private static boolean isReturnRoute(String routeId) {
+        return routeId != null && routeId.endsWith(RETURN_SUFFIX);
+    }
+
     private static final Pattern STOP_ID_RE      = Pattern.compile("^[A-Za-z0-9\\-_]{1,50}$");
     private static final int     MAX_ARRIVALS     = 10;
 
@@ -130,6 +150,10 @@ public class JourneyController {
     public ResponseEntity<List<Map<String, Object>>> timetableRoutes() {
         List<Map<String, Object>> result = routeRepository.findAll().stream()
                 .filter(Route::isActive)
+                // The return route carries the same number and colour as its
+                // outbound: listing both would put two identical "16" chips in
+                // the picker. Its runs are shown inside the outbound's timetable.
+                .filter(r -> !isReturnRoute(r.getId()))
                 .sorted(Comparator.comparing(r -> r.getShortName() != null ? r.getShortName() : r.getId(),
                                              String.CASE_INSENSITIVE_ORDER))
                 .<Map<String, Object>>map(r -> {
@@ -158,7 +182,11 @@ public class JourneyController {
         Route route = routeRepository.findById(routeId).orElse(null);
         if (route == null || !route.isActive()) return ResponseEntity.notFound().build();
 
-        var calls = scheduledStopRepository.findCallsForRoute(routeId);
+        // Both halves of the line. The return runs live on their own route since
+        // V26, but a timetable that showed one direction only would be a
+        // regression for the traveller, who had both before the split.
+        var calls = new ArrayList<>(scheduledStopRepository.findCallsForRoute(routeId));
+        calls.addAll(scheduledStopRepository.findCallsForRoute(routeId + RETURN_SUFFIX));
         if (calls.isEmpty()) return ResponseEntity.notFound().build();
 
         // Rows arrive grouped by trip and ordered by sequence, so one pass rebuilds
@@ -419,6 +447,43 @@ public class JourneyController {
         return out;
     }
 
+    /** Longest itinerary worth believing, in minutes: a day of travel inside a city. */
+    private static final int MAX_DURATION_MIN = 600;
+
+    /**
+     * The client's duration, or null when it cannot be believed. A journey that
+     * takes no time, negative time, or longer than {@link #MAX_DURATION_MIN} did
+     * not happen as described, and an average is easier to poison than a total.
+     */
+    private static Integer readDuration(Object raw) {
+        if (!(raw instanceof Number n)) return null;
+        double v = n.doubleValue();
+        if (Double.isNaN(v) || Double.isInfinite(v)) return null;
+        int minutes = (int) Math.round(v);
+        return (minutes > 0 && minutes <= MAX_DURATION_MIN) ? minutes : null;
+    }
+
+    /**
+     * How many moving pieces the itinerary has, counted from the per-mode
+     * kilometres the client sent and falling back to the chain's own name.
+     *
+     * <p>The fallback matters: a chain always names its modes, so a combined
+     * journey is never recorded as a single leg even when the split is missing
+     * or unusable.
+     */
+    private static int countLegs(Object rawLegsKm, String mode) {
+        int named = mode == null ? 1 : mode.split("_").length;
+        if (!(rawLegsKm instanceof Map<?, ?> m)) return named;
+        int moving = 0;
+        for (Map.Entry<?, ?> e : m.entrySet()) {
+            if (!(e.getKey() instanceof String k)) continue;
+            String up = k.toUpperCase();
+            if ("WAIT".equals(up) || "TRANSFER".equals(up)) continue;
+            if (e.getValue() instanceof Number n && n.doubleValue() > 0) moving++;
+        }
+        return Math.max(moving, named);
+    }
+
     @PostMapping("/select")
     @Operation(summary = "Record a journey mode selection")
     public ResponseEntity<?> select(
@@ -460,9 +525,22 @@ public class JourneyController {
                 : greenIndexService.computeCo2Grams(mode, distanceKm);
         int greenIndex = greenIndexService.greenIndexFor(co2Grams, distanceKm);
 
+        // How long the accepted itinerary was expected to take. Rejecting a bad
+        // value would stop a traveller from starting a journey over a statistic,
+        // so an unusable duration is simply not recorded — the trip is written
+        // without one and the averages leave it out.
+        Integer durationMinutes = readDuration(body.get("duration_minutes"));
+
+        // Moving pieces only: waiting for a bus and changing at a stop take time
+        // but cover no ground, and counting them would make every bus trip look
+        // like a chain. Falls back to the number of modes named in the chain when
+        // the client sent no legs at all.
+        int legs = countLegs(body.get("legs_km"), mode);
+
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
         journeyEventService.recordJourneySearch(
-                mode, now.getHour(), now.getDayOfWeek().toString(), greenIndex, distanceKm
+                mode, now.getHour(), now.getDayOfWeek().toString(), greenIndex, distanceKm,
+                durationMinutes, costEuros, legs
         );
 
         journeyLogRepository.save(JourneyLog.builder()
@@ -472,6 +550,7 @@ public class JourneyController {
                 .costEuros(costEuros)
                 .co2Grams(co2Grams)
                 .greenIndex(greenIndex)
+                .durationMinutes(durationMinutes)
                 .originName(originName)
                 .destName(destName)
                 // Kept so the trip can be replayed even when an end was a point
@@ -685,6 +764,10 @@ public class JourneyController {
         byRoute.forEach((routeId, points) -> {
             var route = routes.get(routeId);
             if (route != null && !route.isActive()) return;   // retired line: not on the map
+            // The return route's geometry is the outbound's, travelled the other
+            // way: drawing both would stack two identical lines on the map and
+            // put the same number twice in the legend.
+            if (isReturnRoute(routeId)) return;
             String shortName = route != null && route.getShortName() != null
                     ? route.getShortName() : routeId;
             String longName  = route != null && route.getLongName() != null

@@ -113,12 +113,21 @@ public class DataRetentionService {
     }
 
     // ── 2. Security logs ────────────────────────────────────────────
+    /**
+     * Both registers of the same events age out together: security_audit_events
+     * and the readable copy of the export records shown on an operator's card.
+     * Keeping one after the other would leave the card claiming a history the
+     * audit can no longer corroborate.
+     */
     void purgeSecurityEvents() {
         if (!windowIsSane(RULE_SECURITY, securityDays, "days")) return;
         ZonedDateTime cutoff = ZonedDateTime.now(ROME).minusDays(securityDays);
-        run(RULE_SECURITY, cutoff, () -> jdbc.update(
-                "DELETE FROM security_audit_events WHERE created_at < ?",
-                Timestamp.from(cutoff.toInstant())));
+        Timestamp ts = Timestamp.from(cutoff.toInstant());
+        run(RULE_SECURITY, cutoff, () -> {
+            int events  = jdbc.update("DELETE FROM security_audit_events WHERE created_at < ?", ts);
+            int exports = jdbc.update("DELETE FROM admin_exports WHERE exported_at < ?", ts);
+            return events + exports;
+        });
     }
 
     // ── 3. Consent ledger ───────────────────────────────────────────

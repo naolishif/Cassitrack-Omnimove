@@ -79,7 +79,7 @@ public class RouteController {
         List<RouteGeometry> out = new ArrayList<>();
         for (Route r : routeRepository.findAll()) {
             if (!r.isActive()) continue;
-            // Da V26 le fermate della linea si leggono dal pattern, non da una
+            // Da V27 le fermate della linea si leggono dal pattern, non da una
             // corsa presa a campione: una linea senza corse programmate ha
             // comunque un percorso, e prima spariva da questa mappa.
             List<StopPoint> pts = new ArrayList<>();
@@ -366,7 +366,7 @@ public class RouteController {
         // L'i-esimo vertice marcato come fermata è l'i-esima fermata del
         // pattern: è la stessa corrispondenza che il salvataggio costruisce,
         // letta al contrario. Se le due liste divergono (shape disegnata prima
-        // di V26, o modificata a mano) i vertici in eccesso restano senza id e
+        // di V27, o modificata a mano) i vertici in eccesso restano senza id e
         // l'editor li tratterà come fermate da riagganciare.
         List<String> patternStops = routePatternService.stopIds(id);
         List<ShapeVertex> path = new ArrayList<>();
@@ -425,7 +425,7 @@ public class RouteController {
      * Ridefinisce il percorso di una linea: il tracciato disegnato E le sue
      * fermate, propagando il cambio alle corse.
      *
-     * Fino a V26 questo endpoint RIFIUTAVA di cambiare le fermate, e con
+     * Fino a V27 questo endpoint RIFIUTAVA di cambiare le fermate, e con
      * ragione: la sequenza viveva duplicata in ogni corsa, quindi riscriverla
      * avrebbe voluto dire inventare gli orari di tutte. Ora le fermate
      * appartengono alla linea e gli orari alla corsa, quindi il cambio si

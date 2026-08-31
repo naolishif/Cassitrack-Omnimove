@@ -21,4 +21,13 @@ public class UserDTO {
 
     /** Total accesses recorded — drives the "N accesses" hint in the dashboard. */
     private Long loginCount;
+
+    /**
+     * Messages from this person that nobody has opened yet.
+     *
+     * <p>Account metadata, not content: the list view shows that something is
+     * waiting, the message itself is only readable from the individual record —
+     * the same rule the privacy notice states for journey history.
+     */
+    private Long unreadMessages;
 }

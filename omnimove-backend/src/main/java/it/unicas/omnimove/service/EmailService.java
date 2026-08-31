@@ -92,6 +92,21 @@ public class EmailService {
         log.info("[EMAIL] Welcome email ({}) sent to {}", lang, to);
     }
 
+    /**
+     * Acknowledges a message sent from inside the app.
+     *
+     * <p>Sent on the same path as every other e-mail here, so a failure is
+     * logged and swallowed: the message is already stored, and the person who
+     * wrote it should not be told their feedback was lost because our SMTP was
+     * having a bad day.
+     */
+    public void sendMessageReceivedEmail(String to, String name, String messageBody, String lang) {
+        boolean it = "it".equalsIgnoreCase(lang);
+        String subject = it ? "Abbiamo ricevuto il tuo messaggio" : "We have received your message";
+        sendHtml(to, subject, buildMessageReceivedHtml(name, messageBody, it));
+        log.info("[EMAIL] Message acknowledgement ({}) sent to {}", lang, to);
+    }
+
     // ── Internal helpers ────────────────────────────────────────────
 
     private void sendHtml(String to, String subject, String htmlBody) {
@@ -163,6 +178,43 @@ public class EmailService {
             """.formatted(title, hi, body, url("/omnimove-login.html"), cta, sign);
 
         return shell(content, footer);
+    }
+
+    private String buildMessageReceivedHtml(String name, String messageBody, boolean it) {
+        String title = it ? "Grazie per averci scritto" : "Thank you for writing to us";
+        String hi    = it ? ("Ciao " + name + ",") : ("Hi " + name + ",");
+        String body  = it
+            ? "Il tuo contributo &egrave; importante. Il tuo messaggio verr&agrave; preso presto in esame "
+            + "dai nostri sviluppatori, e se serve ti ricontatteremo a questo indirizzo."
+            : "Your contribution matters. Your message will be looked at shortly by our developers, "
+            + "and we will get back to you at this address if we need to.";
+        String quotedLabel = it ? "Il messaggio che ci hai inviato:" : "The message you sent us:";
+        String sign  = it ? "A presto,<br><strong>Il team OMNIMOVE</strong>"
+                          : "Talk soon,<br><strong>The OMNIMOVE team</strong>";
+        String footer = it ? "OMNIMOVE – Universit&agrave; di Cassino, UNICAS 2025/2026"
+                           : "OMNIMOVE – University of Cassino, UNICAS 2025/2026";
+
+        // Quoted back so the sender has a record of what they wrote. Escaped:
+        // it is their own text and must never be read as markup in an inbox.
+        String content = """
+              <p style="font-size:20px;font-weight:bold;margin:0 0 16px;color:#0f172a;">%s</p>
+              <p style="font-size:14px;margin:0 0 8px;">%s</p>
+              <p style="font-size:14px;line-height:1.6;margin:0 0 24px;">%s</p>
+              <p style="font-size:12px;color:#64748b;margin:0 0 8px;">%s</p>
+              <blockquote style="margin:0 0 24px;padding:12px 16px;background:#f1f5f9;
+                 border-left:3px solid #cbd5e1;border-radius:4px;font-size:14px;
+                 line-height:1.6;color:#334155;white-space:pre-wrap;">%s</blockquote>
+              <p style="font-size:14px;line-height:1.6;margin:0 0 24px;">%s</p>
+            """.formatted(title, hi, body, quotedLabel, escapeHtml(messageBody), sign);
+
+        return shell(content, footer);
+    }
+
+    /** The message is the sender's own text: it goes into the mail as text. */
+    private static String escapeHtml(String s) {
+        return (s == null ? "" : s)
+                .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 
     private String buildHtml(String title, String hi, String body, String linkHref,

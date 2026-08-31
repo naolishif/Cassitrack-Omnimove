@@ -212,6 +212,19 @@ const OMNI_T = {
     // Profile stats
     stat_eco_pts:'Eco pts', stat_co2:'CO₂ saved', stat_trips:'Trips', stat_spent:'Spent (30d)',
     stat_window:'Last 12 months \u00b7 spending over 30 days',
+    nav_messages:'Write to us', ptab_messages:'Write to us',
+    label_write_us:'Write to us',
+    msg_intro:'Tell us what you think, report anything that went wrong, and a developer will get back to you.',
+    msg_placeholder:'Share your feedback, report any problems \u2014 a developer will get back to you',
+    msg_send:'Send',
+    label_msg_history:'Messages you have sent',
+    msg_none:'You have not written to us yet.',
+    msg_sent:'Thank you \u2014 we have your message and sent you a confirmation by e-mail.',
+    msg_empty:'Write something first.',
+    msg_failed:'Could not send the message. Please try again.',
+    msg_load_failed:'Could not load your messages.',
+    msg_state_sent:'Sent',
+    msg_state_read:'Read',
     ai_nudge:'Ask OmniAI about your route',
     // Tickets
     section_my_tickets:'Fares',
@@ -630,6 +643,19 @@ const OMNI_T = {
     // Profile stats
     stat_eco_pts:'Eco pts', stat_co2:'CO₂ risparmiata', stat_trips:'Percorsi', stat_spent:'Spesi (30g)',
     stat_window:'Ultimi 12 mesi \u00b7 spesa sugli ultimi 30 giorni',
+    nav_messages:'Scrivici', ptab_messages:'Scrivici',
+    label_write_us:'Scrivici',
+    msg_intro:'Dicci cosa ne pensi, segnalaci eventuali errori: verrai ricontattato da uno sviluppatore.',
+    msg_placeholder:'Esprimi il tuo feedback, segnalaci eventuali errori \u2014 verrai ricontattato da uno sviluppatore',
+    msg_send:'Invia',
+    label_msg_history:'Messaggi che hai inviato',
+    msg_none:'Non ci hai ancora scritto.',
+    msg_sent:'Grazie \u2014 abbiamo ricevuto il tuo messaggio e ti abbiamo inviato una conferma via e-mail.',
+    msg_empty:'Scrivi prima qualcosa.',
+    msg_failed:'Non \u00e8 stato possibile inviare il messaggio. Riprova.',
+    msg_load_failed:'Non \u00e8 stato possibile caricare i tuoi messaggi.',
+    msg_state_sent:'Inviato',
+    msg_state_read:'Letto',
     ai_nudge:'Chiedi a OmniAI sul tuo percorso',
     // Tickets
     section_my_tickets:'Listino prezzi',
@@ -861,7 +887,10 @@ function applyTranslations() {
   const lang = getLang();
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.dataset.i18n;
-    if (el.tagName === 'INPUT') { el.placeholder = t(key); }
+    // TEXTAREA alongside INPUT: on a textarea the translated string is the
+    // placeholder too. Setting textContent instead would type the hint into
+    // the box as if the user had written it.
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') { el.placeholder = t(key); }
     // Strings ending in _html hold markup (the privacy checkbox needs a link
     // inside the sentence). They come from this file, never from user input.
     else if (key.endsWith('_html')) { el.innerHTML = t(key); }

@@ -9,7 +9,7 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * Il pattern di fermate di una linea (V26). Vedi {@link RouteStop}.
+ * Il pattern di fermate di una linea (V27). Vedi {@link RouteStop}.
  */
 public interface RouteStopRepository extends JpaRepository<RouteStop, RouteStop.Key> {
 

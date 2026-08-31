@@ -151,7 +151,7 @@ function renderTable(data) {
     <tr>
       <td class="text-mono">#${escHtml(u.id)}</td>
       <td><button class="name-cell" onclick="openProfile(${u.id})"
-                  title="Open profile">${escHtml(u.name)}</button></td>
+                  title="Open profile">${escHtml(u.name)}</button>${unreadTag(u)}</td>
       <td style="color:var(--text-secondary);font-size:12px">${escHtml(u.email)}</td>
       <td><span class="badge ${roles[u.role] || 'badge-user'}">${escHtml(u.role)}</span></td>
       <td class="text-mono" style="font-size:11px">${escHtml(fmtDateTime(u.registeredAt))}</td>
@@ -273,6 +273,84 @@ function signUpBadge(account) {
 }
 
 /**
+ * The messages this person has written.
+ *
+ * <p>Outside the travel block on purpose: a message is account data, not a
+ * journey, so it is shown even for an operator account that never travels.
+ * Opening this card is what marks them read server-side, which is why the
+ * unread marker in the list clears as soon as somebody looks.
+ */
+/**
+ * The marker beside a name when messages are waiting.
+ *
+ * <p>A count, not a dot: "3 unread" and "1 unread" are different amounts of
+ * someone's patience. It disappears the moment the card is opened, because
+ * that is when the server marks them read.
+ */
+function unreadTag(u) {
+    const n = Number(u.unreadMessages || 0);
+    if (!n) return '';
+    return ' <span class="unread-tag" title="Unread messages">\u2709 ' + n + '</span>';
+}
+
+/**
+ * What this person has downloaded, and when.
+ *
+ * <p>The two kinds are kept apart on purpose: the analytics report carries
+ * aggregate figures and nothing personal, while the user list is names and
+ * e-mail addresses. Reading "3 downloads" without that distinction would say
+ * very little.
+ */
+function renderUserExports(summary) {
+    const box = document.getElementById('profileExports');
+    if (!box) return;
+    const rows = summary.recent || [];
+    const total = Number(summary.total || 0);
+
+    setSectionTitle('profileExportsTitle', 'Data downloads (' + total + ')');
+    if (!rows.length) {
+        box.innerHTML = '<div class="history-empty">This user has never downloaded data.</div>';
+        return;
+    }
+
+    const label = k => k === 'USER_LIST'
+        ? '<span class="exp-tag exp-tag--personal">USER DATA</span>'
+        : '<span class="exp-tag">ANALYTICS</span>';
+
+    box.innerHTML = rows.map(x =>
+        '<div class="exp-row">'
+      +   label(x.kind)
+      +   '<span class="exp-detail">' + escHtml(x.detail || '') + '</span>'
+      +   '<span class="exp-date text-mono">' + escHtml(fmtDateTime(x.at)) + '</span>'
+      + '</div>').join('')
+      + (total > rows.length
+          ? '<div class="history-empty">' + (total - rows.length)
+            + ' older downloads not listed.</div>'
+          : '');
+}
+
+function renderUserMessages(messages) {
+    const box   = document.getElementById('profileMessages');
+    const title = document.getElementById('profileMessagesTitle');
+    if (!box) return;
+
+    setSectionTitle('profileMessagesTitle', 'Messages (' + messages.length + ')');
+    if (!messages.length) {
+        box.innerHTML = '<div class="history-empty">No messages from this user.</div>';
+        return;
+    }
+    // The text is the user's own: escaped, and shown with its line breaks.
+    box.innerHTML = messages.map(m =>
+        '<div class="msg-row' + (m.read ? '' : ' msg-row--new') + '">'
+      + '<div class="msg-row-head">'
+      +   '<span class="text-mono" style="font-size:11px">' + escHtml(fmtDateTime(m.createdAt)) + '</span>'
+      +   (m.read ? '' : '<span class="msg-new-tag">NEW</span>')
+      + '</div>'
+      + '<div class="msg-row-body">' + escHtml(m.body) + '</div>'
+      + '</div>').join('');
+}
+
+/**
  * Whether this person has been shown, and acknowledged, each notice.
  *
  * Three states, not two: never shown, acknowledged under the text currently
@@ -313,6 +391,9 @@ function renderProfile(data) {
     document.getElementById('profileNotices').innerHTML =
         noticeBadge('Privacy notice', ack.PRIVACY_NOTICE) +
         noticeBadge('Cookie notice',  ack.COOKIE_NOTICE);
+
+    renderUserMessages(data.messages || []);
+    renderUserExports(data.exports || {});
 
     // Admin accounts carry no travel story — the server does not even compute it
     const travelBlock = document.getElementById('travelBlock');
@@ -506,9 +587,12 @@ async function saveProfile() {
     }
 }
 
+// Reloads the list on close: the messages were marked read while the card was
+// open, so the marker beside the name is now stale.
 function closeProfileModal() {
     document.getElementById('profileModal').classList.remove('open');
     _profileUserId = null;
+    refreshNow();          // the unread marker beside the name is now stale
 }
 
 // ── Access history modal ──
@@ -707,6 +791,9 @@ function byDateAsc(x, y) {
     return dx - dy;
 }
 
+// The rows currently listed, after search, role, dates and sort.
+let visibleUsers = [];
+
 function applyFilter() {
     const q     = document.getElementById('searchInput').value.trim().toLowerCase();
     const role  = document.getElementById('roleFilter').value;
@@ -741,6 +828,10 @@ function applyFilter() {
     });
 
     rows.sort(SORTERS[sort] || SORTERS['id-asc']);
+    // Kept so the export can hand over exactly what is on screen. Re-filtering
+    // it a second time, here or on the server, is how a file ends up disagreeing
+    // with the table it was downloaded from.
+    visibleUsers = rows;
     renderTable(rows);
 
     const count = document.getElementById('filterCount');
@@ -749,6 +840,85 @@ function applyFilter() {
         : `${rows.length} of ${users.length}`;
     count.style.color = rows.length === users.length
         ? 'var(--text-secondary)' : 'var(--accent-cyan)';
+}
+
+/**
+ * Downloads the user list as CSV.
+ *
+ * <p>Built here rather than on the server so that it is, by construction, the
+ * table the operator is looking at — filters and sort included. The rows are
+ * already in the browser: this adds no disclosure that GET /admin/users has not
+ * already made, and that call is itself audited.
+ *
+ * <p>What it does add is a copy leaving the system, so the server is told a
+ * download happened. That is a different event from reading the list, and the
+ * existing one fires on every refresh.
+ */
+async function exportUsersCsv(btn) {
+    const rows = visibleUsers.length ? visibleUsers : users;
+    if (!rows.length) { toast('Nothing to export'); return; }
+
+    const filters = describeFilters();
+    const header = [
+        ['OMNIMOVE — user list'],
+        ['Generated', fmtDateTime(new Date().toISOString())],
+        ['Filters', filters],
+        ['Users', String(rows.length)],
+        []
+    ];
+    const cols = ['ID', 'Full name', 'Email', 'Role', 'Verified',
+                  'Registered', 'Last login', 'Accesses', 'Unread messages'];
+    const body = rows.map(u => [
+        u.id, u.name || '', u.email || '', u.role || '',
+        u.verified === false ? 'no' : 'yes',
+        u.registeredAt ? fmtDateTime(u.registeredAt) : '',
+        u.lastLoginAt  ? fmtDateTime(u.lastLoginAt)  : 'never',
+        u.loginCount == null ? '' : u.loginCount,
+        u.unreadMessages || 0
+    ]);
+
+    const csv = '\uFEFF' + header.concat([cols], body).map(csvRow).join('\r\n');
+    const name = 'omnimove-users-' + new Date().toISOString().slice(0, 10) + '.csv';
+    saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), name);
+
+    // Fire and forget: the file is already on its way, and a logging failure
+    // must not look to the operator like the export failed.
+    apiFetch('/admin/users/export-log', {
+        method: 'POST',
+        body: JSON.stringify({ count: rows.length, filters: filters })
+    }).catch(e => console.warn('Could not record the export:', e));
+
+    toast(name + ' downloaded');
+}
+
+/** RFC 4180: quote when the value holds a delimiter, a quote or a newline. */
+function csvRow(cells) {
+    return cells.map(v => {
+        const s = v === null || v === undefined ? '' : String(v);
+        return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(',');
+}
+
+/** The filters in force, written into the file so it explains its own scope. */
+function describeFilters() {
+    const bits = [];
+    const q    = document.getElementById('searchInput').value.trim();
+    const role = document.getElementById('roleFilter').value;
+    const from = document.getElementById('fromDate').value;
+    const to   = document.getElementById('toDate').value;
+    if (q)    bits.push('search "' + q + '"');
+    if (role) bits.push('role ' + role);
+    if (from) bits.push('registered from ' + from);
+    if (to)   bits.push('registered to ' + to);
+    return bits.length ? bits.join('; ') : 'none';
+}
+
+function saveBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function clearFilters() {
@@ -935,24 +1105,91 @@ const RANGE_LABELS = {
 };
 let currentRange = '1M';
 
+// A custom period travels as from/to on the request; currentRange holds the
+// literal 'CUSTOM' so the preset stays highlighted while the dates are edited.
+let customFrom = null, customTo = null;
+
 document.getElementById('rangeBar').addEventListener('click', e => {
     const btn = e.target.closest('.range-btn');
     if (!btn) return;
     document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentRange = btn.dataset.range;
+
+    const box = document.getElementById('customRange');
+    if (currentRange === 'CUSTOM') {
+        box.hidden = false;
+        syncCustomRange();
+        // Nothing is reloaded yet: the operator has not said which period yet,
+        // and refetching the previous one would only make the page flicker.
+        if (!customFrom || !customTo) {
+            document.getElementById('rangeLabel').textContent = 'Pick a period';
+            return;
+        }
+        loadAnalytics(currentRange);
+        return;
+    }
+
+    box.hidden = true;
     document.getElementById('rangeLabel').textContent = RANGE_LABELS[currentRange] || '';
     loadAnalytics(currentRange);
+});
+
+/** Enables Apply only for a complete, correctly ordered pair. */
+function syncCustomRange() {
+    const from = document.getElementById('rangeFrom').value;
+    const to   = document.getElementById('rangeTo').value;
+    const note = document.getElementById('rangeNote');
+    const btn  = document.getElementById('rangeApply');
+
+    if (!from || !to)          { btn.disabled = true;  note.textContent = 'Choose both dates'; return; }
+    if (from > to)             { btn.disabled = true;  note.textContent = 'The start is after the end'; return; }
+    btn.disabled = false;
+    note.textContent = '';
+}
+
+function applyCustomRange() {
+    customFrom = document.getElementById('rangeFrom').value;
+    customTo   = document.getElementById('rangeTo').value;
+    if (!customFrom || !customTo) return;
+    currentRange = 'CUSTOM';
+    document.getElementById('rangeLabel').textContent = customFrom + ' → ' + customTo;
+    loadAnalytics(currentRange);
+}
+
+['rangeFrom', 'rangeTo'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', syncCustomRange);
 });
 
 // ── Analytics: real data from InfluxDB ──────────────────────────────────
 let modeChart = null;
 let greenChart = null;
 
+/**
+ * The window as query parameters. A preset travels as range=; a custom period
+ * adds from= and to=, which the server folds into the same window every panel
+ * and the export use — so the screen and the downloaded report cannot disagree.
+ */
+function rangeQuery(range) {
+    const p = new URLSearchParams({ range: range || '1M' });
+    if (range === 'CUSTOM' && customFrom && customTo) {
+        p.set('from', customFrom);
+        p.set('to', customTo);
+    }
+    return p.toString();
+}
+
 async function loadAnalytics(range = '1M') {
+    // The captions are set from the range that was ASKED for, before the answer
+    // arrives. A failed load used to return here leaving the previous range's
+    // numbers on screen under the previous range's captions: the operator saw
+    // "1Y" selected, "Last 12 months" in the corner, and figures labelled "last
+    // 30 days" — stale data presented as current, which is worse than a gap.
+    setKpiCaptions(range);
     try {
-        const r = await apiFetch(`/admin/analytics?range=${range}`);
-        if (!r.ok) { console.warn('Analytics endpoint error', r.status); return; }
+        const r = await apiFetch('/admin/analytics?' + rangeQuery(range));
+        if (!r.ok) { console.warn('Analytics endpoint error', r.status); clearKpis(); return; }
         const data = await r.json();
 
         updateKpis(data.kpis, range);
@@ -961,35 +1198,68 @@ async function loadAnalytics(range = '1M') {
         updateGreenIndexChart(data.greenIndexTrend, range);
         updateDayOfWeek(data.dayOfWeek);
         updateTopRoutes(data.topRoutes);
+        updateCombined(data.combined);
 
     } catch(e) {
         console.error('loadAnalytics error:', e);
+        clearKpis();
     }
 }
 
+/**
+ * Captions only, from the range the operator picked. Split out of updateKpis so
+ * they are right even when no figures come back — the caption describes the
+ * question, and the question was asked whatever the answer was.
+ */
+function setKpiCaptions(range) {
+    const label = range === 'CUSTOM' && customFrom && customTo
+        ? customFrom + ' → ' + customTo
+        : (RANGE_LABELS[range] || '').toLowerCase();
+    const sub = (id, text, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = text;
+        el.className = cls || 'sub';
+    };
+    sub('kpiSearchesSub',   'queries in ' + label);
+    sub('kpiSelectionsSub', 'confirmed trips · ' + label);
+    sub('kpiCo2Sub',        'vs all-car alternative · ' + label, 'sub up');
+}
+
+/** Nothing to show. A dash, not the last range's numbers. */
+function clearKpis() {
+    ['kpiSearches', 'kpiSelections', 'kpiCo2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '—';
+    });
+    const el = document.getElementById('kpiSearchesSub');
+    if (el) { el.textContent = 'could not be loaded'; el.className = 'sub warn'; }
+    clearCombined();
+}
+
 function updateKpis(kpis, range) {
-    if (!kpis) return;
-    const label = RANGE_LABELS[range] || '';
+    if (!kpis) { clearKpis(); return; }
+    setKpiCaptions(range);
 
     // KPI 1 — Searches
     const searches = Number(kpis.totalSearches);
     document.getElementById('kpiSearches').textContent = searches.toLocaleString('it-IT');
-    document.getElementById('kpiSearchesSub').textContent =
-        searches === 0 ? 'tracking from today' : `queries in ${label.toLowerCase()}`;
-    document.getElementById('kpiSearchesSub').className = 'sub';
+    // Zero over the whole window means the counter only started recently, which
+    // is worth saying instead of an empty "queries in last 12 months".
+    if (searches === 0) {
+        const el = document.getElementById('kpiSearchesSub');
+        el.textContent = 'tracking from today';
+        el.className = 'sub';
+    }
 
     // KPI 2 — Selections
     const selections = Number(kpis.totalSelections);
     document.getElementById('kpiSelections').textContent = selections.toLocaleString('it-IT');
-    document.getElementById('kpiSelectionsSub').textContent = `confirmed trips · ${label.toLowerCase()}`;
-    document.getElementById('kpiSelectionsSub').className = 'sub';
 
     // KPI 3 — CO₂ Saved
     const co2 = Number(kpis.co2SavedKg);
     document.getElementById('kpiCo2').textContent =
         co2 >= 1000 ? `${(co2/1000).toFixed(1)} t` : `${co2} kg`;
-    document.getElementById('kpiCo2Sub').textContent = `vs all-car alternative · ${label.toLowerCase()}`;
-    document.getElementById('kpiCo2Sub').className = 'sub up';
 
     // Update Green Index badge in chart card
     if (kpis.avgGreenIndex != null)
@@ -1132,6 +1402,380 @@ function updateGreenIndexChart(trend, range) {
     });
 }
 
+// ── Combined journeys (MaaS panel) ───────────────────────────────────────
+// The chain is never folded here. Everywhere else on this page a stitched
+// itinerary is one category called "Combined", because a doughnut with a slice
+// per chain would be unreadable; in this block the chain IS the subject, and
+// the order it is ridden in is the finding — Bus → Scooter is somebody solving
+// the last mile, Scooter → Bus is somebody solving the first one.
+let combinedChainChart = null, combinedDurationChart = null,
+    combinedRoleChart  = null, combinedHourChart     = null,
+    combinedCompareChart = null;
+
+const CHAIN_COLORS = ['#fbbf24','#38bdf8','#34d399','#a855f7','#f87171','#60a5fa','#f472b6','#22d3ee'];
+
+/** "BUS_SCOOTER" → "🚌 Bus → 🛴 E-Scooter", in the order ridden. */
+function chainLabel(chain) {
+    return String(chain || '').split('_')
+        .map(p => `${MODE_EMOJI[p] || ''} ${MODE_NAME[p] || p}`.trim())
+        .join(' → ');
+}
+
+const VEHICLE_MODES = ['BIKE', 'SCOOTER'];
+
+/** A figure that was never recorded reads as a dash, never as a zero. */
+const fig = (v, suffix = '') => (v === null || v === undefined) ? '—' : `${v}${suffix}`;
+
+/**
+ * Swaps a chart for a sentence when there is nothing to draw. An empty canvas
+ * looks like a chart that failed; "no combined journeys in this period" is a
+ * finding, and for a MaaS pilot often the most important one.
+ */
+function chartOrNote(canvasId, emptyMessage) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+    const wrap = canvas.parentElement;
+    let note = wrap.querySelector('.chain-empty');
+    if (emptyMessage) {
+        if (!note) {
+            note = document.createElement('div');
+            note.className = 'chain-empty';
+            wrap.appendChild(note);
+        }
+        note.textContent = emptyMessage;
+        note.style.display = '';
+        canvas.style.display = 'none';
+        return null;
+    }
+    if (note) note.style.display = 'none';
+    canvas.style.display = '';
+    return canvas;
+}
+
+function clearCombined() {
+    ['kpiCombined','kpiCombinedShare','kpiCombinedDuration','kpiCombinedCo2']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '—'; });
+    const tb = document.getElementById('combinedChainTbody');
+    if (tb) tb.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-dim);padding:20px;font-size:12px">No combined journeys in this period</td></tr>`;
+    const list = document.getElementById('combinedChainList');
+    if (list) list.innerHTML = '';
+}
+
+function updateCombined(c) {
+    if (!c) { clearCombined(); return; }
+
+    const total  = Number(c.combinedJourneys) || 0;
+    const chains = Array.isArray(c.chains) ? c.chains : [];
+
+    // ── KPI row ──
+    document.getElementById('kpiCombined').textContent = total.toLocaleString('it-IT');
+    document.getElementById('kpiCombinedSub').textContent =
+        `${chains.length} distinct chain${chains.length === 1 ? '' : 's'} · of ${Number(c.totalJourneys || 0).toLocaleString('it-IT')} trips`;
+
+    document.getElementById('kpiCombinedShare').textContent = `${fig(c.combinedShare)}%`;
+
+    document.getElementById('kpiCombinedDuration').textContent =
+        c.avgDurationMin == null ? '—' : `${c.avgDurationMin} min`;
+    // The duration was added later than the rest, so the average can speak for
+    // fewer journeys than the count above it. Saying which is the difference
+    // between an average and a claim.
+    const timed = Number(c.timedJourneys) || 0;
+    document.getElementById('kpiCombinedDurationSub').textContent =
+        total === 0 ? 'no combined trips yet'
+        : timed === 0 ? 'no trip timed yet'
+        : timed < total ? `median ${fig(c.medianDurationMin)} · from ${timed} of ${total} trips`
+        : `median ${fig(c.medianDurationMin)} min · ${fig(c.avgLegs)} legs avg`;
+
+    const co2 = Number(c.co2SavedKg) || 0;
+    document.getElementById('kpiCombinedCo2').textContent =
+        co2 >= 1000 ? `${(co2/1000).toFixed(1)} t` : `${co2} kg`;
+    document.getElementById('kpiCombinedCo2Sub').textContent =
+        `avg green index ${fig(c.avgGreenIndex)} · ${fig(c.avgDistanceKm)} km per trip`;
+
+    // How many moving legs a chain really has. Two is the shape the planner
+    // names — BUS_SCOOTER — but a trip that changes bus on the way carries
+    // three, and how often that happens is how complicated the offer has got.
+    const legNote = document.getElementById('combinedLegNote');
+    if (legNote) {
+        const legs = Object.entries(c.legCount || {})
+            .sort((a, b) => Number(a[0]) - Number(b[0]))
+            .map(([n, count]) => `${n} legs: ${count}`)
+            .join(' · ');
+        const opens = Object.entries(c.firstLeg || {})
+            .map(([m, n]) => `${MODE_NAME[m] || m} ${n}`).join(' · ');
+        legNote.textContent = legs
+            ? `${legs}${opens ? ` · opens with — ${opens}` : ''}`
+            : '';
+    }
+
+    updateCombinedChains(chains);
+    updateCombinedDuration(c);
+    updateCombinedRole(chains, c);
+    updateCombinedHour(c.byHour);
+    updateCombinedCompare(c.comparison);
+    updateCombinedTable(chains);
+}
+
+/** How often each chain is chosen — the composition question itself. */
+function updateCombinedChains(chains) {
+    const list = document.getElementById('combinedChainList');
+    const canvas = chartOrNote('chartCombinedChains',
+        chains.length ? null : 'No combined journeys were confirmed in this period.');
+    if (!canvas) { if (list) list.innerHTML = ''; return; }
+
+    const labels = chains.map(c => chainLabel(c.chain));
+    const values = chains.map(c => Number(c.journeys));
+    const colors = chains.map((_, i) => CHAIN_COLORS[i % CHAIN_COLORS.length]);
+
+    if (combinedChainChart) combinedChainChart.destroy();
+    combinedChainChart = new Chart(canvas, {
+        type: 'bar',
+        data: { labels, datasets: [{
+            label: 'Journeys', data: values,
+            backgroundColor: colors, borderRadius: 4, borderSkipped: false
+        }]},
+        options: {
+            indexAxis: 'y',
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: {
+                    label: ctx => ` ${ctx.parsed.x} trips · ${chains[ctx.dataIndex].share}%`
+                }}
+            },
+            scales: {
+                x: { ticks:{ color:'#3d5268', font:{family:'Inter',size:9}, precision:0 },
+                     grid:{ color:'#1e2d3d' } },
+                y: { ticks:{ color:'#7a90a8', font:{family:'Inter',size:10} },
+                     grid:{ display:false } }
+            }
+        }
+    });
+
+    list.innerHTML = chains.map((c, i) => `
+      <div class="chain-row">
+        <div class="chain-swatch" style="background:${colors[i]}"></div>
+        <span class="chain-name">${chainLabel(c.chain)}</span>
+        <span class="chain-figure">${Number(c.journeys).toLocaleString('it-IT')}</span>
+        <span class="chain-figure" style="color:${colors[i]};min-width:44px;text-align:right">${c.share}%</span>
+      </div>`).join('');
+}
+
+/** How long a combined trip takes, as a spread rather than one number. */
+function updateCombinedDuration(c) {
+    const buckets = c.durationBuckets || {};
+    const values  = Object.values(buckets).map(Number);
+    const any     = values.some(v => v > 0);
+
+    document.getElementById('combinedMedianBadge').textContent =
+        c.avgDurationMin == null ? '—'
+        : `avg ${c.avgDurationMin} min · median ${fig(c.medianDurationMin)} min`;
+
+    const note = document.getElementById('combinedDurationNote');
+    const canvas = chartOrNote('chartCombinedDuration',
+        any ? null : 'No combined journey in this period carries a duration yet.');
+    if (!canvas) { if (note) note.textContent = ''; return; }
+
+    if (note) {
+        const timed = Number(c.timedJourneys) || 0;
+        note.textContent = `${timed} timed trip${timed === 1 ? '' : 's'} · `
+            + `${fig(c.avgDistanceKm)} km and ${fig(c.avgLegs)} legs on average · `
+            + `€${fig(c.avgCostEuros)} per trip`;
+    }
+
+    if (combinedDurationChart) combinedDurationChart.destroy();
+    combinedDurationChart = new Chart(canvas, {
+        type: 'bar',
+        data: { labels: Object.keys(buckets), datasets: [{
+            label: 'Journeys', data: values,
+            backgroundColor: 'rgba(251,191,36,.7)', borderRadius: 4, borderSkipped: false
+        }]},
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend:{ display:false },
+                       tooltip:{ callbacks:{ label: ctx => ` ${ctx.parsed.y} trips` } } },
+            scales: {
+                x: { ticks:{ color:'#7a90a8', font:{family:'Inter',size:10} }, grid:{ display:false } },
+                y: { ticks:{ color:'#3d5268', font:{family:'Inter',size:9}, precision:0 },
+                     grid:{ color:'#1e2d3d' },
+                     title:{ display:true, text:'Trips', color:'#3d5268', font:{family:'Inter',size:9} } }
+            }
+        }
+    });
+}
+
+/**
+ * Where the shared vehicle sits in the chain. Riding it before the bus is
+ * somebody reaching the network; riding it after is somebody leaving it. The
+ * two are solved by different things — a vehicle bay at the stop, or vehicles
+ * spread through the neighbourhood — so the split is worth its own chart.
+ */
+function updateCombinedRole(chains, c) {
+    const tally = { BIKE: { first: 0, last: 0 }, SCOOTER: { first: 0, last: 0 } };
+    for (const row of chains) {
+        const parts = String(row.chain || '').split('_');
+        const n = Number(row.journeys) || 0;
+        parts.forEach((p, i) => {
+            if (!VEHICLE_MODES.includes(p)) return;
+            // Before any bus in the chain = first mile, after it = last mile.
+            const busAt = parts.indexOf('BUS');
+            if (busAt === -1) return;
+            tally[p][i < busAt ? 'first' : 'last'] += n;
+        });
+    }
+
+    const used = VEHICLE_MODES.filter(m => tally[m].first + tally[m].last > 0);
+    const note = document.getElementById('combinedRoleNote');
+    const canvas = chartOrNote('chartCombinedRole',
+        used.length ? null : 'No chain in this period rides a shared vehicle.');
+    if (!canvas) { if (note) note.textContent = ''; return; }
+
+    if (combinedRoleChart) combinedRoleChart.destroy();
+    combinedRoleChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: used.map(m => `${MODE_EMOJI[m]} ${MODE_NAME[m]}`),
+            datasets: [
+                { label: 'First mile — vehicle, then bus',
+                  data: used.map(m => tally[m].first),
+                  backgroundColor: '#38bdf8', borderRadius: 4, borderSkipped: false },
+                { label: 'Last mile — bus, then vehicle',
+                  data: used.map(m => tally[m].last),
+                  backgroundColor: '#fbbf24', borderRadius: 4, borderSkipped: false }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend:{ labels:{ color:'#7a90a8', font:{family:'Inter',size:10}, boxWidth:10 } },
+                       tooltip:{ callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y} trips` } } },
+            scales: {
+                x: { ticks:{ color:'#7a90a8', font:{family:'Inter',size:10} }, grid:{ display:false } },
+                y: { ticks:{ color:'#3d5268', font:{family:'Inter',size:9}, precision:0 },
+                     grid:{ color:'#1e2d3d' } }
+            }
+        }
+    });
+
+    const mix = c.vehicleMix || {};
+    const mixText = Object.entries(mix)
+        .map(([m, n]) => `${MODE_NAME[m] || m} ${n}`).join(' · ');
+    const firstTotal = used.reduce((a, m) => a + tally[m].first, 0);
+    const lastTotal  = used.reduce((a, m) => a + tally[m].last, 0);
+    if (note) note.textContent =
+        `${firstTotal} trips use the vehicle to reach the bus, ${lastTotal} to leave it`
+        + (mixText ? ` · vehicle mix: ${mixText}` : '');
+}
+
+/** When people accept a chain — the peaks a MaaS offer has to be staffed for. */
+function updateCombinedHour(byHour) {
+    const hours = Array.from(byHour || []).map(Number);
+    const canvas = chartOrNote('chartCombinedHour',
+        hours.some(v => v > 0) ? null : 'No combined journeys to place on the clock yet.');
+    if (!canvas) return;
+
+    if (combinedHourChart) combinedHourChart.destroy();
+    combinedHourChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: Array.from({length:24}, (_,i) => `${i}h`),
+            datasets: [{ label:'Combined journeys', data: hours,
+                         backgroundColor:'rgba(251,191,36,.65)', borderRadius:3, borderSkipped:false }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend:{ display:false },
+                       tooltip:{ callbacks:{ title: ctx => `Hour ${ctx[0].label}`,
+                                             label: ctx => ` ${ctx.parsed.y} trips` } } },
+            scales: {
+                x: { ticks:{ color:'#3d5268', font:{family:'Inter',size:9} }, grid:{ color:'#1e2d3d' } },
+                y: { ticks:{ color:'#3d5268', font:{family:'Inter',size:9}, precision:0 },
+                     grid:{ color:'#1e2d3d' } }
+            }
+        }
+    });
+}
+
+/**
+ * A chain against the plain modes on the same measures. "34 minutes" says
+ * nothing on its own; "34 minutes at 4.1 min/km against the bus's 5.8" says
+ * whether the extra change of vehicle bought the traveller anything.
+ */
+function updateCombinedCompare(comparison) {
+    const rows = (Array.isArray(comparison) ? comparison : [])
+        .filter(r => Number(r.journeys) > 0);
+    const canvas = chartOrNote('chartCombinedCompare',
+        rows.length ? null : 'Not enough journeys in this period to compare.');
+    if (!canvas) return;
+
+    if (combinedCompareChart) combinedCompareChart.destroy();
+    combinedCompareChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: rows.map(r => r.label || r.mode),
+            datasets: [
+                { label: 'Pace (min/km)', yAxisID: 'y',
+                  data: rows.map(r => r.minutesPerKm),
+                  backgroundColor: rows.map(r => r.mode === 'COMBINED' ? '#fbbf24' : 'rgba(56,189,248,.55)'),
+                  borderRadius: 4, borderSkipped: false },
+                { label: 'Avg green index', yAxisID: 'y1', type: 'line',
+                  data: rows.map(r => r.avgGreenIndex),
+                  borderColor: '#34d399', backgroundColor: '#34d399',
+                  pointRadius: 3, tension: .3, borderWidth: 2 }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { labels:{ color:'#7a90a8', font:{family:'Inter',size:10}, boxWidth:10 } },
+                tooltip: { callbacks: {
+                    afterBody: ctx => {
+                        const r = rows[ctx[0].dataIndex];
+                        return [`${Number(r.journeys).toLocaleString('it-IT')} trips`,
+                                `avg ${fig(r.avgDurationMin)} min · ${fig(r.avgDistanceKm)} km`,
+                                `€${fig(r.avgCostEuros)} per trip`];
+                    }
+                }}
+            },
+            scales: {
+                x:  { ticks:{ color:'#7a90a8', font:{family:'Inter',size:10} }, grid:{ display:false } },
+                y:  { position:'left', beginAtZero:true,
+                      ticks:{ color:'#3d5268', font:{family:'Inter',size:9} }, grid:{ color:'#1e2d3d' },
+                      title:{ display:true, text:'min / km', color:'#3d5268', font:{family:'Inter',size:9} } },
+                y1: { position:'right', min:0, max:100,
+                      ticks:{ color:'#34d399', font:{family:'Inter',size:9} }, grid:{ display:false },
+                      title:{ display:true, text:'green index', color:'#34d399', font:{family:'Inter',size:9} } }
+            }
+        }
+    });
+}
+
+/** Every chain, every measure. The chart shows the shape; this is the evidence. */
+function updateCombinedTable(chains) {
+    const tbody = document.getElementById('combinedChainTbody');
+    if (!tbody) return;
+    if (!chains.length) {
+        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-dim);padding:20px;font-size:12px">No combined journeys in this period</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = chains.map((c, i) => `
+      <tr>
+        <td style="font-size:13px">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:7px;background:${CHAIN_COLORS[i % CHAIN_COLORS.length]}"></span>
+          ${chainLabel(c.chain)}
+        </td>
+        <td class="text-mono">${Number(c.journeys).toLocaleString('it-IT')}</td>
+        <td class="text-mono">${c.share}%</td>
+        <td class="text-mono">${fig(c.avgDurationMin)}</td>
+        <td class="text-mono">${fig(c.medianDurationMin)}</td>
+        <td class="text-mono">${fig(c.avgDistanceKm)}</td>
+        <td class="text-mono">${fig(c.minutesPerKm)}</td>
+        <td class="text-mono">${fig(c.avgCostEuros)}</td>
+        <td class="text-mono">${fig(c.avgLegs)}</td>
+        <td style="font-family:var(--font-mono);font-size:13px;color:${greenColor(c.avgGreenIndex)}">${fig(c.avgGreenIndex)}</td>
+        <td class="text-mono">${fig(c.co2SavedKg)} kg</td>
+      </tr>`).join('');
+}
+
 // Initial load
 loadAnalytics('1M');
 
@@ -1148,8 +1792,8 @@ async function downloadReport(format, btn) {
     const label = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = '⬇ …'; }
     try {
-        const r = await apiFetch('/admin/analytics/export?range='
-                                 + encodeURIComponent(currentRange || '1M')
+        const r = await apiFetch('/admin/analytics/export?'
+                                 + rangeQuery(currentRange)
                                  + '&format=' + encodeURIComponent(format));
         if (!r.ok) throw new Error('export ' + r.status);
 

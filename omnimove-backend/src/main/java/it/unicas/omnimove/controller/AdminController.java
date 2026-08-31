@@ -6,7 +6,10 @@ import it.unicas.omnimove.dto.AdminCreateUserRequest;
 import it.unicas.omnimove.dto.AdminUpdateUserRequest;
 import it.unicas.omnimove.dto.LoginEventDTO;
 import it.unicas.omnimove.dto.UserDTO;
+import it.unicas.omnimove.model.AdminExport;
 import it.unicas.omnimove.model.User;
+import it.unicas.omnimove.repository.AdminExportRepository;
+import it.unicas.omnimove.repository.UserMessageRepository;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.service.ActiveSessionService;
 import it.unicas.omnimove.service.AnalyticsExportService;
@@ -62,6 +65,8 @@ public class AdminController {
     private final ConsentService consentService;
     private final DataRetentionService dataRetentionService;
     private final UiSettingsService uiSettingsService;
+    private final UserMessageRepository messageRepository;
+    private final AdminExportRepository exportRepository;
 
     private UserDTO toDTO(User u) {
         return toDTO(u, null);
@@ -87,9 +92,20 @@ public class AdminController {
 
         Map<Long, Long> loginCounts = loginHistoryService.countsByUser();
 
+        // One query for the whole page rather than one per row: the marker on a
+        // row is "has unread messages", and asking per user would be a query per
+        // user on a list that shows all of them.
+        Map<Long, Long> unread = new java.util.HashMap<>();
+        messageRepository.countUnreadByUser()
+                .forEach(row -> unread.put((Long) row[0], (Long) row[1]));
+
         List<UserDTO> users = userRepo.findAll()
                 .stream()
-                .map(u -> toDTO(u, loginCounts.getOrDefault(u.getId(), 0L)))
+                .map(u -> {
+                    UserDTO dto = toDTO(u, loginCounts.getOrDefault(u.getId(), 0L));
+                    dto.setUnreadMessages(unread.getOrDefault(u.getId(), 0L));
+                    return dto;
+                })
                 .collect(Collectors.toList());
 
         securityAuditService.adminListedUsers(principal.getUsername(), users.size());
@@ -123,6 +139,23 @@ public class AdminController {
                            + "each rule's most recent run. Counts and timestamps only.")
     public ResponseEntity<?> retention() {
         return ResponseEntity.ok(dataRetentionService.status());
+    }
+
+    // ── POST /api/v1/admin/users/export-log ───────────────────────────────
+    @PostMapping("/users/export-log")
+    @Operation(summary = "Record that the user list was downloaded",
+               description = "The file itself is built in the browser from the rows already "
+                           + "on screen, so that it matches the filters exactly. This records "
+                           + "that a copy was taken, which reading the list does not.")
+    public ResponseEntity<?> logUserExport(@RequestBody(required = false) Map<String, Object> body,
+                                           @AuthenticationPrincipal UserDetails principal) {
+        Object count   = body == null ? null : body.get("count");
+        Object filters = body == null ? null : body.get("filters");
+        int rows = count instanceof Number n ? n.intValue() : -1;
+        String scope = (filters == null ? "none" : String.valueOf(filters)) + "; " + rows + " rows";
+
+        recordExport(principal.getUsername(), AdminExport.KIND_USER_LIST, scope, rows);
+        return ResponseEntity.ok(Map.of("logged", true));
     }
 
     // ── POST /api/v1/admin/users ──────────────────────────────────────────
@@ -254,6 +287,36 @@ public class AdminController {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("account", account);
 
+            // Messages, newest first — and opening the card is what marks them
+            // read. The unread marker in the list means "nobody has looked at
+            // this yet", so it has to clear exactly when somebody does.
+            var messages = messageRepository.findByUserIdOrderByCreatedAtDesc(user.getId());
+            body.put("messages", messages.stream().map(m -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", m.getId());
+                row.put("body", m.getBody());
+                row.put("createdAt", m.getCreatedAt());
+                row.put("read", m.getReadAt() != null);
+                return row;
+            }).toList());
+            messageRepository.markRead(user.getId(), java.time.ZonedDateTime.now());
+
+            // What this person has taken out of the system. Shown for everyone,
+            // not only operators: an ordinary traveller has no exports and the
+            // section simply says so, which is itself worth being able to see.
+            var exports = exportRepository.findByUserIdOrderByExportedAtDesc(
+                    user.getId(), org.springframework.data.domain.PageRequest.of(0, 20));
+            Map<String, Object> exportSummary = new LinkedHashMap<>();
+            exportSummary.put("total", exportRepository.countByUserId(user.getId()));
+            exportSummary.put("recent", exports.stream().map(x -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("kind",   x.getKind());
+                row.put("detail", x.getDetail());
+                row.put("at",     x.getExportedAt());
+                return row;
+            }).toList());
+            body.put("exports", exportSummary);
+
             // An operator account never travels: the figures would all read zero
             // and the queries behind them are pure waste, so they are not run.
             boolean travels = !"ADMIN".equalsIgnoreCase(user.getRole());
@@ -381,7 +444,11 @@ public class AdminController {
     @Operation(summary = "Transport mode analytics",
                description = "InfluxDB aggregates. range = 1W | 1M | 3M | 6M | 1Y. ADMIN only.")
     public ResponseEntity<?> analytics(
-            @RequestParam(value = "range", defaultValue = "1M") String range) {
+            @RequestParam(value = "range", defaultValue = "1M") String range,
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to",   required = false) String to) {
+
+        range = resolveRange(range, from, to);
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("kpis",             analyticsService.getSummaryKpis(range));
@@ -390,8 +457,61 @@ public class AdminController {
         payload.put("greenIndexTrend",  analyticsService.getGreenIndexTrend(range));
         payload.put("dayOfWeek",        analyticsService.getModeByDayOfWeek(range));
         payload.put("topRoutes",        analyticsService.getTopRoutes(range));
+        // The multimodal panel. It travels with the rest so the whole page is
+        // one window and one request — a second call for the MaaS figures could
+        // land on a different period and quietly disagree with the charts above it.
+        payload.put("combined",         analyticsService.getCombinedStats(range));
 
         return ResponseEntity.ok(payload);
+    }
+
+    /**
+     * Records a copy leaving the system, in both registers.
+     *
+     * <p>security_audit_events is the proof and the application can only write to
+     * it; admin_exports is the same fact in a table the application may read, so
+     * the operator's own card can show it. Neither is allowed to fail the
+     * download: the file is what was asked for, and a bookkeeping error is ours.
+     */
+    private void recordExport(String adminEmail, String kind, String detail, int rows) {
+        try {
+            if (AdminExport.KIND_USER_LIST.equals(kind))
+                securityAuditService.adminExportedUsers(adminEmail, rows, detail);
+            else
+                securityAuditService.adminExportedAnalytics(adminEmail, detail);
+        } catch (Exception e) {
+            log.warn("Could not audit the export by {}: {}", adminEmail, e.getMessage());
+        }
+        try {
+            userRepo.findByEmail(adminEmail).ifPresent(u -> exportRepository.save(
+                    AdminExport.builder()
+                            .userId(u.getId())
+                            .kind(kind)
+                            .detail(detail)
+                            .exportedAt(java.time.ZonedDateTime.now())
+                            .build()));
+        } catch (Exception e) {
+            log.warn("Could not record the export by {}: {}", adminEmail, e.getMessage());
+        }
+    }
+
+    /**
+     * Folds an explicit period into the range string the services already take.
+     *
+     * <p>Both dates or neither: half a period is a mistake, and guessing the
+     * missing end would answer a question nobody asked. When they are missing or
+     * unusable the preset is used, so a mistyped URL degrades to the default
+     * rather than to an error page.
+     */
+    private static String resolveRange(String range, String from, String to) {
+        if (from == null || to == null || from.isBlank() || to.isBlank()) return range;
+        try {
+            java.time.LocalDate.parse(from.trim());
+            java.time.LocalDate.parse(to.trim());
+            return "CUSTOM:" + from.trim() + ":" + to.trim();
+        } catch (Exception e) {
+            return range;
+        }
     }
 
     // ── GET /api/v1/admin/analytics/export?range=1M&format=csv|xlsx|pdf ──
@@ -401,9 +521,15 @@ public class AdminController {
                            + "rendered as CSV, XLSX or PDF, so the three cannot disagree.")
     public ResponseEntity<byte[]> exportAnalytics(
             @RequestParam(value = "range", defaultValue = "1M") String range,
-            @RequestParam(value = "format", defaultValue = "csv") String format) {
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to",   required = false) String to,
+            @RequestParam(value = "format", defaultValue = "csv") String format,
+            @AuthenticationPrincipal UserDetails principal) {
 
-        AnalyticsExportService.Report report = analyticsExport.build(range);
+        // The same window the dashboard is showing: a report that covered a
+        // different period from the screen it was downloaded from would be worse
+        // than no report.
+        AnalyticsExportService.Report report = analyticsExport.build(resolveRange(range, from, to));
         String base = analyticsExport.fileBaseName(report);
 
         byte[] body;
@@ -428,6 +554,9 @@ public class AdminController {
                 return ResponseEntity.badRequest().build();
             }
         }
+
+        recordExport(principal.getUsername(), AdminExport.KIND_ANALYTICS,
+                     extension + ", " + report.range(), 0);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_TYPE, contentType)

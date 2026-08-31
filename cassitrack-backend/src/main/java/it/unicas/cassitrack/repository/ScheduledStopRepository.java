@@ -13,7 +13,7 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
 
     List<ScheduledStop> findByTripId(String tripId);
     List<ScheduledStop> findByTripRouteIdOrderByStopSequenceAsc(String routeId);
-    // JOIN FETCH su trip e route: da V26 la fermata di una riga di orario si
+    // JOIN FETCH su trip e route: da V27 la fermata di una riga di orario si
     // ricava dal pattern della LINEA, quindi chi legge queste righe deve poter
     // risalire alla linea. Trip.route e ScheduledStop.trip sono entrambi LAZY,
     // e i chiamanti principali — RouteMatchingService, ETAService,
@@ -35,7 +35,7 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     /**
      * Prossimi passaggi a una fermata.
      *
-     * Da V26 la fermata non è più una colonna di ScheduledStop: si arriva a
+     * Da V27 la fermata non è più una colonna di ScheduledStop: si arriva a
      * lei attraverso la linea della corsa, in RouteStop, confrontando la
      * posizione nella sequenza.
      */
@@ -73,7 +73,7 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     /**
      * Le fermate di ogni linea attiva, in ordine di percorso.
      *
-     * Da V26 legge direttamente il pattern invece di dedurlo dalle corse. Il
+     * Da V27 legge direttamente il pattern invece di dedurlo dalle corse. Il
      * GROUP BY che serviva a collassare le 1884 righe duplicate in 142 non ha
      * più ragione di esistere: la tabella contiene già una riga per posizione.
      * Ne segue anche che una linea senza corse programmate compare comunque,
@@ -242,7 +242,7 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
                                         @Param("excludeTripId") String excludeTripId);
 
     // Il guardiano sulla cancellazione di una fermata è passato a
-    // RouteStopRepository.countByStopId: da V26 è route_stops a referenziare
+    // RouteStopRepository.countByStopId: da V27 è route_stops a referenziare
     // stops, ed è quella FK (ON DELETE RESTRICT) che ora protegge la rete.
     // Qui non resta nulla da contare: scheduled_stops non conosce le fermate.
 
@@ -344,7 +344,7 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
      * Every call of every trip, joined with route, bus and stop — the exploded
      * timetable (one row per trip+stop), as exported to CSV.
      *
-     * Da V26 la fermata arriva dal pattern della linea (RouteStop), non dalla
+     * Da V27 la fermata arriva dal pattern della linea (RouteStop), non dalla
      * riga di orario: è la join che ricostruisce la vista che scheduled_stops
      * offriva da sola prima della normalizzazione.
      *

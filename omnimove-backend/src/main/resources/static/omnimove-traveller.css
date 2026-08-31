@@ -3318,3 +3318,74 @@ body {
 @media (max-width: 768px) {
     .ai-fab { touch-action: none; }
 }
+
+
+/* ── Write to us ──
+   The composer and the sender's own history, laid out like the other profile
+   tabs so the section does not read as bolted on. */
+.msg-box {
+    width: 100%;
+    margin-top: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-mid);
+    border-radius: 12px;
+    background: var(--bg-white);
+    color: var(--text-dark);
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 13px;
+    line-height: 1.55;
+    resize: vertical;
+    min-height: 110px;
+    outline: none;
+    transition: border-color .15s;
+}
+.msg-box:focus { border-color: var(--primary); }
+
+.msg-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+}
+.msg-count { font-size: 11px; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+
+.msg-feedback { font-size: 12px; margin-top: 8px; min-height: 16px; }
+.msg-feedback.ok  { color: var(--primary-dark); }
+.msg-feedback.err { color: var(--red); }
+
+.msg-history { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.msg-item {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: var(--bg-white);
+}
+.msg-item-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+.msg-item-date { font-size: 11px; color: var(--text-soft); }
+.msg-item-state {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    padding: 2px 8px;
+    border-radius: 50px;
+}
+/* "Read" is the only sign the message reached a person, so it is the one that
+   gets the colour; "Sent" stays quiet. */
+.msg-item-state.read   { background: var(--primary-light); color: var(--primary-dark); }
+.msg-item-state.unread { background: var(--bg-app); color: var(--text-soft); }
+/* white-space so the paragraphs the sender typed survive */
+.msg-item-body {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-dark);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
