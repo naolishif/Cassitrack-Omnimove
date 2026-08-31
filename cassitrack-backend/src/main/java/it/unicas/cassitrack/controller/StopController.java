@@ -163,7 +163,7 @@ public class StopController {
     public ResponseEntity<?> deleteStop(@PathVariable String id) {
         Stop s = stopRepository.findById(id).orElse(null);
         if (s == null) return err(HttpStatus.NOT_FOUND, "Stop not found.");
-        // Da V26 è route_stops a referenziare stops, con ON DELETE RESTRICT.
+        // Da V27 è route_stops a referenziare stops, con ON DELETE RESTRICT.
         // Il database rifiuterebbe comunque, ma con un vincolo violato; qui si
         // dice prima, nominando le linee, così il gestore sa dove intervenire.
         List<String> servingRoutes = routeStopRepository.findRouteIdsServing(id);

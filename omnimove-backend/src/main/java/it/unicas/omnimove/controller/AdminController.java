@@ -7,6 +7,7 @@ import it.unicas.omnimove.dto.AdminUpdateUserRequest;
 import it.unicas.omnimove.dto.LoginEventDTO;
 import it.unicas.omnimove.dto.UserDTO;
 import it.unicas.omnimove.model.User;
+import it.unicas.omnimove.repository.UserMessageRepository;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.service.ActiveSessionService;
 import it.unicas.omnimove.service.AnalyticsExportService;
@@ -62,6 +63,7 @@ public class AdminController {
     private final ConsentService consentService;
     private final DataRetentionService dataRetentionService;
     private final UiSettingsService uiSettingsService;
+    private final UserMessageRepository messageRepository;
 
     private UserDTO toDTO(User u) {
         return toDTO(u, null);
@@ -87,9 +89,20 @@ public class AdminController {
 
         Map<Long, Long> loginCounts = loginHistoryService.countsByUser();
 
+        // One query for the whole page rather than one per row: the marker on a
+        // row is "has unread messages", and asking per user would be a query per
+        // user on a list that shows all of them.
+        Map<Long, Long> unread = new java.util.HashMap<>();
+        messageRepository.countUnreadByUser()
+                .forEach(row -> unread.put((Long) row[0], (Long) row[1]));
+
         List<UserDTO> users = userRepo.findAll()
                 .stream()
-                .map(u -> toDTO(u, loginCounts.getOrDefault(u.getId(), 0L)))
+                .map(u -> {
+                    UserDTO dto = toDTO(u, loginCounts.getOrDefault(u.getId(), 0L));
+                    dto.setUnreadMessages(unread.getOrDefault(u.getId(), 0L));
+                    return dto;
+                })
                 .collect(Collectors.toList());
 
         securityAuditService.adminListedUsers(principal.getUsername(), users.size());
@@ -253,6 +266,20 @@ public class AdminController {
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("account", account);
+
+            // Messages, newest first — and opening the card is what marks them
+            // read. The unread marker in the list means "nobody has looked at
+            // this yet", so it has to clear exactly when somebody does.
+            var messages = messageRepository.findByUserIdOrderByCreatedAtDesc(user.getId());
+            body.put("messages", messages.stream().map(m -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", m.getId());
+                row.put("body", m.getBody());
+                row.put("createdAt", m.getCreatedAt());
+                row.put("read", m.getReadAt() != null);
+                return row;
+            }).toList());
+            messageRepository.markRead(user.getId(), java.time.ZonedDateTime.now());
 
             // An operator account never travels: the figures would all read zero
             // and the queries behind them are pure waste, so they are not run.

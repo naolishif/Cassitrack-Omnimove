@@ -10,7 +10,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Accesso in memoria al pattern di fermate delle linee (V26).
+ * Accesso in memoria al pattern di fermate delle linee (V27).
  *
  * Perché una cache. Dopo la normalizzazione la fermata di una riga di orario
  * si ottiene da route_stops, e i chiamanti che ne hanno bisogno sono i due

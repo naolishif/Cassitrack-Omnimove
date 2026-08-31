@@ -15,6 +15,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import it.unicas.omnimove.security.PasswordPolicy;
+import it.unicas.omnimove.model.UserMessage;
 import it.unicas.omnimove.util.RequestLang;
 import it.unicas.omnimove.service.PasswordResetService;
 import it.unicas.omnimove.service.PreferenceWeights;
@@ -46,6 +47,8 @@ public class TravellerController {
 
     private final UserRepository userRepo;
     private final it.unicas.omnimove.service.UiSettingsService uiSettingsService;
+    private final it.unicas.omnimove.repository.UserMessageRepository messageRepository;
+    private final it.unicas.omnimove.service.EmailService emailServiceForMessages;
     private final PasswordEncoder passwordEncoder;
     private final FavoriteRouteRepository favoriteRouteRepository;
     private final FavoriteStopRepository  favoriteStopRepository;
@@ -56,6 +59,68 @@ public class TravellerController {
     private final PasswordResetService    passwordResetService;
     private final RateLimiterService      rateLimiter;
     private final SessionService         sessionService;
+
+    /** Longest message accepted. Generous — a useful report is often long. */
+    private static final int MESSAGE_MAX_CHARS = 4000;
+
+    // ── POST /api/v1/traveller/messages ───────────────────────────────────
+    @PostMapping("/messages")
+    @Operation(summary = "Send a message to the administrators",
+               description = "Stored against the account and acknowledged by e-mail.")
+    public ResponseEntity<?> sendMessage(@RequestBody java.util.Map<String, String> body,
+                                         @AuthenticationPrincipal UserDetails principal,
+                                         HttpServletRequest request) {
+
+        String text = body == null ? null : body.get("body");
+        if (text == null || text.trim().isEmpty())
+            return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("message", "The message is empty."));
+        if (text.length() > MESSAGE_MAX_CHARS)
+            return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("message",
+                            "The message is too long (max " + MESSAGE_MAX_CHARS + " characters)."));
+
+        User user = userRepo.findByEmail(principal.getUsername()).orElse(null);
+        if (user == null) return ResponseEntity.status(401).build();
+
+        UserMessage saved = messageRepository.save(UserMessage.builder()
+                .userId(user.getId())
+                .body(text.trim())
+                .createdAt(ZonedDateTime.now())
+                .build());
+
+        // Stored first, acknowledged second. If the mail fails the message is
+        // still on file — the reverse would thank someone for nothing.
+        emailServiceForMessages.sendMessageReceivedEmail(
+                user.getEmail(), user.getName(), saved.getBody(), RequestLang.of(request));
+
+        return ResponseEntity.ok(java.util.Map.of(
+                "id", saved.getId(),
+                "createdAt", saved.getCreatedAt(),
+                "body", saved.getBody()));
+    }
+
+    // ── GET /api/v1/traveller/messages ────────────────────────────────────
+    @GetMapping("/messages")
+    @Operation(summary = "The messages this traveller has sent")
+    public ResponseEntity<?> myMessages(@AuthenticationPrincipal UserDetails principal) {
+        User user = userRepo.findByEmail(principal.getUsername()).orElse(null);
+        if (user == null) return ResponseEntity.status(401).build();
+
+        return ResponseEntity.ok(messageRepository.findByUserIdOrderByCreatedAtDesc(user.getId())
+                .stream()
+                .map(m -> {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("id", m.getId());
+                    row.put("body", m.getBody());
+                    row.put("createdAt", m.getCreatedAt());
+                    // Whether it has been read is the traveller's business too:
+                    // it is the only sign their message went anywhere.
+                    row.put("read", m.getReadAt() != null);
+                    return row;
+                })
+                .toList());
+    }
 
     // ── GET /api/v1/traveller/ui-settings ─────────────────────────────────
     @GetMapping("/ui-settings")

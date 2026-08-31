@@ -23,7 +23,7 @@ import java.util.*;
  * Cambiare le fermate di una linea, propagandolo alle sue corse.
  *
  * PRINCIPIO
- * Le fermate appartengono alla linea, gli orari alla corsa (V26). Cambiare il
+ * Le fermate appartengono alla linea, gli orari alla corsa (V27). Cambiare il
  * percorso significa quindi riscrivere una tabella sola — route_stops — e poi
  * riconciliare gli orari di ogni corsa con la nuova sequenza. La regola è che
  * <b>una fermata sopravvissuta non cambia orario</b>: chi resta resta anche
@@ -206,7 +206,7 @@ public class RoutePatternEditService {
         }
 
         // ── 3. Scarti di default, dai tempi appena scritti ───────────────
-        // Mediana come nella migrazione V26: una corsa con un orario battuto a
+        // Mediana come nella migrazione V27: una corsa con un orario battuto a
         // mano fuori scala non deve trascinare la proposta per le corse future.
         if (!allTimes.isEmpty()) {
             for (int i = 0; i < pattern.size(); i++) {

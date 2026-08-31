@@ -463,6 +463,16 @@
 
             <!-- Hidden for admins: an operator account has no travel story -->
             <div id="travelBlock">
+                <div class="collapse" id="secMessages">
+                    <button class="collapse-head" onclick="toggleSection('secMessages')">
+                        <span class="collapse-caret">▸</span>
+                        <span class="collapse-title" id="profileMessagesTitle">Messages</span>
+                    </button>
+                    <div class="collapse-body">
+                        <div id="profileMessages"></div>
+                    </div>
+                </div>
+
                 <div class="profile-section">Travel figures — as the user sees them</div>
                 <div class="kpi-grid" id="profileKpis"></div>
 

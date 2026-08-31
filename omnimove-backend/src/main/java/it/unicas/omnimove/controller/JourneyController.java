@@ -63,6 +63,26 @@ import java.util.stream.Stream;
 @Tag(name="Journey Planner", description="Multimodal journey planning")
 public class JourneyController {
 
+    /**
+     * Suffix marking the return direction of a line.
+     *
+     * <p>CassiTrack's V26 split each line's return runs onto a route of their
+     * own — {@code LINEA_16_R} beside {@code LINEA_16} — because the stop
+     * pattern introduced by V27 allows a route only one sequence of stops, and
+     * a line that goes there and back has two.
+     *
+     * <p>That is a storage decision and the traveller should not meet it: to
+     * them line 16 is line 16, both ways. So the return routes are folded back
+     * into their outbound line here — hidden from the pickers, read together
+     * with it in the timetable — and the direction is worked out the way it
+     * always was, from the terminus of each run.
+     */
+    private static final String RETURN_SUFFIX = "_R";
+
+    private static boolean isReturnRoute(String routeId) {
+        return routeId != null && routeId.endsWith(RETURN_SUFFIX);
+    }
+
     private static final Pattern STOP_ID_RE      = Pattern.compile("^[A-Za-z0-9\\-_]{1,50}$");
     private static final int     MAX_ARRIVALS     = 10;
 
@@ -130,6 +150,10 @@ public class JourneyController {
     public ResponseEntity<List<Map<String, Object>>> timetableRoutes() {
         List<Map<String, Object>> result = routeRepository.findAll().stream()
                 .filter(Route::isActive)
+                // The return route carries the same number and colour as its
+                // outbound: listing both would put two identical "16" chips in
+                // the picker. Its runs are shown inside the outbound's timetable.
+                .filter(r -> !isReturnRoute(r.getId()))
                 .sorted(Comparator.comparing(r -> r.getShortName() != null ? r.getShortName() : r.getId(),
                                              String.CASE_INSENSITIVE_ORDER))
                 .<Map<String, Object>>map(r -> {
@@ -158,7 +182,11 @@ public class JourneyController {
         Route route = routeRepository.findById(routeId).orElse(null);
         if (route == null || !route.isActive()) return ResponseEntity.notFound().build();
 
-        var calls = scheduledStopRepository.findCallsForRoute(routeId);
+        // Both halves of the line. The return runs live on their own route since
+        // V26, but a timetable that showed one direction only would be a
+        // regression for the traveller, who had both before the split.
+        var calls = new ArrayList<>(scheduledStopRepository.findCallsForRoute(routeId));
+        calls.addAll(scheduledStopRepository.findCallsForRoute(routeId + RETURN_SUFFIX));
         if (calls.isEmpty()) return ResponseEntity.notFound().build();
 
         // Rows arrive grouped by trip and ordered by sequence, so one pass rebuilds
@@ -685,6 +713,10 @@ public class JourneyController {
         byRoute.forEach((routeId, points) -> {
             var route = routes.get(routeId);
             if (route != null && !route.isActive()) return;   // retired line: not on the map
+            // The return route's geometry is the outbound's, travelled the other
+            // way: drawing both would stack two identical lines on the map and
+            // put the same number twice in the legend.
+            if (isReturnRoute(routeId)) return;
             String shortName = route != null && route.getShortName() != null
                     ? route.getShortName() : routeId;
             String longName  = route != null && route.getLongName() != null

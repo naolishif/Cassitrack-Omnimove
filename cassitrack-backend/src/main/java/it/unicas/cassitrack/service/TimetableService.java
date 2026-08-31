@@ -150,7 +150,7 @@ public class TimetableService {
     /**
      * La fermata di una riga di orario, risolta dal pattern della sua linea.
      *
-     * Da V26 scheduled_stops porta solo il tempo; il "quale fermata" sta in
+     * Da V27 scheduled_stops porta solo il tempo; il "quale fermata" sta in
      * route_stops. Restituisce "?" invece di null perché i chiamanti la usano
      * come chiave e in etichette: un buco visibile è meglio di un NPE.
      */
@@ -210,7 +210,7 @@ public class TimetableService {
         if (manual) {
             buildManualCalls(req.stops(), stopIds, times);
         } else {
-            // Da V26 gli orari si propongono dagli scarti di default della
+            // Da V27 gli orari si propongono dagli scarti di default della
             // linea, non copiandoli da una corsa presa a campione. Cambia due
             // cose: una linea appena disegnata può avere la sua prima corsa
             // senza che ne esista già una, e la proposta non eredita più le
@@ -240,7 +240,7 @@ public class TimetableService {
 
         ensureBusIsFree(bus.getBusId(), departure, arrival, null);
 
-        // ── La corsa deve stare dentro il pattern della sua linea (V26) ──
+        // ── La corsa deve stare dentro il pattern della sua linea (V27) ──
         //
         // Da quando le fermate appartengono alla linea, una corsa non può più
         // fermarsi dove vuole: sarebbe di nuovo possibile che due corse della

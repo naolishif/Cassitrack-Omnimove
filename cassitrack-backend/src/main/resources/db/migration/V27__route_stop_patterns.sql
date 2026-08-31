@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- V26 — Il pattern di fermate sale dalla corsa alla linea
+-- V27 — Il pattern di fermate sale dalla corsa alla linea
 --
 -- Rinumerata da V24 al momento del merge: su massi_sprint_10 quel numero
 -- era gia' occupato da V24__half_hourly_timetable_with_returns.sql, e due
@@ -84,7 +84,7 @@ BEGIN
 
     IF offending IS NOT NULL THEN
         RAISE EXCEPTION
-            'V26 interrotta: queste linee hanno corse con fermate diverse nella stessa posizione (%). Allinearle prima di migrare.',
+            'V27 interrotta: queste linee hanno corse con fermate diverse nella stessa posizione (%). Allinearle prima di migrare.',
             offending;
     END IF;
 END $$;
@@ -153,7 +153,7 @@ BEGIN
 
     IF orphans > 0 THEN
         RAISE EXCEPTION
-            'V26 interrotta: % righe di scheduled_stops non trovano riscontro nel pattern appena creato.',
+            'V27 interrotta: % righe di scheduled_stops non trovano riscontro nel pattern appena creato.',
             orphans;
     END IF;
 END $$;

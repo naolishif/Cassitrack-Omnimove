@@ -3344,6 +3344,7 @@ function switchProfileTab(tab) {
     if (tab === 'history')   loadHistory();
     if (tab === 'favorites') { loadFavorites(); loadFavoriteStops(); }
     if (tab === 'settings')  { loadPreferences(); loadPrivacyConsents(); }
+    if (tab === 'messages')  loadMessages();
     if (tab === 'account') loadAccount();
 }
 
@@ -3642,6 +3643,87 @@ function closeAI(e) {
         document.getElementById('aiOverlay').classList.remove('open');
     }
 }
+
+// ── Messages to the administrators ─────────────────────────────────
+// One direction: the reply comes back by e-mail, to the address on the account.
+// The history is here so the sender can see what they wrote and whether anyone
+// has opened it — without that, sending feels like dropping a note into a hole.
+
+async function loadMessages() {
+    const list = document.getElementById('msgHistory');
+    if (!list) return;
+    try {
+        const r = await apiFetch('/traveller/messages');
+        if (!r.ok) throw new Error('messages ' + r.status);
+        renderMessages(await r.json());
+    } catch (e) {
+        console.warn('Could not load messages:', e);
+        list.innerHTML = `<div class="empty-state">${t('msg_load_failed')}</div>`;
+    }
+}
+
+function renderMessages(items) {
+    const list = document.getElementById('msgHistory');
+    if (!items || !items.length) {
+        list.innerHTML = `<div class="empty-state">${t('msg_none')}</div>`;
+        return;
+    }
+    list.innerHTML = items.map(m => `
+        <div class="msg-item">
+            <div class="msg-item-head">
+                <span class="msg-item-date">${escHtml(timeAgoLabel(m.createdAt).sub)}</span>
+                <span class="msg-item-state ${m.read ? 'read' : 'unread'}">
+                    ${m.read ? escHtml(t('msg_state_read')) : escHtml(t('msg_state_sent'))}
+                </span>
+            </div>
+            <div class="msg-item-body">${escHtml(m.body)}</div>
+        </div>`).join('');
+}
+
+async function sendMessage() {
+    const box  = document.getElementById('msgBody');
+    const btn  = document.getElementById('msgSendBtn');
+    const note = document.getElementById('msgFeedback');
+    const text = (box.value || '').trim();
+
+    note.className = 'msg-feedback';
+    if (!text) { note.classList.add('err'); note.textContent = t('msg_empty'); return; }
+
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = t('btn_sending');
+    try {
+        const r = await apiFetch('/traveller/messages', {
+            method: 'POST',
+            body: JSON.stringify({ body: text })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.message || ('messages ' + r.status));
+
+        box.value = '';
+        syncMsgCount();
+        note.classList.add('ok');
+        note.textContent = t('msg_sent');
+        loadMessages();            // it appears at the top of the list straight away
+    } catch (e) {
+        console.warn('Could not send the message:', e);
+        note.classList.add('err');
+        note.textContent = t('msg_failed');
+    }
+    btn.disabled = false;
+    btn.textContent = label;
+}
+
+/** Characters left, so the 4000 limit is not discovered by being refused. */
+function syncMsgCount() {
+    const box = document.getElementById('msgBody');
+    const out = document.getElementById('msgCount');
+    if (box && out) out.textContent = (box.value || '').length + ' / 4000';
+}
+document.addEventListener('DOMContentLoaded', () => {
+    const box = document.getElementById('msgBody');
+    if (box) box.addEventListener('input', syncMsgCount);
+});
 
 // ── Eco Score explainer ────────────────────────────────────────────
 // Opened by the small "i" on the eco card; explains the GreenIndexService formula.

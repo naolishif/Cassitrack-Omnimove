@@ -151,7 +151,7 @@ function renderTable(data) {
     <tr>
       <td class="text-mono">#${escHtml(u.id)}</td>
       <td><button class="name-cell" onclick="openProfile(${u.id})"
-                  title="Open profile">${escHtml(u.name)}</button></td>
+                  title="Open profile">${escHtml(u.name)}</button>${unreadTag(u)}</td>
       <td style="color:var(--text-secondary);font-size:12px">${escHtml(u.email)}</td>
       <td><span class="badge ${roles[u.role] || 'badge-user'}">${escHtml(u.role)}</span></td>
       <td class="text-mono" style="font-size:11px">${escHtml(fmtDateTime(u.registeredAt))}</td>
@@ -273,6 +273,48 @@ function signUpBadge(account) {
 }
 
 /**
+ * The messages this person has written.
+ *
+ * <p>Outside the travel block on purpose: a message is account data, not a
+ * journey, so it is shown even for an operator account that never travels.
+ * Opening this card is what marks them read server-side, which is why the
+ * unread marker in the list clears as soon as somebody looks.
+ */
+/**
+ * The marker beside a name when messages are waiting.
+ *
+ * <p>A count, not a dot: "3 unread" and "1 unread" are different amounts of
+ * someone's patience. It disappears the moment the card is opened, because
+ * that is when the server marks them read.
+ */
+function unreadTag(u) {
+    const n = Number(u.unreadMessages || 0);
+    if (!n) return '';
+    return ' <span class="unread-tag" title="Unread messages">\u2709 ' + n + '</span>';
+}
+
+function renderUserMessages(messages) {
+    const box   = document.getElementById('profileMessages');
+    const title = document.getElementById('profileMessagesTitle');
+    if (!box) return;
+
+    setSectionTitle('profileMessagesTitle', 'Messages (' + messages.length + ')');
+    if (!messages.length) {
+        box.innerHTML = '<div class="history-empty">No messages from this user.</div>';
+        return;
+    }
+    // The text is the user's own: escaped, and shown with its line breaks.
+    box.innerHTML = messages.map(m =>
+        '<div class="msg-row' + (m.read ? '' : ' msg-row--new') + '">'
+      + '<div class="msg-row-head">'
+      +   '<span class="text-mono" style="font-size:11px">' + escHtml(fmtDateTime(m.createdAt)) + '</span>'
+      +   (m.read ? '' : '<span class="msg-new-tag">NEW</span>')
+      + '</div>'
+      + '<div class="msg-row-body">' + escHtml(m.body) + '</div>'
+      + '</div>').join('');
+}
+
+/**
  * Whether this person has been shown, and acknowledged, each notice.
  *
  * Three states, not two: never shown, acknowledged under the text currently
@@ -313,6 +355,8 @@ function renderProfile(data) {
     document.getElementById('profileNotices').innerHTML =
         noticeBadge('Privacy notice', ack.PRIVACY_NOTICE) +
         noticeBadge('Cookie notice',  ack.COOKIE_NOTICE);
+
+    renderUserMessages(data.messages || []);
 
     // Admin accounts carry no travel story — the server does not even compute it
     const travelBlock = document.getElementById('travelBlock');
@@ -506,9 +550,12 @@ async function saveProfile() {
     }
 }
 
+// Reloads the list on close: the messages were marked read while the card was
+// open, so the marker beside the name is now stale.
 function closeProfileModal() {
     document.getElementById('profileModal').classList.remove('open');
     _profileUserId = null;
+    refreshNow();          // the unread marker beside the name is now stale
 }
 
 // ── Access history modal ──
@@ -950,9 +997,15 @@ let modeChart = null;
 let greenChart = null;
 
 async function loadAnalytics(range = '1M') {
+    // The captions are set from the range that was ASKED for, before the answer
+    // arrives. A failed load used to return here leaving the previous range's
+    // numbers on screen under the previous range's captions: the operator saw
+    // "1Y" selected, "Last 12 months" in the corner, and figures labelled "last
+    // 30 days" — stale data presented as current, which is worse than a gap.
+    setKpiCaptions(range);
     try {
         const r = await apiFetch(`/admin/analytics?range=${range}`);
-        if (!r.ok) { console.warn('Analytics endpoint error', r.status); return; }
+        if (!r.ok) { console.warn('Analytics endpoint error', r.status); clearKpis(); return; }
         const data = await r.json();
 
         updateKpis(data.kpis, range);
@@ -964,32 +1017,61 @@ async function loadAnalytics(range = '1M') {
 
     } catch(e) {
         console.error('loadAnalytics error:', e);
+        clearKpis();
     }
 }
 
+/**
+ * Captions only, from the range the operator picked. Split out of updateKpis so
+ * they are right even when no figures come back — the caption describes the
+ * question, and the question was asked whatever the answer was.
+ */
+function setKpiCaptions(range) {
+    const label = (RANGE_LABELS[range] || '').toLowerCase();
+    const sub = (id, text, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = text;
+        el.className = cls || 'sub';
+    };
+    sub('kpiSearchesSub',   'queries in ' + label);
+    sub('kpiSelectionsSub', 'confirmed trips · ' + label);
+    sub('kpiCo2Sub',        'vs all-car alternative · ' + label, 'sub up');
+}
+
+/** Nothing to show. A dash, not the last range's numbers. */
+function clearKpis() {
+    ['kpiSearches', 'kpiSelections', 'kpiCo2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '—';
+    });
+    const el = document.getElementById('kpiSearchesSub');
+    if (el) { el.textContent = 'could not be loaded'; el.className = 'sub warn'; }
+}
+
 function updateKpis(kpis, range) {
-    if (!kpis) return;
-    const label = RANGE_LABELS[range] || '';
+    if (!kpis) { clearKpis(); return; }
+    setKpiCaptions(range);
 
     // KPI 1 — Searches
     const searches = Number(kpis.totalSearches);
     document.getElementById('kpiSearches').textContent = searches.toLocaleString('it-IT');
-    document.getElementById('kpiSearchesSub').textContent =
-        searches === 0 ? 'tracking from today' : `queries in ${label.toLowerCase()}`;
-    document.getElementById('kpiSearchesSub').className = 'sub';
+    // Zero over the whole window means the counter only started recently, which
+    // is worth saying instead of an empty "queries in last 12 months".
+    if (searches === 0) {
+        const el = document.getElementById('kpiSearchesSub');
+        el.textContent = 'tracking from today';
+        el.className = 'sub';
+    }
 
     // KPI 2 — Selections
     const selections = Number(kpis.totalSelections);
     document.getElementById('kpiSelections').textContent = selections.toLocaleString('it-IT');
-    document.getElementById('kpiSelectionsSub').textContent = `confirmed trips · ${label.toLowerCase()}`;
-    document.getElementById('kpiSelectionsSub').className = 'sub';
 
     // KPI 3 — CO₂ Saved
     const co2 = Number(kpis.co2SavedKg);
     document.getElementById('kpiCo2').textContent =
         co2 >= 1000 ? `${(co2/1000).toFixed(1)} t` : `${co2} kg`;
-    document.getElementById('kpiCo2Sub').textContent = `vs all-car alternative · ${label.toLowerCase()}`;
-    document.getElementById('kpiCo2Sub').className = 'sub up';
 
     // Update Green Index badge in chart card
     if (kpis.avgGreenIndex != null)

@@ -873,3 +873,25 @@ td .sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim)
     font-family:var(--font-mono);
     font-size:12px;
 }
+
+
+/* ── Messages from users ──
+   The marker beside a name in the list, and the messages themselves in the card. */
+.unread-tag{
+    display:inline-block;margin-left:7px;padding:1px 7px;border-radius:50px;
+    background:var(--accent-amber,#f59e0b);color:#0b1220;
+    font-family:var(--font-mono);font-size:10px;font-weight:700;vertical-align:middle;
+}
+.msg-row{
+    border:1px solid var(--border,#243044);border-radius:10px;
+    padding:10px 12px;margin-bottom:8px;background:var(--bg-deep,#0b1220);
+}
+/* An unopened message is the only thing on this card that wants attention */
+.msg-row--new{border-color:var(--accent-amber,#f59e0b)}
+.msg-row-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.msg-new-tag{
+    font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:.5px;
+    color:var(--accent-amber,#f59e0b);
+}
+/* pre-wrap so the paragraphs the sender typed survive */
+.msg-row-body{font-size:13px;line-height:1.55;color:var(--text-primary,#e6edf7);white-space:pre-wrap;word-break:break-word}

@@ -21,7 +21,7 @@ public class ScheduledStop {
     @JoinColumn(name = "trip_id", nullable = false)
     private Trip trip;
 
-    // stop_id non c'è più (V26). Quale fermata occupi questa posizione lo dice
+    // stop_id non c'è più (V27). Quale fermata occupi questa posizione lo dice
     // route_stops, tramite la linea della corsa: usare RoutePatternService.
     // Tenerlo qui significava 1884 copie di un'informazione che ne richiede 142,
     // e nessun vincolo che impedisse a due corse della stessa linea di divergere.
