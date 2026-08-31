@@ -204,6 +204,32 @@ public class SecurityAuditService {
     }
 
     /**
+     * An operator took a copy of the user list away.
+     *
+     * <p>Its own event rather than another ADMIN_USER_LIST_FETCHED: that one
+     * fires on every refresh of the page and cannot tell reading from taking.
+     * A file of names and addresses leaves the system here, and afterwards it
+     * lives somewhere we no longer control — which is precisely the moment that
+     * has to be answerable later.
+     */
+    /**
+     * An operator downloaded the analytics report. Aggregate figures, so no
+     * personal data leaves — but a copy leaves, and the pair of events lets the
+     * two kinds of download be told apart later without reading the files.
+     */
+    public void adminExportedAnalytics(String adminEmail, String scope) {
+        log.info("ADMIN_ANALYTICS_EXPORTED admin={} scope={}", maskEmail(adminEmail), scope);
+        persist("ADMIN_ANALYTICS_EXPORTED", adminEmail, null, "scope=" + scope);
+    }
+
+    public void adminExportedUsers(String adminEmail, int count, String filters) {
+        log.info("ADMIN_USER_LIST_EXPORTED admin={} count={} filters={}",
+                 maskEmail(adminEmail), count, filters);
+        persist("ADMIN_USER_LIST_EXPORTED", adminEmail, null,
+                "count=" + count + " filters=" + filters);
+    }
+
+    /**
      * A user exercised their right of access (GDPR art. 15) and downloaded every
      * record we hold about them. Logged because the export is a bulk disclosure of
      * personal data and must be traceable.

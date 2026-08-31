@@ -48,8 +48,21 @@
                 <button class="range-btn" data-range="3M">3M</button>
                 <button class="range-btn" data-range="6M">6M</button>
                 <button class="range-btn" data-range="1Y">1Y</button>
+                <button class="range-btn" data-range="CUSTOM">CUSTOM</button>
             </div>
             <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim)" id="rangeLabel">Last 30 days</span>
+        </div>
+
+        <!-- Shown only while CUSTOM is the chosen preset. Both dates are needed:
+             half a period is a mistake, so Apply stays disabled until there are
+             two and they are the right way round. -->
+        <div class="custom-range" id="customRange" hidden>
+            <label for="rangeFrom">From</label>
+            <input class="filter-control filter-date" id="rangeFrom" type="date">
+            <label for="rangeTo">to</label>
+            <input class="filter-control filter-date" id="rangeTo" type="date">
+            <button class="btn btn-ghost" id="rangeApply" onclick="applyCustomRange()" disabled>APPLY</button>
+            <span class="custom-range-note" id="rangeNote"></span>
         </div>
 
         <!-- FR-OM-009 (a) KPI pills -->
@@ -108,6 +121,125 @@
                 <div class="chart-wrap" style="height:148px">
                     <canvas id="chartGreenIndex"></canvas>
                 </div>
+            </div>
+        </div>
+
+        <!-- ══════ COMBINED JOURNEYS — the MaaS panel ══════
+             A combined journey is the only thing this platform offers that a
+             timetable and a scooter app do not already offer separately, so it
+             gets its own block rather than one slice of the mode doughnut. The
+             chain is always shown in the order it is ridden: Bus → Scooter is a
+             last-mile problem being solved, Scooter → Bus is a first-mile one,
+             and an operator invests in different things depending on which of
+             the two people are actually taking. -->
+        <div class="section-head">
+            <span class="section-head-title">Combined journeys — multimodal (MaaS)</span>
+            <span class="gdpr-badge" style="font-size:8px;padding:2px 6px">ANON · ITINERARIES, NOT TRAVELLERS</span>
+        </div>
+
+        <div class="grid-4">
+            <div class="stat-pill">
+                <div class="label">Combined Journeys</div>
+                <div class="value" id="kpiCombined" style="color:var(--accent-amber)">—</div>
+                <div class="sub" id="kpiCombinedSub">loading…</div>
+            </div>
+            <div class="stat-pill">
+                <div class="label">Share of All Journeys</div>
+                <div class="value" id="kpiCombinedShare">—</div>
+                <div class="sub" id="kpiCombinedShareSub">of confirmed trips</div>
+            </div>
+            <div class="stat-pill">
+                <div class="label">Avg Time per Combined Trip</div>
+                <div class="value" id="kpiCombinedDuration">—</div>
+                <div class="sub" id="kpiCombinedDurationSub">loading…</div>
+            </div>
+            <div class="stat-pill">
+                <div class="label">CO₂ Saved by Chains</div>
+                <div class="value" id="kpiCombinedCo2" style="color:var(--accent-green)">—</div>
+                <div class="sub up" id="kpiCombinedCo2Sub">vs all-car alternative</div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <!-- What a combined solution is actually made of -->
+            <div class="card">
+                <div class="card-title" style="justify-content:space-between">
+                    <span>Composition — how the chain is built</span>
+                    <span class="text-mono" style="font-size:9px;color:var(--text-dim)">ORDER = ORDER RIDDEN</span>
+                </div>
+                <div class="chart-wrap" style="height:190px">
+                    <canvas id="chartCombinedChains"></canvas>
+                </div>
+                <div id="combinedChainList" class="chain-list"></div>
+                <div id="combinedLegNote" class="chain-note"></div>
+            </div>
+
+            <!-- How long they take -->
+            <div class="card">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                    <div class="card-title" style="margin-bottom:0">
+                        <span>Time taken</span>
+                        <span id="combinedMedianBadge" class="text-mono"
+                              style="font-size:10px;color:var(--text-dim);margin-left:8px">—</span>
+                    </div>
+                </div>
+                <div class="chart-wrap" style="height:190px">
+                    <canvas id="chartCombinedDuration"></canvas>
+                </div>
+                <div id="combinedDurationNote" class="chain-note"></div>
+            </div>
+        </div>
+
+        <!-- Every chain, on every measure -->
+        <div class="card">
+            <div class="card-title">Combined solutions in detail</div>
+            <table class="user-table" id="combinedChainTable">
+                <thead>
+                <tr>
+                    <th>Chain</th>
+                    <th>Trips</th>
+                    <th>Share</th>
+                    <th>Avg min</th>
+                    <th>Median min</th>
+                    <th>Avg km</th>
+                    <th>Min / km</th>
+                    <th>Avg €</th>
+                    <th>Legs</th>
+                    <th>Green</th>
+                    <th>CO₂ saved</th>
+                </tr>
+                </thead>
+                <tbody id="combinedChainTbody"></tbody>
+            </table>
+        </div>
+
+        <div class="grid-2">
+            <!-- Access or egress: does the vehicle get you TO the network or FROM it -->
+            <div class="card">
+                <div class="card-title">Shared vehicle — first mile or last mile</div>
+                <div class="chart-wrap" style="height:180px">
+                    <canvas id="chartCombinedRole"></canvas>
+                </div>
+                <div id="combinedRoleNote" class="chain-note"></div>
+            </div>
+
+            <!-- When people go multimodal -->
+            <div class="card">
+                <div class="card-title">Combined journeys by hour of day</div>
+                <div class="chart-wrap" style="height:180px">
+                    <canvas id="chartCombinedHour"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Is a chain worth its change of vehicle? -->
+        <div class="card">
+            <div class="card-title" style="justify-content:space-between">
+                <span>Combined against single modes</span>
+                <span class="text-mono" style="font-size:9px;color:var(--text-dim)">PACE = MINUTES PER KILOMETRE · LOWER IS FASTER</span>
+            </div>
+            <div class="chart-wrap" style="height:200px">
+                <canvas id="chartCombinedCompare"></canvas>
             </div>
         </div>
 
@@ -226,7 +358,7 @@
                     <option value="login-desc">Last login — newest</option>
                     <option value="login-asc">Last login — oldest</option>
                 </select>
-                <button class="btn btn-ghost">EXPORT CSV</button>
+                <button class="btn btn-ghost" onclick="exportUsersCsv(this)" title="Downloads the rows currently listed, filters included">⬇ EXPORT CSV</button>
             </div>
 
             <div class="search-row" id="dateFilterRow">
@@ -470,6 +602,16 @@
                     </button>
                     <div class="collapse-body">
                         <div id="profileMessages"></div>
+                    </div>
+                </div>
+
+                <div class="collapse" id="secExports">
+                    <button class="collapse-head" onclick="toggleSection('secExports')">
+                        <span class="collapse-caret">▸</span>
+                        <span class="collapse-title" id="profileExportsTitle">Data downloads</span>
+                    </button>
+                    <div class="collapse-body">
+                        <div id="profileExports"></div>
                     </div>
                 </div>
 

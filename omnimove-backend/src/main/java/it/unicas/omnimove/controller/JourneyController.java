@@ -447,6 +447,43 @@ public class JourneyController {
         return out;
     }
 
+    /** Longest itinerary worth believing, in minutes: a day of travel inside a city. */
+    private static final int MAX_DURATION_MIN = 600;
+
+    /**
+     * The client's duration, or null when it cannot be believed. A journey that
+     * takes no time, negative time, or longer than {@link #MAX_DURATION_MIN} did
+     * not happen as described, and an average is easier to poison than a total.
+     */
+    private static Integer readDuration(Object raw) {
+        if (!(raw instanceof Number n)) return null;
+        double v = n.doubleValue();
+        if (Double.isNaN(v) || Double.isInfinite(v)) return null;
+        int minutes = (int) Math.round(v);
+        return (minutes > 0 && minutes <= MAX_DURATION_MIN) ? minutes : null;
+    }
+
+    /**
+     * How many moving pieces the itinerary has, counted from the per-mode
+     * kilometres the client sent and falling back to the chain's own name.
+     *
+     * <p>The fallback matters: a chain always names its modes, so a combined
+     * journey is never recorded as a single leg even when the split is missing
+     * or unusable.
+     */
+    private static int countLegs(Object rawLegsKm, String mode) {
+        int named = mode == null ? 1 : mode.split("_").length;
+        if (!(rawLegsKm instanceof Map<?, ?> m)) return named;
+        int moving = 0;
+        for (Map.Entry<?, ?> e : m.entrySet()) {
+            if (!(e.getKey() instanceof String k)) continue;
+            String up = k.toUpperCase();
+            if ("WAIT".equals(up) || "TRANSFER".equals(up)) continue;
+            if (e.getValue() instanceof Number n && n.doubleValue() > 0) moving++;
+        }
+        return Math.max(moving, named);
+    }
+
     @PostMapping("/select")
     @Operation(summary = "Record a journey mode selection")
     public ResponseEntity<?> select(
@@ -488,9 +525,22 @@ public class JourneyController {
                 : greenIndexService.computeCo2Grams(mode, distanceKm);
         int greenIndex = greenIndexService.greenIndexFor(co2Grams, distanceKm);
 
+        // How long the accepted itinerary was expected to take. Rejecting a bad
+        // value would stop a traveller from starting a journey over a statistic,
+        // so an unusable duration is simply not recorded — the trip is written
+        // without one and the averages leave it out.
+        Integer durationMinutes = readDuration(body.get("duration_minutes"));
+
+        // Moving pieces only: waiting for a bus and changing at a stop take time
+        // but cover no ground, and counting them would make every bus trip look
+        // like a chain. Falls back to the number of modes named in the chain when
+        // the client sent no legs at all.
+        int legs = countLegs(body.get("legs_km"), mode);
+
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
         journeyEventService.recordJourneySearch(
-                mode, now.getHour(), now.getDayOfWeek().toString(), greenIndex, distanceKm
+                mode, now.getHour(), now.getDayOfWeek().toString(), greenIndex, distanceKm,
+                durationMinutes, costEuros, legs
         );
 
         journeyLogRepository.save(JourneyLog.builder()
@@ -500,6 +550,7 @@ public class JourneyController {
                 .costEuros(costEuros)
                 .co2Grams(co2Grams)
                 .greenIndex(greenIndex)
+                .durationMinutes(durationMinutes)
                 .originName(originName)
                 .destName(destName)
                 // Kept so the trip can be replayed even when an end was a point

@@ -2828,6 +2828,11 @@ async function startJourney() {
                     green_index: selectedJourney.greenIndex,
                     distance_km: selectedJourney.distanceKm,
                     cost_euros:  selectedJourney.costEuros,
+                    // How long the itinerary was proposed to take. Without it the
+                    // dashboard can say how often a bus-and-scooter chain is
+                    // chosen but not whether it is worth choosing, which is the
+                    // question a combined offer has to answer.
+                    duration_minutes: selectedJourney.durationMinutes ?? null,
                     origin_name: origin ? origin.name : null,
                     dest_name:   dest ? dest.name : null,
                     // So the trip can be replayed from Last Routes even when an

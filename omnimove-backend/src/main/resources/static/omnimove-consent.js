@@ -64,7 +64,7 @@
 
     // Keep in sync with omnimove.privacy.policy-version in application.yml and
     // with the "Ultimo aggiornamento" date in privacy.html / cookie-policy.html.
-    const POLICY_VERSION = '2026-08-28';
+    const POLICY_VERSION = '2026-08-31';
 
     // Turn to true only if a non-technical third-party resource is reintroduced.
     const THIRD_PARTY_ASSETS = false;

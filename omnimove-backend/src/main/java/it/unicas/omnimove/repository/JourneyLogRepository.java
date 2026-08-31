@@ -22,10 +22,21 @@ public interface JourneyLogRepository extends JpaRepository<JourneyLog, Long> {
                AVG(j.greenIndex)   AS avgGi
         FROM   JourneyLog j
         WHERE  j.createdAt > :since
+          AND  j.createdAt <= :until
           AND  j.originName IS NOT NULL
           AND  j.destName   IS NOT NULL
         GROUP BY j.originName, j.destName
         ORDER BY uses DESC
         """)
-    List<Object[]> findTopRoutes(@Param("since") ZonedDateTime since, Pageable pageable);
+    /**
+     * Busiest routes inside a window.
+     *
+     * <p>An upper bound as well as a lower one: with only {@code since} the list
+     * always ran to now, so a custom period picked in the dashboard would show
+     * its start honoured and its end ignored — the one table on the page that
+     * quietly disagreed with the others.
+     */
+    List<Object[]> findTopRoutes(@Param("since") ZonedDateTime since,
+                                 @Param("until") ZonedDateTime until,
+                                 Pageable pageable);
 }
