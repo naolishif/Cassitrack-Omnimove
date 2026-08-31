@@ -15,8 +15,13 @@
   aggiorna questa tabella nello stesso commit. Un elenco incompleto rende
   l'informativa inesatta.
 
-  Stato attuale: solo strumenti tecnici. Nessuno strumento di profilazione,
-  nessun cookie di terze parti. Font e librerie sono self-hosted in /vendor.
+  Stato attuale: solo strumenti tecnici, nessuno strumento di profilazione.
+  Font e librerie sono self-hosted in /vendor. Tre servizi di terze parti
+  restano contattati dal browser: le mappe OpenStreetMap e, sulla pagina di
+  accesso, Google Sign-In e reCAPTCHA (§ 4). I due script Google NON stanno
+  nell'HTML: omnimove-login.js li inietta solo se la funzione e' attiva lato
+  server e solo dopo la prima interazione dell'utente. Se qualcuno li rimette
+  come <script src> nella pagina, questo paragrafo e il § 4 diventano falsi.
   ════════════════════════════════════════════════════════════════════════
 -->
 <body>
@@ -46,7 +51,14 @@
         </p>
         <p>
             <strong>Non utilizziamo cookie di profilazione, cookie pubblicitari, strumenti di
-            analisi statistica di terze parti né cookie di tracciamento tra siti diversi.</strong>
+            analisi statistica di terze parti n&eacute; cookie di tracciamento tra siti diversi.</strong>
+        </p>
+        <p>
+            La pagina di accesso pu&ograve; impiegare due servizi Google necessari
+            all'autenticazione e alla sicurezza &mdash; l'accesso con account Google e il
+            controllo reCAPTCHA &mdash; che installano propri cookie tecnici sul dominio di
+            Google. Vengono caricati solo se attivi e solo quando cominci a usare la pagina:
+            se ti limiti ad aprirla, non viene installato nulla. Sono descritti al § 4.
         </p>
         <p>
             Per gli strumenti tecnici la normativa <strong>non richiede il consenso</strong>
@@ -106,10 +118,13 @@
             </tr>
             <tr>
                 <td><code>omnimove_consent</code></td>
-                <td><code>localStorage</code></td>
+                <td><code>sessionStorage</code></td>
                 <td>Registra che hai preso visione di questa informativa, per non
-                    riproportela a ogni visita</td>
-                <td>Persistente</td>
+                    riproportela a ogni pagina. Finch&eacute; non hai un account resta
+                    soltanto nel browser e non viene trasmesso ai nostri server; se
+                    ti registri, la presa d'atto viene salvata sul tuo account e da
+                    quel momento vale su qualsiasi dispositivo</td>
+                <td>Fino alla chiusura della scheda</td>
                 <td>Non richiesto</td>
             </tr>
             </tbody>
@@ -125,7 +140,8 @@
         tali soggetti.
     </p>
     <p>
-        Fa eccezione un solo elemento, indispensabile al funzionamento del servizio:
+        Fanno eccezione i seguenti servizi, ciascuno indispensabile alla funzione
+        a cui &egrave; associato:
     </p>
     <div class="table-scroll">
         <table>
@@ -137,16 +153,42 @@
                 <td>OpenStreetMap Foundation<br><code>tile.openstreetmap.org</code></td>
                 <td>Fornisce le immagini della mappa che vedi nell'applicazione</td>
                 <td>Il tuo indirizzo IP, il tipo di browser e le porzioni di mappa richieste</td>
-                <td>Non richiesto: la mappa è parte del servizio che hai richiesto.
+                <td>Non richiesto: la mappa &egrave; parte del servizio che hai richiesto.
                     OpenStreetMap non installa cookie di profilazione</td>
+            </tr>
+            <tr>
+                <td>Google Sign-In<br><code>accounts.google.com</code></td>
+                <td>Ti permette di accedere con il tuo account Google anzich&eacute; con una
+                    password dedicata</td>
+                <td>Il tuo indirizzo IP e il tipo di browser. Lo script viene caricato solo
+                    se questa modalit&agrave; &egrave; attiva e solo dopo che hai cominciato a
+                    usare la pagina. Se la utilizzi, Google ci comunica nome, indirizzo e-mail
+                    e un identificativo del tuo account</td>
+                <td>Non richiesto: strumento tecnico necessario all'autenticazione che hai
+                    scelto di utilizzare</td>
+            </tr>
+            <tr>
+                <td>Google reCAPTCHA<br><code>google.com/recaptcha</code>,
+                    <code>gstatic.com/recaptcha</code></td>
+                <td>Distingue le persone dai sistemi automatizzati, per proteggere la pagina
+                    di accesso da tentativi di accesso massivi</td>
+                <td>Il tuo indirizzo IP, il tipo di browser e informazioni sulla tua
+                    interazione con la pagina. Installa un cookie tecnico proprio
+                    (<code>_GRECAPTCHA</code>) sul dominio di Google. Viene caricato solo se
+                    il controllo &egrave; attivo e solo dopo che hai cominciato a usare
+                    la pagina</td>
+                <td>Non richiesto: strumento tecnico di sicurezza, necessario a proteggere
+                    l'accesso al tuo account</td>
             </tr>
             </tbody>
         </table>
     </div>
     <p>
-        Informativa del fornitore:
+        Informative dei fornitori:
         <a href="https://osmfoundation.org/wiki/Privacy_Policy" target="_blank"
-           rel="noopener noreferrer">osmfoundation.org/wiki/Privacy_Policy</a>.
+           rel="noopener noreferrer">osmfoundation.org/wiki/Privacy_Policy</a> &middot;
+        <a href="https://policies.google.com/privacy" target="_blank"
+           rel="noopener noreferrer">policies.google.com/privacy</a>.
     </p>
 
     <!-- ─────────────────────────────────────────────────────────────── -->
@@ -186,7 +228,7 @@
 
     <div class="footer-nav">
         <a href="privacy.html">Informativa privacy</a>
-        <a href="omnimove-login.html">← Torna a OMNIMOVE</a>
+        <a href="omnimove-login.html" data-omni-back>← Torna a OMNIMOVE</a>
         <a href="#" onclick="OmniConsent.open(); return false;">Preferenze cookie</a>
     </div>
 </div>

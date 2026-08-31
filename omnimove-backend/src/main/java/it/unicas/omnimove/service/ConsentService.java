@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.ZonedDateTime;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,6 +40,7 @@ public class ConsentService {
 
     private static final Set<String> KNOWN_TYPES = Set.of(
             UserConsent.TYPE_PRIVACY_NOTICE,
+            UserConsent.TYPE_COOKIE_NOTICE,
             UserConsent.TYPE_PROFILING,
             UserConsent.TYPE_THIRD_PARTY,
             UserConsent.TYPE_RESEARCH_USE);
@@ -110,6 +112,47 @@ public class ConsentService {
             state.put(type, c.isGranted() && stillCurrent);
         }
         return state;
+    }
+
+    /** True when a still-current acknowledgement of this type already exists. */
+    @Transactional(readOnly = true)
+    public boolean hasCurrent(Long userId, String type) {
+        return consentRepo.findFirstByUserIdAndConsentTypeOrderByRecordedAtDesc(userId, type)
+                .filter(UserConsent::isGranted)
+                .filter(c -> policyVersion.equals(c.getPolicyVersion()))
+                .isPresent();
+    }
+
+    /**
+     * The two acknowledgements, as the operator's user card needs them: whether
+     * there is one at all, when it was given, and under which version of the
+     * text. Kept apart from {@link #currentStateFor} because that one collapses
+     * everything to a boolean, and "acknowledged, but under the previous
+     * wording" is exactly the case an operator needs to be able to see.
+     *
+     * Account metadata only — no journey data is reachable from here.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> acknowledgementsFor(Long userId) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (String type : List.of(UserConsent.TYPE_PRIVACY_NOTICE,
+                                   UserConsent.TYPE_COOKIE_NOTICE)) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            var latest = consentRepo
+                    .findFirstByUserIdAndConsentTypeOrderByRecordedAtDesc(userId, type);
+            if (latest.isEmpty()) {
+                row.put("seen", false);
+            } else {
+                UserConsent c = latest.get();
+                row.put("seen",          c.isGranted());
+                row.put("at",            c.getRecordedAt());
+                row.put("policyVersion", c.getPolicyVersion());
+                row.put("current",       policyVersion.equals(c.getPolicyVersion()));
+                row.put("source",        c.getSource());
+            }
+            out.put(type, row);
+        }
+        return out;
     }
 
     /** Full ledger for the art. 15 data export. */

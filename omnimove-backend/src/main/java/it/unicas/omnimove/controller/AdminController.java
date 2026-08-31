@@ -9,7 +9,11 @@ import it.unicas.omnimove.dto.UserDTO;
 import it.unicas.omnimove.model.User;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.service.ActiveSessionService;
+import it.unicas.omnimove.service.AnalyticsExportService;
 import it.unicas.omnimove.service.AnalyticsService;
+import it.unicas.omnimove.service.ConsentService;
+import it.unicas.omnimove.service.DataRetentionService;
+import it.unicas.omnimove.service.UiSettingsService;
 import it.unicas.omnimove.service.GoogleApiSettingsService;
 import it.unicas.omnimove.service.LoginHistoryService;
 import it.unicas.omnimove.service.RecaptchaService;
@@ -17,6 +21,7 @@ import it.unicas.omnimove.service.TravellerProfileService;
 import it.unicas.omnimove.service.SecurityAuditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -47,12 +52,16 @@ public class AdminController {
     private final UserRepository userRepo;
     private final PasswordEncoder passwordEncoder;
     private final AnalyticsService analyticsService;
+    private final AnalyticsExportService analyticsExport;
     private final GoogleApiSettingsService googleApiSettings;
     private final SecurityAuditService securityAuditService;
     private final LoginHistoryService loginHistoryService;
     private final TravellerProfileService travellerProfileService;
     private final ActiveSessionService activeSessionService;
     private final RecaptchaService recaptchaService;
+    private final ConsentService consentService;
+    private final DataRetentionService dataRetentionService;
+    private final UiSettingsService uiSettingsService;
 
     private UserDTO toDTO(User u) {
         return toDTO(u, null);
@@ -85,6 +94,35 @@ public class AdminController {
 
         securityAuditService.adminListedUsers(principal.getUsername(), users.size());
         return ResponseEntity.ok(users);
+    }
+
+    // ── Traveller interface settings ──────────────────────────────────────
+    @GetMapping("/settings/ui")
+    @Operation(summary = "Interface settings the operator can tune")
+    public ResponseEntity<?> uiSettings() {
+        return ResponseEntity.ok(Map.of("aiNudgeMinutes", uiSettingsService.getAiNudgeMinutes()));
+    }
+
+    @PutMapping("/settings/ui")
+    @Operation(summary = "Set how often the assistant introduces itself",
+               description = "Minutes between nudges; 0 turns them off. Out-of-range "
+                           + "values are clamped and the stored value is returned.")
+    public ResponseEntity<?> setUiSettings(@RequestBody Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("aiNudgeMinutes");
+        if (!(raw instanceof Number n))
+            return ResponseEntity.badRequest().body(Map.of("message", "aiNudgeMinutes must be a number"));
+
+        return ResponseEntity.ok(Map.of("aiNudgeMinutes",
+                uiSettingsService.setAiNudgeMinutes(n.intValue())));
+    }
+
+    // ── GET /api/v1/admin/retention ───────────────────────────────────────
+    @GetMapping("/retention")
+    @Operation(summary = "Retention rules and what each last removed",
+               description = "The periods privacy.html § 7 states, with the outcome of "
+                           + "each rule's most recent run. Counts and timestamps only.")
+    public ResponseEntity<?> retention() {
+        return ResponseEntity.ok(dataRetentionService.status());
     }
 
     // ── POST /api/v1/admin/users ──────────────────────────────────────────
@@ -207,6 +245,11 @@ public class AdminController {
             account.put("registeredAt", user.getCreatedAt());
             account.put("lastLoginAt",  user.getLastLoginAt());
             account.put("loginCount",   loginHistoryService.count(user.getId()));
+            // Whether this person has been shown, and acknowledged, the two
+            // notices. Account metadata, so it belongs on the card rather than
+            // behind the travel block — and it is the only way an operator can
+            // answer "was this user ever presented the informativa?".
+            account.put("acknowledgements", consentService.acknowledgementsFor(user.getId()));
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("account", account);
@@ -349,6 +392,48 @@ public class AdminController {
         payload.put("topRoutes",        analyticsService.getTopRoutes(range));
 
         return ResponseEntity.ok(payload);
+    }
+
+    // ── GET /api/v1/admin/analytics/export?range=1M&format=csv|xlsx|pdf ──
+    @GetMapping("/analytics/export")
+    @Operation(summary = "Download the analytics report",
+               description = "Aggregate figures only — no personal data. One dataset "
+                           + "rendered as CSV, XLSX or PDF, so the three cannot disagree.")
+    public ResponseEntity<byte[]> exportAnalytics(
+            @RequestParam(value = "range", defaultValue = "1M") String range,
+            @RequestParam(value = "format", defaultValue = "csv") String format) {
+
+        AnalyticsExportService.Report report = analyticsExport.build(range);
+        String base = analyticsExport.fileBaseName(report);
+
+        byte[] body;
+        String contentType, extension;
+        switch (format == null ? "" : format.toLowerCase()) {
+            case "xlsx" -> {
+                body = analyticsExport.toXlsx(report);
+                contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                extension = "xlsx";
+            }
+            case "pdf" -> {
+                body = analyticsExport.toPdf(report);
+                contentType = "application/pdf";
+                extension = "pdf";
+            }
+            case "csv" -> {
+                body = analyticsExport.toCsv(report);
+                contentType = "text/csv; charset=UTF-8";
+                extension = "csv";
+            }
+            default -> {
+                return ResponseEntity.badRequest().build();
+            }
+        }
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, contentType)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + base + "." + extension + "\"")
+                .body(body);
     }
 
     // == GET /api/v1/admin/settings/security =============================

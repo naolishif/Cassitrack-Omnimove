@@ -20,4 +20,12 @@ public class AuthResponse {
     /** true → el frontend muestra el botón "Olvidé mi contraseña" */
     @JsonProperty("suggest_password_reset")
     private Boolean suggestPasswordReset;
+
+    /**
+     * The Google token is valid but belongs to nobody yet, and creating the
+     * account would need the privacy notice acknowledged first. No user was
+     * written. The page collects the acknowledgement and posts the same
+     * credential again.
+     */
+    private Boolean consentRequired;
 }

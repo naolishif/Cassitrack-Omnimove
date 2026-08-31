@@ -81,14 +81,21 @@ public class PrivacyController {
             return ResponseEntity.status(429).body(Map.of("message", "Too many consent updates"));
 
         Long userId = null;
-        String source = UserConsent.SOURCE_BANNER;
         if (principal != null) {
             User user = userRepo.findByEmail(principal.getUsername()).orElse(null);
-            if (user != null) {
-                userId = user.getId();
-                source = UserConsent.SOURCE_SETTINGS;
-            }
+            if (user != null) userId = user.getId();
         }
+
+        // Where the decision was taken. Signed in used to mean SETTINGS without
+        // exception, but the banner is now shown only to signed-in users, so every
+        // banner acknowledgement was being filed as a settings toggle and
+        // SOURCE_BANNER had quietly stopped being used at all. COOKIE_NOTICE only
+        // ever comes from the banner — the "Cookie preferences" link reopens that
+        // same banner — so it keeps SOURCE_BANNER whoever is calling.
+        String source = (userId != null
+                         && !UserConsent.TYPE_COOKIE_NOTICE.equals(body.getType()))
+                        ? UserConsent.SOURCE_SETTINGS
+                        : UserConsent.SOURCE_BANNER;
 
         String subjectKey = sanitiseKey(body.getSubjectKey());
         if (userId == null && subjectKey == null)
@@ -97,6 +104,22 @@ public class PrivacyController {
 
         consentService.record(userId, subjectKey, body.getType(), body.getGranted(),
                               source, request);
+
+        // PRIVACY_NOTICE is written at exactly one other point in the codebase —
+        // the sign-up form — so an account that did not come through it was stuck
+        // at "not seen" permanently, with nothing able to change it: accounts
+        // created by an operator, accounts from Google sign-in, and every account
+        // that predates this ledger. The banner is where those people are in fact
+        // shown the notice; it names it and links to it. Only filled in when there
+        // is nothing current to overwrite, so a genuine acknowledgement given at
+        // sign-up is never restated or backdated.
+        if (userId != null
+                && UserConsent.TYPE_COOKIE_NOTICE.equals(body.getType())
+                && Boolean.TRUE.equals(body.getGranted())
+                && !consentService.hasCurrent(userId, UserConsent.TYPE_PRIVACY_NOTICE)) {
+            consentService.record(userId, subjectKey, UserConsent.TYPE_PRIVACY_NOTICE,
+                                  true, source, request);
+        }
 
         // An objection to research use must reach data promoted BEFORE it was
         // raised — art. 21 is not forward-only. The pseudonym is recomputable from

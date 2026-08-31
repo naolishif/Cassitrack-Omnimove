@@ -122,6 +122,16 @@ public class AuthController {
         consentService.record(user.getId(), req.getSubjectKey(),
                 UserConsent.TYPE_PROFILING, Boolean.TRUE.equals(req.getProfilingConsent()),
                 UserConsent.SOURCE_REGISTRATION, request);
+        // Carried from the banner the visitor dismissed before signing up, so the
+        // same notice is not put in front of them again at first sign-in. Recorded
+        // only now: until the account existed there was nobody to attribute it to.
+        if (Boolean.TRUE.equals(req.getCookieNoticeAccepted()))
+            consentService.record(user.getId(), req.getSubjectKey(),
+                    UserConsent.TYPE_COOKIE_NOTICE, true,
+                    UserConsent.SOURCE_BANNER, request);
+
+        // Kept for rows written under the older flow, where an anonymous decision
+        // did reach the ledger with only a subjectKey on it. A no-op otherwise.
         consentService.attachAnonymousConsents(req.getSubjectKey(), user.getId());
 
         emailService.sendVerificationEmail(req.getEmail(), verificationToken, langFrom(request));
@@ -281,7 +291,42 @@ public class AuthController {
                     .body(AuthResponse.builder().message("Google sign-in failed. Please try again.").build());
         }
 
+        // Signing in and signing up are one gesture here, so the branch that would
+        // CREATE an account is the only one that needs the art. 13 acknowledgement
+        // — and it is exactly the branch that never asked for it. Decided before
+        // resolveGoogleUser touches anything, so a refusal leaves no trace of the
+        // person in the database, matching what /register does.
+        boolean wouldCreateAccount =
+                   userRepo.findByGoogleSub(identity.subject()).isEmpty()
+                && userRepo.findByEmail(identity.email()).isEmpty();
+
+        if (wouldCreateAccount && !Boolean.TRUE.equals(req.getPrivacyNoticeAccepted())) {
+            return ResponseEntity.ok(AuthResponse.builder()
+                    .consentRequired(true)
+                    .email(identity.email())
+                    .name(identity.name())
+                    .message("The privacy notice must be accepted to create an account.")
+                    .build());
+        }
+
         User user = resolveGoogleUser(identity, ip, langFrom(httpReq));
+
+        // Same ledger entries the e-mail sign-up writes, and only for a genuinely
+        // new account: re-recording them on every later sign-in would say nothing
+        // and would bury the real one under duplicates.
+        if (wouldCreateAccount) {
+            consentService.record(user.getId(), req.getSubjectKey(),
+                    UserConsent.TYPE_PRIVACY_NOTICE, true,
+                    UserConsent.SOURCE_REGISTRATION, httpReq);
+            consentService.record(user.getId(), req.getSubjectKey(),
+                    UserConsent.TYPE_PROFILING, Boolean.TRUE.equals(req.getProfilingConsent()),
+                    UserConsent.SOURCE_REGISTRATION, httpReq);
+            if (Boolean.TRUE.equals(req.getCookieNoticeAccepted()))
+                consentService.record(user.getId(), req.getSubjectKey(),
+                        UserConsent.TYPE_COOKIE_NOTICE, true,
+                        UserConsent.SOURCE_BANNER, httpReq);
+            consentService.attachAnonymousConsents(req.getSubjectKey(), user.getId());
+        }
 
         if (user.getFailedLoginAttempts() != 0) user.setFailedLoginAttempts(0);
         loginHistoryService.recordLogin(user, ip, httpReq.getHeader("User-Agent"));

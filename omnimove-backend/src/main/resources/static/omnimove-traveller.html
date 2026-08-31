@@ -103,6 +103,9 @@
         <button class="hamburger" id="menuBtn" aria-label="Open menu" onclick="openMenu()">☰</button>
         <button class="mobile-back" onclick="backToMap()" aria-label="Back">←</button>
         <span class="mobile-title" id="mobileTitle"></span>
+        <!-- Wordmark above the search on the phone, where the sidebar that
+             normally carries it is a drawer and stays shut. -->
+        <div class="topbar-logo">OMNI<span>MOVE</span></div>
         <div class="topbar-search">
             <div class="search-seg">
                 <span>📍</span>
@@ -147,6 +150,15 @@
             </div>
             <button class="map-menu-fab" onclick="openMenu()" aria-label="Open menu">☰</button>
             <div class="ai-fab" onclick="openAI()" title="Ask OmniAI">✦</div>
+            <!-- Nudge towards the assistant. Hidden until the timer raises it,
+                 and never while the assistant itself is open. -->
+            <div class="ai-nudge" id="aiNudge" hidden>
+                <button type="button" class="ai-nudge-body" onclick="openAI()">
+                    <span class="ai-nudge-text" data-i18n="ai_nudge">Ask OmniAI about your route</span>
+                </button>
+                <button type="button" class="ai-nudge-x" onclick="dismissAiNudge()"
+                        aria-label="Dismiss">✕</button>
+            </div>
 
             <div class="map-sidebar">
                 <div class="sheet-handle" id="sheetHandle"><span></span></div>
@@ -258,7 +270,7 @@
         <div class="pane" id="pane-tickets">
             <div class="tickets-inner">
 
-                <div>
+                <div class="tickets-page-title">
                     <div class="section-title" data-i18n="section_my_tickets">My Tickets</div>
                 </div>
 
@@ -385,6 +397,11 @@
                             <div class="pstat-val" id="statSpent">—</div>
                             <div class="pstat-lbl" data-i18n="stat_spent">Spent (30d)</div>
                         </div>
+                        <!-- Journey history is kept for 12 months on a rolling
+                             window, so these three count that period and not a
+                             lifetime. Saying so beats letting the numbers quietly
+                             shrink as older trips age out. -->
+                        <div class="pstat-note" data-i18n="stat_window">Last 12 months · spending over 30 days</div>
                     </div>
                 </div>
 
@@ -561,53 +578,9 @@
                     </div>
                     <div class="settings-section">
                         <span class="section-label" data-i18n="label_save_changes">Save Changes</span>
-                        <button class="action-btn btn-green" onclick="savePreferences()" style="width:100%;padding:12px 20px;font-size:14px;font-weight:700" data-i18n="btn_save_prefs">Save Preferences</button>
-                    </div>
-
-                    <!-- Privacy — deliberately below "Save Changes" and saved on its own.
-                         A consent must be granted and withdrawn by an explicit act
-                         (art. 7 GDPR); burying it inside a bulk "save" would make the
-                         withdrawal harder than the grant. -->
-                    <div class="settings-section">
-                        <span class="section-label" data-i18n="label_privacy">Privacy &amp; your data</span>
-
-                        <div class="pref-row">
-                            <div>
-                                <div class="pref-label" data-i18n="pref_profiling">Personalised suggestions</div>
-                                <div class="pref-desc" data-i18n="desc_profiling">Use my travel history to suggest routes. Optional — the app works exactly the same without it.</div>
-                            </div>
-                            <div class="toggle" id="prefProfiling" onclick="toggleProfilingConsent(this)"></div>
-                        </div>
-
-                        <!-- Objection, not consent: the lawful basis for research is
-                             public interest (art. 6(1)(e)), so this starts ON and the
-                             user switches it OFF to object (art. 21(6)). -->
-                        <div class="pref-row">
-                            <div>
-                                <div class="pref-label" data-i18n="pref_research">Contribute to University research</div>
-                                <div class="pref-desc" data-i18n="desc_research">Anonymous, aggregated mobility statistics for research by the University of Cassino. Switch off to object: your data is excluded and anything already collected is deleted.</div>
-                            </div>
-                            <div class="toggle" id="prefResearch" onclick="toggleResearchUse(this)"></div>
-                        </div>
-
-                        <div class="pref-row">
-                            <div>
-                                <div class="pref-label" data-i18n="pref_export">Download my data</div>
-                                <div class="pref-desc" data-i18n="desc_export">Get a copy of everything we hold about you, in JSON (GDPR art. 15 and 20).</div>
-                            </div>
-                            <button class="action-btn" onclick="downloadMyData(this)" data-i18n="btn_export">Download</button>
-                        </div>
-
-                        <div class="pref-row">
-                            <div>
-                                <div class="pref-label" data-i18n="pref_documents">Documents</div>
-                                <div class="pref-desc">
-                                    <a href="privacy.html" target="_blank" rel="noopener" data-i18n="link_privacy">Privacy notice</a> ·
-                                    <a href="cookie-policy.html" target="_blank" rel="noopener" data-i18n="link_cookies">Cookie policy</a> ·
-                                    <a href="#" onclick="OmniConsent.open(); return false;" data-i18n="link_cookie_prefs">Cookie preferences</a>
-                                </div>
-                            </div>
-                        </div>
+                        <button class="action-btn btn-green" onclick="savePreferences()"
+                                style="width:auto;padding:9px 22px;font-size:13px"
+                                data-i18n="btn_save_prefs">Save Preferences</button>
                     </div>
 
                 </div>
@@ -688,6 +661,58 @@
                             <button class="action-btn" onclick="confirmLogout()" style="width:auto;padding:8px 20px;flex-shrink:0;background:#fef2f2;color:var(--red);border:1px solid #fee2e2" data-i18n="logout_btn">Log Out</button>
                         </div>
                     </div>
+
+                    <!-- Privacy. Each control here saves on its own, with no bulk
+                         "Save" anywhere near it: a consent must be granted and
+                         withdrawn by an explicit act (art. 7 GDPR), and burying it
+                         inside a batch save would make the withdrawal harder than
+                         the grant. Sitting next to "Delete account" is deliberate —
+                         download (art. 15 and 20) and erasure (art. 17) are the same
+                         kind of right and belong in the same place. -->
+                    <div class="settings-section">
+                        <span class="section-label" data-i18n="label_privacy">Privacy &amp; your data</span>
+
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_profiling">Personalised suggestions</div>
+                                <div class="pref-desc" data-i18n="desc_profiling">Use my travel history to suggest routes. Optional — the app works exactly the same without it.</div>
+                            </div>
+                            <div class="toggle" id="prefProfiling" onclick="toggleProfilingConsent(this)"></div>
+                        </div>
+
+                        <!-- Objection, not consent: the lawful basis for research is
+                             public interest (art. 6(1)(e)), so this starts ON and the
+                             user switches it OFF to object (art. 21(6)). -->
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_research">Contribute to University research</div>
+                                <div class="pref-desc" data-i18n="desc_research">Anonymous, aggregated mobility statistics for research by the University of Cassino. Switch off to object: your data is excluded and anything already collected is deleted.</div>
+                            </div>
+                            <div class="toggle" id="prefResearch" onclick="toggleResearchUse(this)"></div>
+                        </div>
+
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_export">Download my data</div>
+                                <div class="pref-desc" data-i18n="desc_export">Get a copy of everything we hold about you, in JSON (GDPR art. 15 and 20).</div>
+                            </div>
+                            <button class="action-btn" onclick="downloadMyData(this)"
+                                    style="width:auto;padding:8px 20px;flex-shrink:0"
+                                    data-i18n="btn_export">Download</button>
+                        </div>
+
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_documents">Documents</div>
+                                <div class="pref-desc">
+                                    <a href="privacy.html" data-i18n="link_privacy">Privacy notice</a> ·
+                                    <a href="cookie-policy.html" data-i18n="link_cookies">Cookie policy</a> ·
+                                    <a href="#" onclick="OmniConsent.open(); return false;" data-i18n="link_cookie_prefs">Cookie preferences</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
 
                     <div class="settings-section">
                         <span class="section-label" data-i18n="section_actions">Account Actions</span>

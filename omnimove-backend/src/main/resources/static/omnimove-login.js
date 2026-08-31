@@ -44,8 +44,21 @@ function clearAllFieldErrs(...ids) { ids.forEach(clearFieldErr); }
 // ════════════════════════════════════════════════════════════
 // STARTUP — URL PARAM DETECTION
 // ════════════════════════════════════════════════════════════
+
+// Declared here, not next to the functions that read them: init() runs while
+// this file is still being evaluated, so a `let` or `const` further down would
+// be in its temporal dead zone and would throw.
+let _pendingTarget = null;
+let _restoreRegisterTab = false;
+const TAB_KEY = 'omnimove_login_tab';
+
 (function init() {
     const params = new URLSearchParams(window.location.search);
+    // Captured before the replaceState below wipes the query string. Reading it
+    // later, at redirect time, always found an empty search and quietly sent
+    // everyone to their default page — so ?next=, which both the server entry
+    // point and the client route guard take the trouble to set, did nothing.
+    _pendingTarget = params.get('next');
     // ?pr=TOKEN  — server-side redirect from /api/v1/auth/reset-page (most reliable path)
     // ?reset=TOKEN — legacy / direct link fallback
     const resetToken = params.get('pr') || params.get('reset');
@@ -83,6 +96,13 @@ function clearAllFieldErrs(...ids) { ids.forEach(clearFieldErr); }
         return;
     }
 
+    // Only noted here, not acted on: switchTab -> showPanel reads ALL_PANELS,
+    // which is declared below and is still in its temporal dead zone while this
+    // runs. Reached last on purpose, so anything the URL asked for wins — a
+    // reset token, a verification outcome and a flash error all return above.
+    try { _restoreRegisterTab = sessionStorage.getItem(TAB_KEY) === 'register'; }
+    catch (e) { /* storage blocked */ }
+
     // V-04 FIX: localStorage token removed — auth is handled via httpOnly cookie.
     // If a valid session cookie exists, the server-side redirect handles re-entry.
     // No client-side auto-redirect needed here.
@@ -91,7 +111,7 @@ function clearAllFieldErrs(...ids) { ids.forEach(clearFieldErr); }
 // ════════════════════════════════════════════════════════════
 // UI HELPERS
 // ════════════════════════════════════════════════════════════
-const ALL_PANELS = ['loginForm','registerForm','emailSentPanel','forgotForm','resetForm'];
+const ALL_PANELS = ['loginForm','registerForm','emailSentPanel','forgotForm','resetForm','googleConsentPanel'];
 
 function showPanel(id) {
     ALL_PANELS.forEach(p => {
@@ -101,12 +121,23 @@ function showPanel(id) {
 }
 
 function switchTab(tab) {
+    // Remembered so that leaving this page and coming back — which now happens
+    // in the same tab, since the privacy notice no longer opens a new one —
+    // returns to the half-filled Register form rather than to Sign In.
+    // Browsers restore the field values on a history navigation; which panel was
+    // open is our own state and nobody restores it for us.
+    try { sessionStorage.setItem(TAB_KEY, tab); } catch (e) { /* storage blocked */ }
+
     document.querySelectorAll('.tab').forEach((t, i) =>
         t.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register')));
     showPanel(tab === 'login' ? 'loginForm' : 'registerForm');
     showTabs(); showGuestSection();
     if (tab === 'login') syncForgotButton();
 }
+
+// Deferred out of init() for the reason given there. Coming back from the
+// privacy notice — same tab now — lands on the panel the visitor left.
+if (_restoreRegisterTab) switchTab('register');
 
 function hideTabs()        { document.getElementById('tabBar').style.display = 'none';
                              setGoogleVisible(false); }
@@ -152,7 +183,7 @@ function showForgotPanel() {
 // a backslash or a host is rejected, so ?next=https://evil.tld cannot bounce the user
 // off-site after a successful login (OWASP A01, open redirect).
 function pendingTarget() {
-    const next = new URLSearchParams(window.location.search).get('next');
+    const next = _pendingTarget;
     if (!next) return null;
     return /^[A-Za-z0-9._-]+\.html$/.test(next) ? next : null;
 }
@@ -203,6 +234,8 @@ async function handleLogin(e) {
     // Caught here purely to save a round trip — the server refuses an unsolved
     // login regardless of what this page does
     if (captchaRequired()) {
+        // The widget is built on first interaction, so it may still be arriving
+        await captchaReady();
         if (_captchaBroken) { showMsg(t('err_captcha_broken'), 'err'); return; }
         if (!captchaToken()) { showMsg(t('err_captcha_required'), 'err'); return; }
     }
@@ -321,6 +354,15 @@ async function handleRegister(e) {
                 // Recorded in the consent ledger so the choice is provable (art. 7(1)).
                 privacyNoticeAccepted: privacyOk,
                 profilingConsent: profiling,
+                // The banner is shown before anyone has an account, and an
+                // anonymous acknowledgement is never sent to the server on its
+                // own — it lives in this tab. Registration is where it becomes
+                // attributable, so it travels with the account that is being
+                // created, and the visitor is not asked the same thing again at
+                // their first sign-in. If registration fails, nothing was
+                // written and the acknowledgement stays where it was.
+                cookieNoticeAccepted: !!(window.OmniConsent && OmniConsent.state()
+                                         && OmniConsent.state().notice === true),
                 // Links any choice already made in the cookie banner to this account.
                 subjectKey: (window.OmniConsent && OmniConsent.state()
                              && OmniConsent.state().subjectKey) || null
@@ -479,6 +521,60 @@ async function handleReset(e) {
 // same one the password form gets. Nothing about the Google account is trusted
 // here — this file only carries the token across.
 
+// ════════════════════════════════════════════════════════════
+//  THIRD-PARTY SCRIPTS, LOADED ONLY WHEN THEY ARE ACTUALLY NEEDED
+// ════════════════════════════════════════════════════════════
+// Google Sign-In and reCAPTCHA used to be <script src> tags in the page, so
+// every visit reached Google before the visitor did anything — including
+// visits to deployments with both features off, and visits from someone who
+// only opened the page to read the privacy notice. Each is now fetched when
+// two conditions hold: the server says the feature is on, and the visitor has
+// started using the page. What is left is described in privacy.html § 5 and
+// cookie-policy.html § 4; if this changes, those change with it.
+
+const GIS_SRC       = 'https://accounts.google.com/gsi/client';
+const RECAPTCHA_SRC = 'https://www.google.com/recaptcha/api.js?render=explicit';
+
+const _scriptLoads = new Map();
+
+/** Injects a script once and resolves when it has run. Rejects if it fails. */
+function loadScriptOnce(src) {
+    if (_scriptLoads.has(src)) return _scriptLoads.get(src);
+    const p = new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = src;
+        el.async = true;
+        el.defer = true;
+        el.onload  = () => resolve(true);
+        el.onerror = () => reject(new Error('could not load ' + src));
+        document.head.appendChild(el);
+    });
+    _scriptLoads.set(src, p);
+    return p;
+}
+
+let _interaction = null;
+
+/**
+ * Resolves the first time the visitor touches the page — a click, a key, a
+ * tap. Landing here and leaving must not reach Google at all, and reading the
+ * page is not using it. Anything that could lead to a sign-in goes through one
+ * of these events first, so nothing is delayed that the visitor is waiting on.
+ */
+function firstInteraction() {
+    if (_interaction) return _interaction;
+    const events = ['pointerdown', 'keydown', 'touchstart'];
+    _interaction = new Promise(resolve => {
+        const fire = () => {
+            events.forEach(e => document.removeEventListener(e, fire));
+            resolve();
+        };
+        events.forEach(e =>
+            document.addEventListener(e, fire, { once: true, passive: true }));
+    });
+    return _interaction;
+}
+
 async function initGoogle() {
     let cfg;
     try {
@@ -488,10 +584,23 @@ async function initGoogle() {
     } catch { return; }
 
     // No client id configured on this deployment: leave the block hidden rather
-    // than draw a button that could only fail
+    // than draw a button that could only fail. Nothing has been asked of Google
+    // at this point, and on a deployment that stops here nothing ever is.
     if (!cfg.enabled || !cfg.clientId) return;
 
-    // The GIS script is async: it may not have run yet when this resolves
+    // Enabled, so the button will be wanted — but not until someone is here to
+    // press it. The button appears a moment after the first interaction, which
+    // is no later than it appeared before: the tag was async anyway.
+    await firstInteraction();
+    try {
+        await loadScriptOnce(GIS_SRC);
+    } catch (e) {
+        console.warn('Google Identity Services did not load:', e.message);
+        return;
+    }
+
+    // Loaded is not the same as initialised: the library defines its namespace
+    // as it runs, so keep polling for the piece actually used here.
     const ready = await waitForGis();
     if (!ready) { console.warn('Google Identity Services did not load'); return; }
 
@@ -533,7 +642,7 @@ function renderGoogleButton() {
 // i18n.js calls this after every language switch
 window._onLangChange = () => renderGoogleButton();
 
-/** The GIS script carries async+defer, so poll briefly instead of assuming. */
+/** The GIS script is injected async, so poll briefly instead of assuming. */
 function waitForGis(timeoutMs = 5000) {
     return new Promise(resolve => {
         const started = Date.now();
@@ -564,11 +673,39 @@ async function handleGoogleCredential(response) {
         return;
     }
 
+    await postGoogleCredential(response.credential, null);
+}
+
+/**
+ * Sends the Google token, and handles the one answer that is neither a session
+ * nor a failure: the token is good but belongs to nobody yet, and the account
+ * cannot be created until the privacy notice has been acknowledged.
+ *
+ * With Google there is no form to put that checkbox on — signing in and signing
+ * up are the same single click — so the panel is raised only when the server
+ * says an account would be created, and the same credential is posted again
+ * with the answers. Someone who already has an account never sees it.
+ *
+ * @param consents null on the first attempt; the collected answers on the retry.
+ */
+async function postGoogleCredential(credential, consents) {
+    const err = document.getElementById('err-google');
     try {
+        const body = { credential: credential };
+        if (consents) {
+            body.privacyNoticeAccepted = true;
+            body.profilingConsent      = consents.profiling === true;
+            // Carried over from the banner, exactly as the e-mail form does
+            body.cookieNoticeAccepted  = !!(window.OmniConsent && OmniConsent.state()
+                                            && OmniConsent.state().notice === true);
+            body.subjectKey            = (window.OmniConsent && OmniConsent.state()
+                                          && OmniConsent.state().subjectKey) || null;
+        }
+
         const r = await fetch(`${OMNIMOVE}/auth/google`, {
             method: 'POST',
             headers: langHeaders(),
-            body: JSON.stringify({ credential: response.credential })
+            body: JSON.stringify(body)
         });
         const data = await r.json();
 
@@ -577,12 +714,56 @@ async function handleGoogleCredential(response) {
             saveSession(data);
             showMsg(t('msg_welcome_back').replace('{name}', data.name || 'user'), 'ok');
             secureRedirect(data.role || 'TRAVELLER');
-        } else {
-            showMsg(data.message || t('err_google_failed'), 'err');
+            return;
         }
+
+        if (r.ok && data.consentRequired === true) {
+            // Nothing was written server-side. Ask, then retry with the same token.
+            openGoogleConsent(credential, data.email, data.name);
+            return;
+        }
+
+        showMsg(data.message || t('err_google_failed'), 'err');
     } catch (e) {
+        if (err) err.textContent = '';
         showMsg(t('msg_server_short'), 'err');
     }
+}
+
+// The token being answered for. Held only until the panel is dismissed.
+let _pendingGoogleCredential = null;
+
+function openGoogleConsent(credential, email, name) {
+    _pendingGoogleCredential = credential;
+    document.getElementById('gConsentWho').textContent = email || name || '';
+    document.getElementById('gcPrivacy').checked  = false;
+    document.getElementById('gcProfiling').checked = false;
+    clearFieldErr('gcPrivacy');
+    hideTabs(); hideGuestSection();
+    showPanel('googleConsentPanel');
+}
+
+function cancelGoogleConsent() {
+    // No account was created, so backing out leaves nothing behind.
+    _pendingGoogleCredential = null;
+    showPanel('loginForm'); showTabs(); showGuestSection();
+}
+
+async function confirmGoogleConsent() {
+    if (!document.getElementById('gcPrivacy').checked) {
+        fieldErr('gcPrivacy', t('err_privacy_required'));
+        return;
+    }
+    const btn = document.getElementById('gcBtn');
+    btn.disabled = true; btn.textContent = t('btn_sending');
+
+    const credential = _pendingGoogleCredential;
+    _pendingGoogleCredential = null;
+    await postGoogleCredential(credential, {
+        profiling: document.getElementById('gcProfiling').checked
+    });
+
+    btn.disabled = false; btn.textContent = t('gc_create');
 }
 
 initGoogle();
@@ -620,6 +801,7 @@ window._onLangChange = (lang) => {
 let _captchaId       = null;   // the rendered widget
 let _captchaRequired = false;  // what the server says it will enforce
 let _captchaBroken   = false;  // required, but the widget never appeared
+let _captchaReady    = null;   // resolves once the widget exists, or is known broken
 
 async function initCaptcha() {
     let cfg;
@@ -629,6 +811,7 @@ async function initCaptcha() {
         cfg = await r.json();
     } catch { return; }
 
+    // Off on this deployment: Google is never contacted from this page.
     if (!cfg.enabled || !cfg.siteKey) return;
 
     // From here on the server WILL reject a login without a token, so any
@@ -636,23 +819,47 @@ async function initCaptcha() {
     // meets an error about a checkbox that is not on the page.
     _captchaRequired = true;
 
-    // api.js carries async+defer and renders explicitly, so wait for it
-    const ready = await waitFor(() => window.grecaptcha?.render);
-    if (!ready) { captchaBroken('reCAPTCHA script did not load'); return; }
+    // Built on first interaction rather than on load. Someone who opens the
+    // page and reads it never reaches Google; anyone about to sign in has
+    // clicked or typed by definition, so the widget is on its way well before
+    // the form can be submitted — and captchaReady() covers the case where it
+    // is not.
+    _captchaReady = (async () => {
+        await firstInteraction();
+        try {
+            await loadScriptOnce(RECAPTCHA_SRC);
+        } catch (e) {
+            captchaBroken(e.message);
+            return;
+        }
 
-    const box = document.getElementById('captchaBox');
-    try {
-        _captchaId = grecaptcha.render(box, {
-            sitekey: cfg.siteKey,
-            theme: 'dark'
-        });
-    } catch (e) {
-        // Most often a key registered as v3 while this page renders a v2
-        // checkbox — grecaptcha throws "Invalid site key type"
-        captchaBroken(e && e.message ? e.message : 'could not render');
-        return;
-    }
-    box.classList.add('on');
+        // api.js renders explicitly and defines grecaptcha as it runs
+        const ready = await waitFor(() => window.grecaptcha?.render);
+        if (!ready) { captchaBroken('reCAPTCHA API never became available'); return; }
+
+        const box = document.getElementById('captchaBox');
+        try {
+            _captchaId = grecaptcha.render(box, {
+                sitekey: cfg.siteKey,
+                theme: 'dark'
+            });
+        } catch (e) {
+            // Most often a key registered as v3 while this page renders a v2
+            // checkbox — grecaptcha throws "Invalid site key type"
+            captchaBroken(e && e.message ? e.message : 'could not render');
+            return;
+        }
+        box.classList.add('on');
+    })();
+}
+
+/**
+ * Waits for the deferred widget, so a fast submit — autofill, then Enter —
+ * does not hit "please complete the check" while the checkbox is still being
+ * built. Returns immediately when the check is off or already rendered.
+ */
+async function captchaReady() {
+    if (_captchaReady) await _captchaReady;
 }
 
 function captchaBroken(reason) {

@@ -11,9 +11,12 @@
   ════════════════════════════════════════════════════════════════════════
   PRIMA DELLA PUBBLICAZIONE — da completare a cura dell'Ateneo:
 
-  1. Sostituire tutti i segnaposto evidenziati in giallo (classe .todo)
-     con i recapiti reali: sede, PEC, contatti del Responsabile della
-     Protezione dei Dati (RPD/DPO) dell'Ateneo.
+  1. FATTO — i recapiti del titolare (§ 1) e dell'RPD (§ 2) sono quelli
+     pubblicati dall'Ateneo. La classe .todo non è più usata in questa
+     pagina; se serve un nuovo segnaposto, riusarla e rimettere questa voce.
+     Da rivedere prima della pubblicazione: il fornitore di posta al § 5 è
+     dichiarato come Gmail perché è ciò che spring.mail.host configura oggi.
+     Se si passa all'SMTP di Ateneo, quella riga va corretta.
   2. Far validare il testo dall'RPD e inserire il trattamento nel registro
      ex art. 30 GDPR.
   3. Verificare le tempistiche di conservazione dichiarate al § 7: la
@@ -46,11 +49,13 @@
     <!-- ─────────────────────────────────────────────────────────────── -->
     <h2>1. Titolare del trattamento</h2>
     <div class="box">
-        <p><strong>Università degli Studi di Cassino e del Lazio Meridionale</strong></p>
-        <p>Sede legale: <span class="todo">indirizzo completo da inserire</span></p>
-        <p>PEC: <span class="todo">indirizzo PEC da inserire</span></p>
+        <p><strong>Universit&agrave; degli Studi di Cassino e del Lazio Meridionale</strong></p>
+        <p>Sede legale: Viale dell'Universit&agrave; &mdash; Rettorato, Campus Universitario,
+           localit&agrave; Folcara, 03043 Cassino (FR)</p>
+        <p>Codice fiscale: 81006500607 &middot; Partita IVA: 01730470604</p>
+        <p>PEC: <a href="mailto:protocollo@pec.unicas.it">protocollo@pec.unicas.it</a></p>
         <p>E-mail per questioni relative alla protezione dei dati:
-           <span class="todo">indirizzo e-mail da inserire</span></p>
+           <a href="mailto:rpd@unicas.it">rpd@unicas.it</a></p>
     </div>
 
     <h2>2. Responsabile della Protezione dei Dati (RPD/DPO)</h2>
@@ -60,8 +65,10 @@
         diritti descritti al § 8:
     </p>
     <div class="box">
-        <p>RPD — <span class="todo">nominativo o struttura di riferimento da inserire</span></p>
-        <p>E-mail: <span class="todo">indirizzo e-mail RPD da inserire</span></p>
+        <p>Dott.ssa Elide Di Duca &mdash; designata con D.R. n. 373 del 15 maggio 2018</p>
+        <p>E-mail: <a href="mailto:rpd@unicas.it">rpd@unicas.it</a></p>
+        <p>PEC: <a href="mailto:dpo@pec.unicas.it">dpo@pec.unicas.it</a></p>
+        <p>Telefono: <a href="tel:+3907762993440">+39 0776 299 3440</a></p>
     </div>
 
     <!-- ─────────────────────────────────────────────────────────────── -->
@@ -186,9 +193,11 @@
                     il tuo indirizzo IP non viene comunicato a Google</td>
             </tr>
             <tr>
-                <td>Anthropic PBC</td>
+                <td>Seeweb S.r.l. &mdash; piattaforma Regolo.ai (Italia)</td>
                 <td>Assistente virtuale, solo se lo utilizzi</td>
-                <td>Il testo della domanda che poni e il contesto del viaggio in corso</td>
+                <td>Il testo della domanda che poni e il contesto del viaggio in corso.
+                    La richiesta parte dai nostri server: il tuo indirizzo IP non viene
+                    comunicato al fornitore. L&apos;elaborazione avviene in Italia</td>
             </tr>
             <tr>
                 <td>OpenWeather Ltd.</td>
@@ -196,17 +205,35 @@
                 <td>Coordinate approssimative della zona. Nessun identificativo dell'utente</td>
             </tr>
             <tr>
+                <td>Google Ireland Ltd. / Google LLC &mdash; Gmail SMTP</td>
+                <td>Invio delle e-mail di verifica dell'account e di reimpostazione password</td>
+                <td>Indirizzo e-mail e contenuto del messaggio</td>
+            </tr>
+            <tr>
+                <td>Google Ireland Ltd. / Google LLC</td>
+                <td>Accesso con account Google, se scegli di utilizzarlo</td>
+                <td>Il tuo indirizzo IP e il tipo di browser, comunicati direttamente dal tuo
+                    browser. Il contatto avviene soltanto se questa modalit&agrave; &egrave;
+                    attiva su questa installazione e soltanto dal momento in cui interagisci
+                    con la pagina di accesso: se ti limiti ad aprirla, Google non viene
+                    contattato. Se utilizzi questa modalit&agrave;, Google ci comunica il tuo
+                    nome, il tuo indirizzo e-mail e un identificativo del tuo account</td>
+            </tr>
+            <tr>
+                <td>Google Ireland Ltd. / Google LLC</td>
+                <td>Protezione della pagina di accesso da accessi automatizzati (reCAPTCHA)</td>
+                <td>Il tuo indirizzo IP, il tipo di browser e informazioni sulla tua interazione
+                    con la pagina, comunicati direttamente dal tuo browser. Il controllo viene
+                    caricato soltanto se &egrave; attivo su questa installazione e soltanto dal
+                    momento in cui interagisci con la pagina di accesso</td>
+            </tr>
+            <tr>
                 <td>OpenStreetMap Foundation</td>
                 <td>Fornitura delle mappe visualizzate nell'applicazione</td>
                 <td>Il tuo indirizzo IP e le porzioni di mappa richieste, comunicati
                     direttamente dal tuo browser</td>
             </tr>
-            <tr>
-                <td><span class="todo">Fornitore del servizio di posta elettronica</span></td>
-                <td>Invio delle e-mail di verifica dell'account e di reimpostazione password</td>
-                <td>Indirizzo e-mail e contenuto del messaggio</td>
-            </tr>
-            </tbody>
+</tbody>
         </table>
     </div>
 
@@ -221,8 +248,22 @@
     <p>
         Per ridurre al minimo le comunicazioni non necessarie, <strong>i caratteri tipografici e le
         librerie software utilizzati dall'applicazione sono ospitati sui nostri server</strong>:
-        il tuo browser non contatta reti di distribuzione di contenuti di terze parti e il tuo
-        indirizzo IP non viene quindi comunicato a tali soggetti.
+        il tuo browser non contatta alcuna rete di distribuzione di contenuti di terze parti e il
+        tuo indirizzo IP non viene quindi comunicato a tali soggetti.
+    </p>
+    <p>
+        Restano tre eccezioni, indicate nella tabella al § 5 e non eliminabili senza rinunciare
+        alla funzione corrispondente: le <strong>immagini della mappa</strong>, richieste dal tuo
+        browser a OpenStreetMap mentre navighi, e i due servizi Google impiegati nella pagina di
+        accesso &mdash; l'<strong>accesso con account Google</strong> e il controllo
+        <strong>reCAPTCHA</strong>.
+    </p>
+    <p>
+        Questi ultimi due non vengono caricati all'apertura della pagina. Sono richiesti al
+        fornitore soltanto se la funzione corrispondente &egrave; attiva su questa installazione
+        e soltanto a partire dal momento in cui interagisci con la pagina di accesso. Chi apre
+        l'applicazione e si limita a leggerla &mdash; ad esempio per consultare questa
+        informativa &mdash; non comunica a Google alcun dato.
     </p>
 
     <!-- ─────────────────────────────────────────────────────────────── -->
@@ -339,7 +380,7 @@
 
     <div class="footer-nav">
         <a href="cookie-policy.html">Cookie policy</a>
-        <a href="omnimove-login.html">← Torna a OMNIMOVE</a>
+        <a href="omnimove-login.html" data-omni-back>← Torna a OMNIMOVE</a>
         <a href="#" onclick="OmniConsent.open(); return false;">Preferenze cookie</a>
     </div>
 </div>

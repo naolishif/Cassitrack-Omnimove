@@ -20,6 +20,17 @@ public class UserConsent {
 
     /** Acknowledgement of the art. 13 privacy notice — mandatory, not "consent" in the art. 6(1)(a) sense. */
     public static final String TYPE_PRIVACY_NOTICE     = "PRIVACY_NOTICE";
+    /**
+     * Acknowledgement of the cookie notice shown by the in-app banner.
+     *
+     * <p>Deliberately separate from {@link #TYPE_PRIVACY_NOTICE}. The registration
+     * form already records that one the moment the account is created, so keying
+     * the banner off it would mean the banner never appears for anyone. They also
+     * cover different things and different articles: the art. 13 notice describes
+     * the processing, the cookie notice covers what is written to the device
+     * (art. 122 Codice Privacy), and they are two separate documents.
+     */
+    public static final String TYPE_COOKIE_NOTICE      = "COOKIE_NOTICE";
     /** Optional: personalised journey suggestions built on travel history. */
     public static final String TYPE_PROFILING          = "PROFILING";
     /** Optional: non-technical third-party assets (only relevant if a CDN is ever reintroduced). */

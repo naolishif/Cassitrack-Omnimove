@@ -162,9 +162,9 @@
             <div class="label">Export anonymised analytics report: <strong id="exportLabel">OMNIMOVE — FR-OM-009 Dashboard — May 2026</strong></div>
             <div class="dl-btns">
                 <span class="gdpr-badge">GDPR</span>
-                <button class="btn btn-ghost" onclick="toast('CSV export queued…')">⬇ CSV</button>
-                <button class="btn btn-ghost" onclick="toast('XLSX export queued…')">⬇ XLSX</button>
-                <button class="btn btn-amber" onclick="toast('Generating PDF report…')">⬇ PDF REPORT</button>
+                <button class="btn btn-ghost" onclick="downloadReport('csv', this)">⬇ CSV</button>
+                <button class="btn btn-ghost" onclick="downloadReport('xlsx', this)">⬇ XLSX</button>
+                <button class="btn btn-amber" onclick="downloadReport('pdf', this)">⬇ PDF REPORT</button>
             </div>
         </div>
 
@@ -256,6 +256,33 @@
     </div>
 
     <div class="pane" id="pane-settings">
+        <!-- Two columns, four cards. Retention sits beside Google Maps because
+             the two are the same size — four rules against four switches — and
+             stacking the table full-width above them left it scrolling inside a
+             card while half the row beside it was empty. -->
+        <div class="settings-grid">
+        <div class="settings-card settings-card--table">
+            <h2 class="settings-h">Data retention</h2>
+            <p class="settings-note">
+                The retention periods the privacy notice states, and what each rule
+                removed the last time it ran. Shown so the promise can be checked
+                against the system rather than taken on trust (GDPR art. 5(2)).
+            </p>
+            <div id="retentionState"></div>
+            <table class="user-table" id="retentionTable">
+                <thead>
+                <tr>
+                    <th>What</th>
+                    <th>Kept for</th>
+                    <th>Last run</th>
+                    <th>Removed</th>
+                    <th>Outcome</th>
+                </tr>
+                </thead>
+                <tbody id="retentionTbody"></tbody>
+            </table>
+        </div>
+
         <div class="settings-card">
             <h2 class="settings-h">Google Maps integration</h2>
             <p class="settings-note">
@@ -294,6 +321,27 @@
         </div>
 
         <div class="settings-card">
+            <h2 class="settings-h">Assistant prompt</h2>
+            <p class="settings-note">
+                How often the OmniAI button introduces itself while the traveller is
+                on Plan Route. The prompt is skipped while the assistant is open,
+                and someone who dismisses it is not shown it again that session.
+            </p>
+            <div class="setting-row">
+                <div class="setting-text">
+                    <div class="setting-title">Every</div>
+                    <div class="setting-desc">Minutes between prompts. <strong>0 turns it off.</strong></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;flex:0 0 auto">
+                    <input class="filter-control" id="aiNudgeMinutes" type="number"
+                           min="0" max="240" step="1" style="width:90px" value="2">
+                    <button class="btn btn-ghost" id="aiNudgeSave" onclick="saveAiNudge()">SAVE</button>
+                </div>
+            </div>
+            <div class="settings-note" id="aiNudgeState"></div>
+        </div>
+
+        <div class="settings-card">
             <h2 class="settings-h">Security</h2>
             <p class="settings-note">
                 Applies to the email + password form. Sign in with Google carries
@@ -310,6 +358,7 @@
                 <button class="switch" id="swCaptcha" data-key="security.recaptcha" data-endpoint="/admin/settings/security" role="switch" aria-checked="false"></button>
             </div>
         </div>
+    </div>
     </div>
 </div>
 
@@ -386,6 +435,9 @@
         </div>
         <div class="profile-scroll" id="profileScroll">
             <div class="profile-id" id="profileId"></div>
+            <!-- Consent ledger, account side only: whether the two notices were
+                 ever presented and acknowledged. No journey data here. -->
+            <div class="profile-id" id="profileNotices"></div>
 
             <div class="profile-section">Edit details</div>
             <div class="form-row">

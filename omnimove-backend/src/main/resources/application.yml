@@ -209,6 +209,30 @@ omnimove:
     # moment one of them is edited.
     from: "OMNIMOVE <${spring.mail.username}>"
     base-url: ${APP_BASE_URL:http://localhost:8180}
+  ratelimit:
+    # Per signed-in account, per hour. These are cost ceilings more than abuse
+    # limits: the bucket is keyed by the account, so reaching it already needs a
+    # verified one, and a journey search can call Google Distance Matrix — every
+    # search is potentially a billed request. Raise with the Google bill in mind.
+    journey-search-per-hour: ${RATELIMIT_JOURNEY_SEARCH:120}
+    # Cheap by comparison: answered from our own cache of the CassiTrack feed.
+    stop-arrivals-per-hour:  ${RATELIMIT_STOP_ARRIVALS:300}
+  retention:
+    # Enforces the periods privacy.html § 7 states. ON by default and it should
+    # stay on: with it off the published notice promises deletions that never
+    # happen, which is the exact mismatch it was written to close.
+    #
+    # It DELETES DATA on a daily schedule. Check the windows against the notice
+    # before a first run on a database you care about — the admin console shows
+    # what each rule removed and when.
+    enabled: ${RETENTION_ENABLED:true}
+    cron: ${RETENTION_CRON:0 45 2 * * *}
+    # Each window mirrors a line of the § 7 table. Changing one here without
+    # changing the notice recreates the problem.
+    journey-days:     ${RETENTION_JOURNEY_DAYS:365}
+    security-days:    ${RETENTION_SECURITY_DAYS:365}
+    consent-days:     ${RETENTION_CONSENT_DAYS:730}
+    unverified-hours: ${RETENTION_UNVERIFIED_HOURS:24}
   research:
     # Three-tier research lifecycle — see docs/privacy/DPIA-omnimove-cassitrack.md.
     # OFF by default: it moves personal data between tiers and deletes it, so it

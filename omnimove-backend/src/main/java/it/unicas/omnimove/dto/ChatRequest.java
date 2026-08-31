@@ -31,6 +31,14 @@ public class ChatRequest {
         /** Origin and destination currently in the search fields, if any. */
         private String originName;
         private String destName;
+        /**
+         * Where the origin actually is. The name alone cannot rank the shared
+         * fleet: "Map point - 41.4901, 13.8305" is not a place the assistant
+         * can look up, and neither is "My location". Sent whenever the field
+         * resolves to a coordinate, whatever the traveller picked it from.
+         */
+        private Double originLat;
+        private Double originLon;
         /** The stop whose arrivals panel is open, if any. */
         private String stopId;
         private String stopName;

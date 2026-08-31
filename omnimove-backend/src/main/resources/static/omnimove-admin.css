@@ -417,6 +417,9 @@ body {
 .text-red   { color: var(--accent-red); }
 .text-amber { color: var(--accent-amber); }
 .text-cyan  { color: var(--accent-cyan); }
+/* Secondary line inside a table cell. `.sub` already exists but only scoped to
+   .stat-pill, and the retention table needs the same treatment in a <td>. */
+td .sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
 
 .progress-bar {
     height: 5px;
@@ -517,6 +520,40 @@ body {
 
 /* ── Settings tab: Google feature flags ────────────────────────────── */
 .settings-card{background:var(--bg-card,#fff);border:1px solid var(--border,#e5e7eb);border-radius:14px;padding:22px;max-width:640px}
+/* The cards used to stack in one 640px column, leaving the right half of a
+   desktop window empty. They now flow into as many columns as the width allows
+   and fall back to a single column on a narrow screen. Scoped to .active so the
+   rule cannot override the display:none that hides an inactive pane.
+   align-items:start keeps a short card short instead of stretching it to match
+   the tallest one in the row. */
+/* The pane keeps the flex column every other pane uses. Making it a grid and
+   spanning the table card across both tracks looked right until the table was
+   filled: the row had already been sized against an empty tbody, so the cards
+   below were drawn over the bottom of it and the last one was clipped away.
+   Only the cards that genuinely sit side by side are in a grid, and that grid
+   holds nothing that grows after it is laid out. */
+#pane-settings .settings-card{max-width:none}
+/* The card holding the retention table. It sits in a column like the others —
+   four rules beside four switches read as a pair — and the table scrolls
+   sideways inside it only when the column gets too narrow for five headings.
+   flex-shrink:0 because the pane is a flex column: without it a card taller
+   than the space left is squeezed and its last rows are cut off, which is what
+   hid "Unverified accounts". */
+#pane-settings .settings-card--table{overflow-x:auto}
+#pane-settings .settings-card--table table{width:100%;min-width:520px}
+#pane-settings .settings-card{flex-shrink:0}
+.settings-grid{
+    display:grid;
+    /* Two fixed columns rather than auto-fit: with auto-fit a wide screen makes
+       three or four tracks, the cards fill the first two and the rest of the row
+       stays blank — the empty space this was meant to remove. */
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    align-items:start;
+    gap:16px;
+}
+@media (max-width:900px){
+    .settings-grid{grid-template-columns:1fr}
+}
 .settings-h{font-size:16px;font-weight:800;margin:0 0 6px}
 .settings-note{font-size:12px;color:var(--text-dim,#6b7280);margin:0 0 18px;line-height:1.5}
 .setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-top:1px solid var(--border,#e5e7eb)}
@@ -823,3 +860,16 @@ body {
 }
 .signup-google { background: rgba(251,191,36,.12); color: var(--accent-amber); border: 1px solid rgba(251,191,36,.3); }
 .signup-local  { background: rgba(122,144,168,.12); color: var(--text-secondary); border: 1px solid rgba(122,144,168,.3); }
+
+
+/* The number box inherited the browser's own light styling, which stood out as
+   a white patch on a dark card. Matched to the filter controls beside it. */
+#aiNudgeMinutes{
+    background:var(--bg-deep,#0b1220);
+    color:var(--text-primary,#e6edf7);
+    border:1px solid var(--border,#243044);
+    border-radius:8px;
+    padding:7px 9px;
+    font-family:var(--font-mono);
+    font-size:12px;
+}

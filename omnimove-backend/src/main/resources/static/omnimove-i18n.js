@@ -19,7 +19,10 @@ const OMNI_T = {
     email_sent_p:'Open the email and click the link to activate your account, then come back here to sign in.',
     lang_choose:'Language',
     // Privacy / consent
-    consent_notice_html:'I have read the <a href="privacy.html" target="_blank" rel="noopener">privacy notice</a>.',
+    consent_notice_html:'I have read the <a href="privacy.html">privacy notice</a>.',
+    gc_intro:'One more step before your account is created.',
+    gc_create:'Create my account',
+    gc_cancel:'Cancel',
     consent_profiling:'Optional: use my travel history to suggest personalised routes. I can withdraw this at any time.',
     err_privacy_required:'You must read and accept the privacy notice to continue',
     link_privacy:'Privacy notice', link_cookies:'Cookie policy',
@@ -208,6 +211,8 @@ const OMNI_T = {
     ptab_payment:'Payment', ptab_settings:'Preferences', ptab_account:'Account',
     // Profile stats
     stat_eco_pts:'Eco pts', stat_co2:'CO₂ saved', stat_trips:'Trips', stat_spent:'Spent (30d)',
+    stat_window:'Last 12 months \u00b7 spending over 30 days',
+    ai_nudge:'Ask OmniAI about your route',
     // Tickets
     section_my_tickets:'Fares',
     label_active_ticket:'Active Ticket',
@@ -432,7 +437,10 @@ const OMNI_T = {
     email_sent_p:"Apri l'email e clicca sul link per attivare il tuo account, poi torna qui per accedere.",
     lang_choose:'Lingua',
     // Privacy / consenso
-    consent_notice_html:'Ho letto l\'<a href="privacy.html" target="_blank" rel="noopener">informativa privacy</a>.',
+    consent_notice_html:'Ho letto l\'<a href="privacy.html">informativa privacy</a>.',
+    gc_intro:'Ancora un passaggio prima di creare il tuo account.',
+    gc_create:'Crea il mio account',
+    gc_cancel:'Annulla',
     consent_profiling:'Facoltativo: usa il mio storico viaggi per suggerirmi percorsi personalizzati. Posso revocare il consenso in qualsiasi momento.',
     err_privacy_required:'Per proseguire devi prendere visione dell\'informativa privacy',
     link_privacy:'Informativa privacy', link_cookies:'Cookie policy',
@@ -621,6 +629,8 @@ const OMNI_T = {
     ptab_payment:'Pagamento', ptab_settings:'Preferenze', ptab_account:'Account',
     // Profile stats
     stat_eco_pts:'Eco pts', stat_co2:'CO₂ risparmiata', stat_trips:'Percorsi', stat_spent:'Spesi (30g)',
+    stat_window:'Ultimi 12 mesi \u00b7 spesa sugli ultimi 30 giorni',
+    ai_nudge:'Chiedi a OmniAI sul tuo percorso',
     // Tickets
     section_my_tickets:'Listino prezzi',
     label_active_ticket:'Biglietto attivo',

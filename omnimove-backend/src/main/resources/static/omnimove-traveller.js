@@ -11,8 +11,14 @@ function escHtml(s) {
 const LOGIN_PAGE = 'omnimove-login.html';
 const _user = JSON.parse(sessionStorage.getItem('omnimove_user') || '{}');
 if (!_user.name && !_user.email) {
-    // Come back here once signed in
-    window.location.replace(OmniSession.loginUrlWithReturn(LOGIN_PAGE));
+    // Empty sessionStorage does not mean signed out. It is per-tab, and a tab
+    // opened through rel="noopener" — the privacy notice and the cookie policy
+    // both open that way — starts with none, as do a bookmark and a pasted URL.
+    // The session cookie is sent regardless, so ask the server before giving up;
+    // only a real "no" sends anyone back to sign-in.
+    OmniSession.recoverUser(LOGIN_PAGE);
+} else {
+    OmniSession.recoveryDone();
 }
 // The guard above never re-runs on a bfcache restore — this covers Back
 OmniSession.bindSessionGuard(LOGIN_PAGE);
@@ -555,6 +561,7 @@ loadHistory();
 loadPreferences();
 loadPrivacyConsents();
 
+
 // Re-render dynamic content when language switches
 window._onLangChange = () => {
     renderAiGreeting();
@@ -1029,6 +1036,8 @@ function setNetworkLinesVisible(visible) {
 // Smart Routes sidebar on desktop and fills the pane on mobile, and only the
 // control keeps the legend pinned inside the map itself in both layouts.
 let _legendControl = null;
+// null until the first render, which picks the default from the screen width
+let _legendCollapsed = null;
 
 function renderNetworkLegend() {
     if (!_legendControl) {
@@ -1047,8 +1056,19 @@ function renderNetworkLegend() {
     }
     const legend = document.getElementById('networkLegend');
     if (!legend) return;
+
+    // Twenty-odd chips cover most of a phone screen, so it starts folded there
+    // and open on a desktop, where there is room beside the map. Decided once
+    // per page: re-deciding on every redraw would fold it back up under someone
+    // who had just opened it.
+    if (_legendCollapsed === null) _legendCollapsed = _mqPhone.matches;
+    legend.classList.toggle('network-legend--collapsed', _legendCollapsed);
+
     legend.innerHTML =
-        `<span class="nl-title">${escHtml(t('legend_lines'))}</span>` +
+        `<button type="button" class="nl-title nl-toggle" aria-expanded="${!_legendCollapsed}">` +
+            `<span>${escHtml(t('legend_lines'))}</span>` +
+            `<span class="nl-caret" aria-hidden="true"></span>` +
+        `</button>` +
         NETWORK_ROUTES.map(r =>
             `<button type="button" class="nl-chip" data-route-id="${escHtml(r.route_id)}"` +
             ` style="--nl-color:${routeColorById(r.route_id, r.short_name)};` +
@@ -1060,7 +1080,18 @@ function renderNetworkLegend() {
         `${escHtml(t('legend_all'))}</button>`;
 }
 
+// Delegated for the same reason the chips are: renderNetworkLegend() rewrites
+// innerHTML, so a listener bound to the button would not survive a redraw.
 document.addEventListener('click', e => {
+    const toggle = e.target.closest('.nl-toggle');
+    if (toggle) {
+        _legendCollapsed = !_legendCollapsed;
+        const legend = document.getElementById('networkLegend');
+        if (legend) legend.classList.toggle('network-legend--collapsed', _legendCollapsed);
+        toggle.setAttribute('aria-expanded', String(!_legendCollapsed));
+        return;
+    }
+
     const chip = e.target.closest('.nl-chip[data-route-id]');
     if (!chip) return;
     const route = NETWORK_ROUTES.find(r => r.route_id === chip.dataset.routeId);
@@ -1154,6 +1185,15 @@ function renderBikeMarkers(list) {
 }
 
 async function fetchAndRenderBikeMarkers() {
+    // Polls every minute, so it long outlives the session that started it. Once
+    // the session has gone the answer is 401 for ever: stop asking, and do not
+    // report it as a bike-layer failure — the redirect to sign-in is already
+    // under way and this would only send the next reader hunting a bug here.
+    if (OmniSession.isSessionOver()) {
+        clearInterval(window._bikePollInterval);
+        window._bikePollInterval = null;
+        return;
+    }
     try {
         const r = await apiFetch('/journeys/bikes');
         if (!r.ok) throw new Error(r.status);
@@ -1161,6 +1201,7 @@ async function fetchAndRenderBikeMarkers() {
         window._lastBikeList = Array.isArray(list) ? list : [];
         renderBikeMarkers(window._lastBikeList);
     } catch (e) {
+        if (OmniSession.isSessionOver()) return;
         console.warn('[BIKE] fetch failed:', e);
         clearBikeMarkers();
     }
@@ -3400,9 +3441,201 @@ async function toggleFav(star, mode, originName, destName) {
 }
 
 function openAI() {
+    hideAiNudge();          // it has done its job
     document.getElementById('aiOverlay').classList.add('open');
     setTimeout(() => document.getElementById('aiInput').focus(), 100);
 }
+
+// ── Moving the assistant button (phone only) ───────────────────────
+// Hold it down for a moment and it comes loose; drag it anywhere on the map and
+// let go. A normal tap still opens the assistant — the press has to be held to
+// count as a grab, and a drag suppresses the click that follows it.
+(function initAiFabDrag() {
+    const fab  = document.querySelector('.ai-fab');
+    const pane = document.getElementById('pane-map');
+    if (!fab || !pane) return;
+
+    const STORE_KEY  = 'omnimove_ai_fab_pos';
+    const HOLD_MS    = 400;
+    const MARGIN     = 10;      // never flush against an edge
+
+    let holdTimer = null, loose = false, moved = false;
+    let grabDX = 0, grabDY = 0;
+
+    function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+
+    /** Keeps the button inside the map, whatever the screen has done since. */
+    function clampTo(left, top) {
+        const p = pane.getBoundingClientRect();
+        const w = fab.offsetWidth || 50, h = fab.offsetHeight || 50;
+        return {
+            left: Math.max(MARGIN, Math.min(p.width  - w - MARGIN, left)),
+            top:  Math.max(MARGIN, Math.min(p.height - h - MARGIN, top))
+        };
+    }
+
+    function place(left, top) {
+        const c = clampTo(left, top);
+        fab.style.left   = c.left + 'px';
+        fab.style.top    = c.top + 'px';
+        fab.style.bottom = 'auto';
+        fab.style.right  = 'auto';
+        return c;
+    }
+
+    function savePosition(c) {
+        try { localStorage.setItem(STORE_KEY, JSON.stringify(c)); } catch (e) { /* ignore */ }
+    }
+
+    function restorePosition() {
+        if (!isMobile()) { fab.style.cssText = ''; return; }
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (e) {}
+        if (saved && typeof saved.left === 'number') place(saved.left, saved.top);
+    }
+
+    function pointOf(e) {
+        const t = e.touches ? e.touches[0] : e;
+        return { x: t.clientX, y: t.clientY };
+    }
+
+    function start(e) {
+        if (!isMobile()) return;
+        const p = pointOf(e);
+        const r = fab.getBoundingClientRect();
+        grabDX = p.x - r.left;
+        grabDY = p.y - r.top;
+        moved = false;
+        holdTimer = setTimeout(function () {
+            loose = true;
+            fab.classList.add('ai-fab--dragging');
+            // A short buzz is the only way to say "you may move me now" without
+            // words; ignored by browsers that do not offer it.
+            if (navigator.vibrate) navigator.vibrate(15);
+        }, HOLD_MS);
+    }
+
+    function move(e) {
+        if (!loose) {
+            // Sliding a finger before the hold completes is a map pan, not a grab
+            if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+            return;
+        }
+        e.preventDefault();
+        moved = true;
+        const p = pointOf(e);
+        const pr = pane.getBoundingClientRect();
+        place(p.x - pr.left - grabDX, p.y - pr.top - grabDY);
+    }
+
+    function end() {
+        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+        if (!loose) return;
+        loose = false;
+        fab.classList.remove('ai-fab--dragging');
+        const r = fab.getBoundingClientRect(), pr = pane.getBoundingClientRect();
+        savePosition(place(r.left - pr.left, r.top - pr.top));
+    }
+
+    // A drag must not also open the assistant when the finger comes up
+    fab.addEventListener('click', function (e) {
+        if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; }
+    }, true);
+
+    fab.addEventListener('mousedown',  start);
+    fab.addEventListener('touchstart', start, { passive: true });
+    document.addEventListener('mousemove', move);
+    document.addEventListener('touchmove', move, { passive: false });
+    document.addEventListener('mouseup',   end);
+    document.addEventListener('touchend',  end);
+
+    // A position saved for one screen can be off another
+    window.addEventListener('resize', restorePosition);
+    restorePosition();
+})();
+
+// ── OmniAI nudge ───────────────────────────────────────────────────
+// Most people never notice the assistant button, so it introduces itself on a
+// timer — but only while Plan Route is the pane on screen, only when the
+// assistant is not already open, and never after the traveller has waved it
+// away in this session. The interval is the operator's to set, and 0 turns it
+// off entirely, so a nag that turns out to be annoying can be stopped without
+// a deploy.
+let _aiNudgeTimer     = null;
+let _aiNudgeMinutes   = 0;      // 0 = off, until the server says otherwise
+let _aiNudgeDismissed = false;
+const AI_NUDGE_VISIBLE_MS = 9000;
+
+function aiNudgeEl() { return document.getElementById('aiNudge'); }
+
+function hideAiNudge() {
+    const el = aiNudgeEl();
+    if (el) el.hidden = true;
+}
+
+/** The ✕: no more nudges until the app is opened again. */
+function dismissAiNudge() {
+    _aiNudgeDismissed = true;
+    hideAiNudge();
+    if (_aiNudgeTimer) { clearInterval(_aiNudgeTimer); _aiNudgeTimer = null; }
+}
+
+function showAiNudgeIfAppropriate() {
+    if (_aiNudgeDismissed) return;
+    // Only over the map, and not on top of the assistant it is advertising
+    if ((document.body.dataset.pane || 'map') !== 'map') return;
+    if (document.getElementById('aiOverlay')?.classList.contains('open')) return;
+    const el = aiNudgeEl();
+    if (!el || !el.hidden) return;
+
+    el.hidden = false;
+    positionNudgeBesideFab(el);
+    setTimeout(hideAiNudge, AI_NUDGE_VISIBLE_MS);
+}
+
+/**
+ * Puts the bubble beside the assistant button wherever that button now is —
+ * it can be dragged, so a fixed corner would leave the two unrelated. Flips to
+ * the button's left when there is no room on its right.
+ */
+function positionNudgeBesideFab(el) {
+    const fab  = document.querySelector('.ai-fab');
+    const pane = document.getElementById('pane-map');
+    if (!fab || !pane) return;
+    const f = fab.getBoundingClientRect(), p = pane.getBoundingClientRect();
+    const gap = 10;
+    const w   = el.offsetWidth || 200;
+
+    const leftOfFab = f.left - p.left;
+    const spaceRight = p.width - (leftOfFab + f.width) - gap;
+    const x = spaceRight >= w ? leftOfFab + f.width + gap
+                              : Math.max(gap, leftOfFab - w - gap);
+
+    el.style.left   = x + 'px';
+    el.style.right  = 'auto';
+    el.style.bottom = 'auto';
+    el.style.top    = Math.round(f.top - p.top + (f.height - el.offsetHeight) / 2) + 'px';
+    el.classList.toggle('ai-nudge--flipped', spaceRight < w);
+}
+
+function startAiNudgeTimer() {
+    if (_aiNudgeTimer) { clearInterval(_aiNudgeTimer); _aiNudgeTimer = null; }
+    if (!_aiNudgeMinutes || _aiNudgeMinutes <= 0) return;
+    _aiNudgeTimer = setInterval(showAiNudgeIfAppropriate, _aiNudgeMinutes * 60 * 1000);
+}
+
+async function loadAiNudgeSetting() {
+    try {
+        const r = await apiFetch('/traveller/ui-settings');
+        if (!r.ok) return;                       // leave it off rather than guess
+        const s = await r.json();
+        _aiNudgeMinutes = Number(s.aiNudgeMinutes) || 0;
+        startAiNudgeTimer();
+    } catch (e) {
+        console.warn('Could not load UI settings:', e);
+    }
+}
+loadAiNudgeSetting();
 
 function closeAI(e) {
     if (!e || e.target === document.getElementById('aiOverlay')) {
@@ -3573,13 +3806,38 @@ function renderAiText(text) {
     return out.replace(/\n{3,}/g, '\n\n').trim().replace(/\n/g, '<br>');
 }
 
+// Where the origin field actually points: a point tapped on the map keeps its
+// coordinates on the field, GPS keeps them in userLat/userLon, a stop keeps
+// them in STOPS. Deliberately NOT getOrigin() — that one writes "My Location"
+// into an empty field as a side effect, and merely asking the assistant a
+// question should not fill in the traveller's search form. An unset field
+// answers null here, and the assistant is told to ask where they are.
+function aiOriginCoords() {
+    const el  = document.getElementById('originSelect');
+    const val = el && el.dataset.id;
+    if (!val) return { lat: null, lon: null };
+    if (val === MAP_PICK_ID) {
+        const la = parseFloat(el.dataset.lat), lo = parseFloat(el.dataset.lon);
+        return isNaN(la) || isNaN(lo) ? { lat: null, lon: null } : { lat: la, lon: lo };
+    }
+    if (val === 'GPS')
+        return userLat ? { lat: userLat, lon: userLon } : { lat: null, lon: null };
+    const stop = STOPS[val];
+    return stop && stop.lat != null && stop.lon != null
+        ? { lat: stop.lat, lon: stop.lon }
+        : { lat: null, lon: null };
+}
+
 /** What the traveller is looking at, sent with every question. */
 function aiScreenContext() {
     const originEl = document.getElementById('originSelect');
     const destEl   = document.getElementById('destSelect');
+    const oc       = aiOriginCoords();
     return {
         originName: originEl?.dataset.id ? originEl.value : null,
         destName:   destEl?.dataset.id   ? destEl.value   : null,
+        originLat:  oc.lat,
+        originLon:  oc.lon,
         // The sheet already tracks which stop is open; the title is its name
         stopId:     _sheetCurrentStopId || null,
         stopName:   _sheetCurrentStopId
@@ -3730,8 +3988,21 @@ function backToMap() { openMenu(); }
 
     var dragging = false, startY = 0, startH = 0, lastY = 0;
 
+    // Opens at the lowest of the three stops, so the app starts on a full map
+    // rather than with 40vh of empty results panel over it. Anyone who wants the
+    // panel drags it up, which is the gesture the handle is there to invite.
+    // The class carries the initial height; the moment a drag starts it goes and
+    // the inline height the drag writes becomes the one in charge.
+    sheet.classList.add('sheet-peek');
+    function releasePeek() { sheet.classList.remove('sheet-peek'); }
+    window.addEventListener('resize', function () {
+        // A height in pixels set for one viewport is wrong in the next
+        if (!isMobile()) sheet.style.height = '';
+    });
+
     function down(e) {
         if (!isMobile()) return;
+        releasePeek();
         dragging = true;
         sheet.style.transition = 'none';
         startY = lastY = pointY(e);
@@ -3787,9 +4058,28 @@ function backToMap() {
 }
 
 // ── Step 23: on mobile, move the zoom control to top-right (menu floats top-left) ──
-if (window.matchMedia('(max-width: 768px)').matches) {
-    try { map.zoomControl.setPosition('topright'); } catch (e) {}
+// Re-applied whenever the breakpoint is crossed, not just once at load. Deciding
+// only at load left + and - sitting underneath the floating ☰ after a rotation or
+// a window resize, because the control stays wherever it was first put.
+const _mqPhone = window.matchMedia('(max-width: 768px)');
+let _zoomCorner = null;
+
+/**
+ * Idempotent: setPosition() detaches and re-attaches the control, so it is only
+ * called when the corner actually has to change. Listening to resize as well as
+ * to the media query is deliberate — the change event does not always arrive
+ * when the viewport is resized by devtools' device emulation, which is where
+ * this was first seen: + and - stayed under the floating menu button.
+ */
+function placeZoomControl() {
+    const corner = _mqPhone.matches ? 'topright' : 'topleft';
+    if (corner === _zoomCorner) return;
+    try { map.zoomControl.setPosition(corner); _zoomCorner = corner; } catch (e) {}
 }
+placeZoomControl();
+if (_mqPhone.addEventListener) _mqPhone.addEventListener('change', placeZoomControl);
+else if (_mqPhone.addListener) _mqPhone.addListener(placeZoomControl);
+window.addEventListener('resize', placeZoomControl);
 
 // ── Step 24: typable search with autocomplete suggestions ──────────
 function setStop(el, id) {

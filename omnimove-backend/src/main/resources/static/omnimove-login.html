@@ -85,7 +85,7 @@
             <label class="consent-row">
                 <input type="checkbox" id="regPrivacy"/>
                 <span data-i18n="consent_notice_html">
-                    I have read the <a href="privacy.html" target="_blank" rel="noopener">privacy notice</a>.
+                    I have read the <a href="privacy.html">privacy notice</a>.
                 </span>
             </label>
             <span class="field-err" id="err-regPrivacy"></span>
@@ -101,6 +101,39 @@
 
             <button class="btn" type="submit" id="regBtn" data-i18n="btn_create">Create Account</button>
         </form>
+
+        <!-- ══ PANEL: consents for a new Google account ═════════════
+             Raised only when the Google token belongs to nobody yet. The account
+             does not exist while this is on screen: the server refused to create
+             it and will only do so once the acknowledgement comes back with the
+             same token. Cancelling therefore leaves nothing behind. -->
+        <div class="form" id="googleConsentPanel">
+            <div class="email-sent-box">
+                <p data-i18n="gc_intro">One more step before your account is created.</p>
+                <p style="margin-top:6px"><strong id="gConsentWho">—</strong></p>
+            </div>
+
+            <label class="consent-row">
+                <input type="checkbox" id="gcPrivacy"/>
+                <span data-i18n="consent_notice_html">
+                    I have read the <a href="privacy.html">privacy notice</a>.
+                </span>
+            </label>
+            <span class="field-err" id="err-gcPrivacy"></span>
+
+            <label class="consent-row">
+                <input type="checkbox" id="gcProfiling"/>
+                <span data-i18n="consent_profiling">
+                    Optional: use my travel history to suggest personalised routes.
+                    I can withdraw this at any time.
+                </span>
+            </label>
+
+            <button class="btn" type="button" id="gcBtn" onclick="confirmGoogleConsent()"
+                    data-i18n="gc_create">Create my account</button>
+            <button type="button" class="btn-ghost" onclick="cancelGoogleConsent()"
+                    data-i18n="gc_cancel">Cancel</button>
+        </div>
 
         <!-- ══ PANEL: Check your email ══════════════════════════════ -->
         <div class="form" id="emailSentPanel">
@@ -183,8 +216,13 @@
     </div>
 </div>
 
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://www.google.com/recaptcha/api.js?render=explicit" async defer></script>
+<!-- The two Google scripts that used to sit here are gone on purpose. As plain
+     <script src> they ran on every visit, so merely opening this page — to read
+     the privacy notice, say — disclosed the visitor's IP to Google, and did so
+     even on deployments where both features are switched off. omnimove-login.js
+     now injects each one only when the server says the feature is enabled AND
+     the visitor has actually started using the page. Do not put them back:
+     privacy.html § 5 and cookie-policy.html § 4 describe this behaviour. -->
 <script src="omnimove-password.js"></script>
 <script src="omnimove-i18n.js"></script>
 <script src="omnimove-consent.js"></script>

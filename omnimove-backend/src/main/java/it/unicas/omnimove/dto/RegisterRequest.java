@@ -37,6 +37,20 @@ public class RegisterRequest {
      */
     private Boolean profilingConsent;
 
+    /**
+     * The cookie banner was already acknowledged, before this account existed.
+     *
+     * <p>An anonymous acknowledgement is kept in the visitor's tab and never sent
+     * to the server on its own: a ledger row about someone we cannot identify
+     * proves nothing under art. 7(1) and would carry their IP address with no
+     * account to erase it from. Registration is the moment it becomes attributable,
+     * so it travels here and is written to the ledger only if the account is
+     * actually created.
+     *
+     * <p>Absent or false simply means the banner will be raised at first sign-in.
+     */
+    private Boolean cookieNoticeAccepted;
+
     /** Ties any choice already made in the cookie banner to the new account. */
     private String subjectKey;
 }

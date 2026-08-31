@@ -7,9 +7,12 @@ import it.unicas.omnimove.dto.ChatResponse;
 import it.unicas.omnimove.dto.StopArrivalDTO;
 import it.unicas.omnimove.dto.VehicleDTO;
 import it.unicas.omnimove.model.JourneyLog;
+import it.unicas.omnimove.model.Route;
 import it.unicas.omnimove.model.Stop;
 import it.unicas.omnimove.repository.JourneyLogRepository;
+import it.unicas.omnimove.repository.RouteRepository;
 import it.unicas.omnimove.repository.StopRepository;
+import it.unicas.omnimove.util.GeoUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,6 +44,7 @@ public class AiOrchestrationService {
 
     private final CassitrackClient cassitrackClient;
     private final StopRepository stopRepository;
+    private final RouteRepository routeRepository;
     private final JourneyLogRepository journeyLogRepository;
     private final WeatherService weatherService;
     private final GreenIndexService greenIndexService;
@@ -62,12 +66,14 @@ public class AiOrchestrationService {
 
     public AiOrchestrationService(CassitrackClient cassitrackClient,
                                   StopRepository stopRepository,
+                                  RouteRepository routeRepository,
                                   JourneyLogRepository journeyLogRepository,
                                   WeatherService weatherService,
                                   GreenIndexService greenIndexService,
                                   BikeSharingService bikeSharingService) {
         this.cassitrackClient = cassitrackClient;
         this.stopRepository = stopRepository;
+        this.routeRepository = routeRepository;
         this.journeyLogRepository = journeyLogRepository;
         this.weatherService = weatherService;
         this.greenIndexService = greenIndexService;
@@ -103,7 +109,7 @@ public class AiOrchestrationService {
         String lang = detectLanguage(question, req.getLanguage());
 
         try {
-            String context = buildContext(userId) + onScreenContext(req.getContext());
+            String context = buildContext(userId, req.getContext()) + onScreenContext(req.getContext());
             String system = buildSystem(lang, context);
             String answer = callModel(system, req.getHistory(), question);
 
@@ -184,11 +190,40 @@ public class AiOrchestrationService {
     //  2. CONTEXT BUILDING (live data + personalisation + weather)
     // ════════════════════════════════════════════════════════════════════
 
-    private String buildContext(Long userId) {
+    private String buildContext(Long userId, ChatRequest.ChatContext ctx) {
         StringBuilder sb = new StringBuilder();
         String now = LocalDateTime.now(ZoneId.of("Europe/Rome"))
                 .format(DateTimeFormatter.ofPattern("HH:mm:ss 'on' EEEE dd MMMM yyyy"));
         sb.append("=== CASSITRACK LIVE DATA ===\nTime in Cassino: ").append(now).append("\n\n");
+
+        // ── The line catalogue ──────────────────────────────────────────
+        // Asked "which lines run in Cassino?" the assistant had nothing to read:
+        // line numbers reached it only through the ETA list, and only for a stop
+        // with a bus due. So it answered from its training data and invented 59,
+        // 60, 61, 68 and 100 — none of which exist here. Same filter and sort as
+        // GET /journeys/timetable/routes, so the chat and the timetable screen
+        // cannot disagree about what runs.
+        List<Route> routes = routeRepository.findAll().stream()
+                .filter(Route::isActive)
+                .sorted(Comparator.comparing(
+                        r -> r.getShortName() != null ? r.getShortName() : r.getId(),
+                        String.CASE_INSENSITIVE_ORDER))
+                .toList();
+        if (routes.isEmpty()) {
+            sb.append("BUS LINES: not loaded right now — say you cannot list them.\n\n");
+        } else {
+            sb.append("BUS LINES IN CASSINO (").append(routes.size())
+              .append(") — this is the COMPLETE list, there are no others:\n");
+            routes.forEach(r -> {
+                String shortName = r.getShortName() != null ? r.getShortName() : r.getId();
+                sb.append("  Line ").append(shortName);
+                if (r.getLongName() != null && !r.getLongName().isBlank()
+                        && !r.getLongName().equals(shortName))
+                    sb.append(" — ").append(r.getLongName());
+                sb.append("\n");
+            });
+            sb.append("\n");
+        }
 
         // ── Live buses ──────────────────────────────────────────────────
         List<VehicleDTO> vehicles = cassitrackClient.getActiveVehicles();
@@ -262,14 +297,25 @@ public class AiOrchestrationService {
                 "  E-scooter: %.2f EUR to unlock, then %.2f EUR per minute, plus a %.2f EUR hold%n"
               + "    that is returned at the end of the ride.%n",
                 scooterUnlock, scooterPerMin, scooterDeposit));
+        // The fleet used to reach the model as two numbers — "7 bikes, 4 scooters"
+        // — while lat, lon, plate and battery were loaded and thrown away. The
+        // prompt above promises the assistant can say WHERE a vehicle is parked,
+        // so "where is the nearest bike?" was a question it was told to answer
+        // with data it had never been given: exactly the hole that produced the
+        // invented bus lines. Raw coordinates would not help either, so each
+        // vehicle is placed against the nearest stop, which is a landmark the
+        // traveller and the model both understand.
         try {
             List<BikeVehicleDTO> fleet = bikeSharingService.getAvailableBikes();
             long bikes    = fleet.stream().filter(v -> !"SCOOTER".equalsIgnoreCase(v.getVehicleType())).count();
             long scooters = fleet.size() - bikes;
             sb.append("  Available right now: ").append(bikes).append(" bikes, ")
               .append(scooters).append(" e-scooters.\n");
-            if (fleet.isEmpty())
+            if (fleet.isEmpty()) {
                 sb.append("  None free at the moment — say so rather than suggesting another service.\n");
+            } else {
+                sb.append(describeFleet(fleet, ctx));
+            }
         } catch (Exception e) {
             sb.append("  Live availability unavailable right now.\n");
         }
@@ -343,6 +389,78 @@ public class AiOrchestrationService {
         return sb.toString();
     }
 
+    /** How many vehicles get spelled out. The rest stay a count. */
+    private static final int FLEET_DETAIL_LIMIT = 8;
+
+    /**
+     * Writes the free Elerent vehicles as places rather than coordinates.
+     *
+     * With an origin on screen the list is the nearest first, each with the walk
+     * from that origin; without one the order is arbitrary and no distance is
+     * claimed, because there is nothing to measure from. Distances are
+     * straight-line times the 1.25 detour factor the journey planner already
+     * uses when Google is unavailable, and are labelled approximate so the
+     * assistant does not quote them as routed walking times.
+     */
+    private String describeFleet(List<BikeVehicleDTO> fleet, ChatRequest.ChatContext ctx) {
+        Double oLat = ctx == null ? null : ctx.getOriginLat();
+        Double oLon = ctx == null ? null : ctx.getOriginLon();
+        boolean haveOrigin = oLat != null && oLon != null;
+
+        List<BikeVehicleDTO> located = fleet.stream()
+                .filter(v -> v.getLat() != null && v.getLon() != null)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        if (located.isEmpty())
+            return "  Positions unavailable — do not say where any vehicle is.\n";
+
+        if (haveOrigin)
+            located.sort(Comparator.comparingDouble(
+                    v -> GeoUtils.haversineMetres(oLat, oLon, v.getLat(), v.getLon())));
+
+        List<Stop> stops = stopRepository.findAll().stream()
+                .filter(st -> st.getLat() != null && st.getLon() != null)
+                .toList();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(haveOrigin
+                ? "  FREE VEHICLES, nearest to the traveller's origin first:\n"
+                : "  FREE VEHICLES (no origin on screen, so these are in no particular\n"
+                + "    order — ask where the traveller is before calling any of them near):\n");
+
+        located.stream().limit(FLEET_DETAIL_LIMIT).forEach(v -> {
+            boolean scooter = "SCOOTER".equalsIgnoreCase(v.getVehicleType());
+            sb.append("    - ").append(scooter ? "E-scooter" : "Bike");
+            String label = v.getPlate() != null && !v.getPlate().isBlank()
+                    ? v.getPlate() : v.getBikeId();
+            if (label != null) sb.append(" ").append(label);
+            if (v.getBatteryPct() != null)
+                sb.append(", battery ").append(v.getBatteryPct()).append("%");
+
+            // Nearest stop as the human-readable anchor for the position
+            Stop near = null;
+            double nearM = Double.MAX_VALUE;
+            for (Stop st : stops) {
+                double d = GeoUtils.haversineMetres(v.getLat(), v.getLon(), st.getLat(), st.getLon());
+                if (d < nearM) { nearM = d; near = st; }
+            }
+            if (near != null)
+                sb.append(", parked ").append(Math.round(nearM / 10.0) * 10)
+                  .append(" m from the stop ").append(near.getName());
+
+            if (haveOrigin) {
+                long walk = Math.round(
+                        GeoUtils.haversineMetres(oLat, oLon, v.getLat(), v.getLon()) * 1.25);
+                sb.append(", about ").append(walk).append(" m on foot from the origin");
+            }
+            sb.append("\n");
+        });
+
+        if (located.size() > FLEET_DETAIL_LIMIT)
+            sb.append("    (").append(located.size() - FLEET_DETAIL_LIMIT)
+              .append(" more not listed — the map shows them all.)\n");
+        return sb.toString();
+    }
+
     // ════════════════════════════════════════════════════════════════════
     //  SYSTEM PROMPT
     // ════════════════════════════════════════════════════════════════════
@@ -354,7 +472,13 @@ public class AiOrchestrationService {
         return """
                 You are the OMNIMOVE assistant for Cassino, Italy.
                 You help passengers plan journeys using Bus, Bike, E-Scooter and Walk
-                between Cassino city centre and the UNICAS Engineering Campus (Folcara).
+                between Cassino city centre and the UNICAS campus at Folcara.
+
+                Folcara is the university campus district, served by the stop
+                UNI (Universita Folcara). It is NOT the Engineering faculty:
+                those are two different places in Cassino, and calling Folcara
+                "the Engineering campus" sends the traveller to the wrong stop.
+                Name a faculty only if the data below names it.
 
                 You have live real-time data from the CASSITRACK fleet system below.
 
@@ -376,6 +500,11 @@ public class AiOrchestrationService {
                 - Never invent a line, a stop, a time or a distance. If the data
                   below does not contain the answer, say what you do not know
                   and ask which stop or which destination they mean.
+                - The BUS LINES list below is the whole network. A line that is
+                  not in it does not exist in Cassino — do not name it, do not
+                  guess a plausible-looking number, and do not carry a line over
+                  from anywhere else you have seen. Cassino's lines are short
+                  numbers such as 01, 05, 11 and 16, not 60-something.
                 - Shared bikes and e-scooters in Cassino are Elerent, and only
                   Elerent. Never name another operator — no BikeMi, Lime, Bird,
                   TIER or anything else.
@@ -384,6 +513,17 @@ public class AiOrchestrationService {
                   unlock or pay for it. The rental is done with Elerent. Do not
                   promise a booking button that does not exist here, and do not
                   claim the traveller must go elsewhere to plan the trip.
+                - Asked where a bike or e-scooter is, answer from the FREE
+                  VEHICLES list below and nowhere else. Locate them the way the
+                  list does — by the stop they are parked near — and never read
+                  out raw coordinates. If the list says there is no origin on
+                  screen, ask where the traveller is starting from instead of
+                  calling any of them the nearest.
+                - The origin and the destination do not have to be a stop or the
+                  traveller's own GPS position: any point on the map can be
+                  tapped and used as either end of the journey. If they want to
+                  plan from or to somewhere with no stop of its own, tell them to
+                  pick that point on the map.
                 - The traveller's question may be missing its context: "the next
                   bus" from which stop, "the campus" from where. Ask rather than
                   assume, unless the context section below already says.
@@ -497,8 +637,8 @@ public class AiOrchestrationService {
                     : "I check Cassino's live weather to recommend the best mode. When it rains, the bus is the most comfortable choice.";
         }
         return it
-                ? "OMNIMOVE monitora l'autobus 16 in tempo reale tra Cassino e il Campus di Ingegneria UNICAS. Usa la scheda Flotta per le posizioni, ETA per gli arrivi e il Pianificatore per i percorsi."
-                : "OMNIMOVE monitors Bus 16 in real time between Cassino and the UNICAS Engineering Campus. Use the Fleet tab for live positions, ETA tab for arrival times, and Journey Planner for routes.";
+                ? "OMNIMOVE monitora l'autobus 16 in tempo reale tra Cassino e il Campus UNICAS di Folcara. Usa la scheda Flotta per le posizioni, ETA per gli arrivi e il Pianificatore per i percorsi."
+                : "OMNIMOVE monitors Bus 16 in real time between Cassino and the UNICAS Folcara campus. Use the Fleet tab for live positions, ETA tab for arrival times, and Journey Planner for routes.";
     }
 
     // ════════════════════════════════════════════════════════════════════

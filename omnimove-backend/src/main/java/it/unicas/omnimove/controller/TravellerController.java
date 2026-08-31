@@ -45,6 +45,7 @@ import java.time.ZonedDateTime;
 public class TravellerController {
 
     private final UserRepository userRepo;
+    private final it.unicas.omnimove.service.UiSettingsService uiSettingsService;
     private final PasswordEncoder passwordEncoder;
     private final FavoriteRouteRepository favoriteRouteRepository;
     private final FavoriteStopRepository  favoriteStopRepository;
@@ -55,6 +56,16 @@ public class TravellerController {
     private final PasswordResetService    passwordResetService;
     private final RateLimiterService      rateLimiter;
     private final SessionService         sessionService;
+
+    // ── GET /api/v1/traveller/ui-settings ─────────────────────────────────
+    @GetMapping("/ui-settings")
+    @Operation(summary = "Interface settings the app needs at start-up",
+               description = "Operator-tuned, not per-user: how often the assistant "
+                           + "introduces itself, 0 meaning never.")
+    public ResponseEntity<?> uiSettings() {
+        return ResponseEntity.ok(java.util.Map.of(
+                "aiNudgeMinutes", uiSettingsService.getAiNudgeMinutes()));
+    }
 
     @GetMapping("/me")
     @Operation(summary = "Own profile, including how this account signs in")

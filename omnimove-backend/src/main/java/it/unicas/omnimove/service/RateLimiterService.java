@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import org.springframework.beans.factory.annotation.Value;
+
 import java.time.Duration;
 
 /**
@@ -33,6 +35,26 @@ public class RateLimiterService {
 
     private final StringRedisTemplate redis;
     private final SecurityAuditService securityAuditService;
+
+    /**
+     * Journey searches allowed per account per hour.
+     *
+     * <p>Configurable rather than fixed because the right number depends on the
+     * deployment: this is not an abuse limit so much as a cost ceiling. A search
+     * can call Google Distance Matrix, so every one of these is potentially a
+     * billed request — which is also why raising it is a decision about the
+     * Google bill, not about security.
+     *
+     * <p>The bucket is keyed by the signed-in account, so reaching it already
+     * requires a verified one. 30/hour — one search every two minutes — was
+     * tight for someone genuinely comparing routes.
+     */
+    @Value("${omnimove.ratelimit.journey-search-per-hour:120}")
+    private int journeySearchPerHour;
+
+    /** Stop-arrival lookups per account per hour. Cheap: served from our own cache. */
+    @Value("${omnimove.ratelimit.stop-arrivals-per-hour:300}")
+    private int stopArrivalsPerHour;
 
     /**
      * @param key         Unique string identifying the bucket (e.g. "rl:register:192.168.1.1")
@@ -91,13 +113,13 @@ public class RateLimiterService {
         return isAllowed("rl:forgot:" + email, 3, Duration.ofHours(1));
     }
 
-    /** 30 journey searches per user per hour */
+    /** Journey searches per user per hour; see {@link #journeySearchPerHour}. */
     public boolean allowJourneySearch(String email) {
-        return isAllowed("rl:journey-search:" + email, 30, Duration.ofHours(1));
+        return isAllowed("rl:journey-search:" + email, journeySearchPerHour, Duration.ofHours(1));
     }
 
-    /** 60 stop-arrivals lookups per user per hour */
+    /** Stop-arrivals lookups per user per hour. */
     public boolean allowStopArrivalsLookup(String email) {
-        return isAllowed("rl:stop-arrivals:" + email, 60, Duration.ofHours(1));
+        return isAllowed("rl:stop-arrivals:" + email, stopArrivalsPerHour, Duration.ofHours(1));
     }
 }

@@ -89,6 +89,17 @@
 
 @media (max-width: 560px) {
     .omni-consent { flex-direction: column; align-items: stretch; }
+    /* flex-basis follows the main axis, so the 300px that made the text share a
+       ROW on a wide screen became a 300px minimum HEIGHT once the banner turned
+       into a column: the card grew to fill half the phone, with the button
+       stranded at the bottom of a field of empty space. In a column the text
+       should simply be as tall as it reads. */
+    .omni-consent-text { flex: 0 0 auto; }
     .omni-consent-actions { width: 100%; }
     .omni-consent-btn { flex: 1; }
+
+    /* Tighter on a small screen: the banner covers the form underneath it, so
+       every pixel it does not need belongs to the page. */
+    .omni-consent { padding: 15px 16px; gap: 13px; }
+    .omni-consent-links { margin-top: 8px !important; }
 }

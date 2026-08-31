@@ -713,6 +713,15 @@ body {
 .pstat { text-align: center; }
 .pstat-val { font-size: 20px; font-weight: 800; }
 .pstat-lbl { font-size: 10px; opacity: 0.75; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+/* Spans the whole row: the window applies to the group, not to one tile */
+.pstat-note {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+    text-align: center;
+    font-size: 9px;
+    opacity: 0.6;
+    letter-spacing: 0.3px;
+}
 
 .profile-tabs {
     display: flex;
@@ -1424,13 +1433,23 @@ body {
     /* On non-map panes, replace the search UI with a back bar */
     body[data-pane="tickets"] .topbar-search,
     body[data-pane="profile"] .topbar-search,
+    body[data-pane="timetable"] .topbar-search,
     body[data-pane="tickets"] .cats,
     body[data-pane="profile"] .cats,
+    body[data-pane="timetable"] .cats,
+    /* The label names the chips, so it goes wherever they go. Without this it
+       stayed behind on Last Routes and Tickets, floating next to the back bar
+       with nothing to label. */
+    body[data-pane="tickets"] .cats-label,
+    body[data-pane="profile"] .cats-label,
+    body[data-pane="timetable"] .cats-label,
     body[data-pane="tickets"] .hamburger,
-    body[data-pane="profile"] .hamburger { display: none; }
+    body[data-pane="profile"] .hamburger,
+    body[data-pane="timetable"] .hamburger { display: none; }
 
     body[data-pane="tickets"] .mobile-back,
-    body[data-pane="profile"] .mobile-back {
+    body[data-pane="profile"] .mobile-back,
+    body[data-pane="timetable"] .mobile-back {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1445,7 +1464,8 @@ body {
         cursor: pointer;
     }
     body[data-pane="tickets"] .mobile-title,
-    body[data-pane="profile"] .mobile-title {
+    body[data-pane="profile"] .mobile-title,
+    body[data-pane="timetable"] .mobile-title {
         display: block;
         font-size: 18px;
         font-weight: 800;
@@ -1546,7 +1566,8 @@ body {
     }
     /* Keep ☰ available on option pages so you can jump to another section */
     body[data-pane="tickets"] .hamburger,
-    body[data-pane="profile"] .hamburger { display: flex; }
+    body[data-pane="profile"] .hamburger,
+    body[data-pane="timetable"] .hamburger { display: flex; }
     /* Back arrow sits first */
     .mobile-back { order: -1; }
 }
@@ -1602,6 +1623,7 @@ body {
 @media (max-width: 768px) {
     /* Remove the ☰ from option pages — only the ← remains */
     body[data-pane="profile"] .hamburger,
+    body[data-pane="timetable"] .hamburger,
     body[data-pane="tickets"] .hamburger { display: none; }
 
     /* ✕ close button inside the open drawer */
@@ -1760,7 +1782,8 @@ body {
             "origin swap"
             "dest   swap"
             "time   time"
-            "search search";
+            "search search"
+            "clear  clear";
         height: auto !important;
         min-height: 0 !important;
         align-items: stretch;
@@ -1819,6 +1842,22 @@ body {
         padding: 0 !important;
     }
     .topbar-search > .search-btn:last-child::after { content: "" !important; }
+
+    /* Clear: its own full-width row under Search. It had no area of its own, so
+       it was auto-placed into an implicit row in the FIRST column only — the
+       second column being the swap button's — which is why it sat left of centre
+       rather than under the middle of the box. */
+    .topbar-search > .search-clear {
+        grid-area: clear;
+        width: 100%;
+        height: 30px !important;
+        border-top: 1px solid var(--border-mid);
+        border-radius: 0 0 14px 14px !important;
+        justify-content: center;
+        padding: 0 !important;
+    }
+    /* Search keeps the rounded bottom only when it is the last thing in the box */
+    .topbar-search > .search-btn:last-child { border-radius: 0 !important; }
 }
 
 /* ── Step 18: mobile Search button — text from data-label attr for i18n ── */
@@ -2126,7 +2165,8 @@ body {
 /* ── Step 19: nicer back-arrow button ── */
 @media (max-width: 768px) {
     body[data-pane="tickets"] .mobile-back,
-    body[data-pane="profile"] .mobile-back {
+    body[data-pane="profile"] .mobile-back,
+    body[data-pane="timetable"] .mobile-back {
         width: 40px;
         height: 40px;
         border: 1px solid var(--border-mid) !important;
@@ -2145,9 +2185,11 @@ body {
 /* ── Step 21: on option pages, center the title (+icon) with the back arrow ── */
 @media (max-width: 768px) {
     body[data-pane="tickets"] .topbar,
-    body[data-pane="profile"] .topbar { align-items: center; }
+    body[data-pane="profile"] .topbar,
+    body[data-pane="timetable"] .topbar { align-items: center; }
     body[data-pane="tickets"] .mobile-title,
-    body[data-pane="profile"] .mobile-title {
+    body[data-pane="profile"] .mobile-title,
+    body[data-pane="timetable"] .mobile-title {
         display: flex;
         align-items: center;
         gap: 6px;
@@ -2396,6 +2438,31 @@ body {
     color: var(--text-soft);
     margin-bottom: 1px;
 }
+/* The title doubles as the fold control: a separate button would cost width the
+   legend does not have, and the whole strip is an easier target on a phone. */
+.nl-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    cursor: pointer;
+}
+.nl-caret {
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid var(--text-soft);
+    transition: transform .18s;
+}
+.network-legend--collapsed .nl-caret { transform: rotate(-90deg); }
+/* Folded: the title strip and nothing else, so the map stays visible. */
+.network-legend--collapsed .nl-chip { display: none; }
+.network-legend--collapsed { gap: 0; padding-bottom: 8px; }
+.network-legend--collapsed .nl-title { margin-bottom: 0; }
 .nl-chip {
     display: inline-flex;
     align-items: center;
@@ -3107,3 +3174,147 @@ body {
     box-shadow: var(--shadow-md);
 }
 .map-pick-pin.is-dest { background: var(--text-dark); }
+
+
+/* ── Sub-page titles on the phone ──
+   The back bar already names the page, taken from the menu entry, so the
+   heading inside the pane repeated it word for word: "← Fares" above a
+   "Fares" that says nothing more. Hidden on the phone only; on desktop there
+   is no back bar and the heading is the page's only title. */
+@media (max-width: 768px) {
+    .tickets-page-title,
+    .tt-head .tt-title { display: none; }
+}
+
+
+/* ── Wordmark over the search (phone only) ──
+   The sidebar carries the brand on desktop; on the phone that sidebar is a
+   drawer, so the app opened with no name anywhere. Hidden on the sub-pages,
+   where the back bar owns the row. */
+.topbar-logo { display: none; }
+@media (max-width: 768px) {
+    .topbar-logo {
+        display: block;
+        flex-basis: 100%;
+        font-family: 'Orbitron', sans-serif;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        color: var(--text-dark);
+        line-height: 1;
+        margin-bottom: 2px;
+    }
+    /* --green does not exist in this file; the palette calls it --primary, which
+       is why the wordmark came out in a single colour. Same font as the sidebar
+       brand so the two read as the same mark. */
+    .topbar-logo span { color: var(--primary); }
+    body[data-pane="tickets"] .topbar-logo,
+    body[data-pane="profile"] .topbar-logo,
+    body[data-pane="timetable"] .topbar-logo { display: none; }
+}
+
+/* ── OmniAI nudge ──
+   A pointer out of the assistant button, not a dialog: it must not cover the
+   map or take a tap to get rid of. It sits beside the fab and shares its
+   bottom edge, so the two read as one object. */
+.ai-nudge {
+    position: absolute;
+    bottom: 24px;
+    left: 84px;                       /* clear of the 50px fab at left: 24px */
+    max-width: min(240px, calc(100% - 110px));
+    display: flex;
+    align-items: stretch;
+    background: var(--bg-white);
+    border: 1px solid var(--border-mid);
+    border-radius: 12px;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.16);
+    z-index: 500;
+    overflow: hidden;
+    animation: ai-nudge-in .22s ease-out;
+}
+.ai-nudge[hidden] { display: none; }
+/* The little arrow pointing back at the button it is talking about. It swaps
+   sides when the bubble has to sit to the button's left, which happens once the
+   button has been dragged towards the right edge. */
+.ai-nudge::before {
+    content: "";
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    width: 9px; height: 9px;
+    margin-top: -5px;
+    background: var(--bg-white);
+    border-left: 1px solid var(--border-mid);
+    border-bottom: 1px solid var(--border-mid);
+    transform: rotate(45deg);
+}
+.ai-nudge--flipped::before {
+    left: auto;
+    right: -5px;
+    border-left: none;
+    border-bottom: none;
+    border-right: 1px solid var(--border-mid);
+    border-top: 1px solid var(--border-mid);
+}
+.ai-nudge-body {
+    flex: 1;
+    border: none;
+    background: none;
+    padding: 10px 6px 10px 13px;
+    text-align: left;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dark);
+    cursor: pointer;
+}
+.ai-nudge-x {
+    border: none;
+    background: none;
+    padding: 0 10px;
+    color: var(--text-soft);
+    font-size: 12px;
+    cursor: pointer;
+}
+.ai-nudge-x:hover { color: var(--text-dark); }
+
+@keyframes ai-nudge-in {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ai-nudge { animation: none; }
+}
+@media (max-width: 768px) {
+    /* Above the bottom sheet, level with the fab it belongs to */
+    .ai-nudge { z-index: 450; }
+}
+
+
+/* ── Smart Routes opens at its lowest stop ──
+   The sheet's height is 40vh in the rule above, so the app opened with almost
+   half the screen covered by an empty results panel. A class rather than an
+   inline height: it has to beat that rule in the cascade, and the drag code
+   already owns the inline style — writing the initial state there too would
+   have the two fighting over the same property. Dropped on first drag, after
+   which the inline height takes over. */
+@media (max-width: 768px) {
+    .map-sidebar.sheet-peek { height: 110px; }
+}
+
+
+/* ── Assistant button: held down, it can be moved ──
+   Its corner is the wrong corner for some people — left-handers, anyone whose
+   thumb lands elsewhere, a phone held low. Rather than guess, let it be put
+   where its owner wants it. Phone only: on desktop it is out of the way. */
+.ai-fab.ai-fab--dragging {
+    transform: scale(1.12);
+    box-shadow: 0 12px 30px rgba(16, 185, 129, 0.55);
+    cursor: grabbing;
+    transition: none;
+}
+/* The pane is the only place it may go, so it cannot be dropped behind the
+   topbar or off the bottom of the screen. */
+@media (max-width: 768px) {
+    .ai-fab { touch-action: none; }
+}

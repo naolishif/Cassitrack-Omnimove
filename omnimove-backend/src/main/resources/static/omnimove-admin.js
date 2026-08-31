@@ -70,7 +70,7 @@ document.querySelectorAll('.tab').forEach(t=>{
         document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
         t.classList.add('active');
         document.getElementById('pane-'+t.dataset.tab).classList.add('active');
-        if (t.dataset.tab === 'settings') loadGoogleSettings();
+        if (t.dataset.tab === 'settings') { loadGoogleSettings(); loadRetention(); loadAiNudge(); }
     });
 });
 
@@ -272,6 +272,27 @@ function signUpBadge(account) {
     return `<span class="signup-tag signup-local">Signed up with email</span>`;
 }
 
+/**
+ * Whether this person has been shown, and acknowledged, each notice.
+ *
+ * Three states, not two: never shown, acknowledged under the text currently
+ * published, and acknowledged under a superseded version — the last one matters
+ * because a reworded notice invalidates the old acknowledgement and the banner
+ * will ask again, so "seen" alone would mislead the operator.
+ */
+function noticeBadge(label, ack) {
+    if (!ack || ack.seen !== true)
+        return `<span class="signup-tag signup-local">${escHtml(label)}: <strong>not seen</strong></span>`;
+
+    const when = ack.at ? fmtDateTime(ack.at) : '—';
+    if (ack.current === false)
+        return `<span class="signup-tag signup-local">${escHtml(label)}: ` +
+               `<strong>older version ${escHtml(ack.policyVersion || '?')}</strong>, ${escHtml(when)}</span>`;
+
+    return `<span class="signup-tag signup-google">${escHtml(label)}: ` +
+           `<strong>seen</strong> ${escHtml(when)}</span>`;
+}
+
 function renderProfile(data) {
     const a = data.account;
 
@@ -287,6 +308,11 @@ function renderProfile(data) {
         `<span>Registered <strong>${escHtml(fmtDateTime(a.registeredAt))}</strong></span>` +
         `<span>Last login <strong>${a.lastLoginAt ? escHtml(fmtDateTime(a.lastLoginAt)) : 'never'}</strong></span>` +
         `<span>Accesses <strong>${escHtml(a.loginCount)}</strong></span>`;
+
+    const ack = a.acknowledgements || {};
+    document.getElementById('profileNotices').innerHTML =
+        noticeBadge('Privacy notice', ack.PRIVACY_NOTICE) +
+        noticeBadge('Cookie notice',  ack.COOKIE_NOTICE);
 
     // Admin accounts carry no travel story — the server does not even compute it
     const travelBlock = document.getElementById('travelBlock');
@@ -1109,6 +1135,147 @@ function updateGreenIndexChart(trend, range) {
 // Initial load
 loadAnalytics('1M');
 
+
+// ── Report download (Statistics tab) ─────────────────────────────────
+// The three buttons were stubs that only raised a toast. They now fetch the
+// real file for the range currently on screen, so what is downloaded is what
+// the operator is looking at rather than a fixed period.
+//
+// Fetched rather than linked because the endpoint needs the session cookie and
+// answers 401 to anyone without it: a plain <a href> would navigate the tab to
+// an error page instead of reporting it here.
+async function downloadReport(format, btn) {
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⬇ …'; }
+    try {
+        const r = await apiFetch('/admin/analytics/export?range='
+                                 + encodeURIComponent(currentRange || '1M')
+                                 + '&format=' + encodeURIComponent(format));
+        if (!r.ok) throw new Error('export ' + r.status);
+
+        // Filename comes from the server, which knows the report's date
+        const disp = r.headers.get('Content-Disposition') || '';
+        const match = /filename="?([^"]+)"?/.exec(disp);
+        const name  = match ? match[1] : 'omnimove-analytics.' + format;
+
+        const blob = await r.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Freed on the next tick: revoking immediately can cancel the download
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast(name + ' downloaded');
+    } catch (e) {
+        console.warn('Report download failed:', e);
+        toast('Could not build the report');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+}
+
+// ── Assistant prompt frequency (Settings tab) ────────────────────────
+async function loadAiNudge() {
+    try {
+        const r = await apiFetch('/admin/settings/ui');
+        if (!r.ok) throw new Error('ui settings ' + r.status);
+        const s = await r.json();
+        document.getElementById('aiNudgeMinutes').value = s.aiNudgeMinutes;
+        showAiNudgeState(s.aiNudgeMinutes);
+    } catch (e) {
+        console.warn('Could not load UI settings:', e);
+    }
+}
+
+function showAiNudgeState(minutes) {
+    const el = document.getElementById('aiNudgeState');
+    if (!el) return;
+    const n = Number(minutes);
+    el.innerHTML = n > 0
+        ? 'Travellers see the prompt every <strong>' + escHtml(String(n)) + '</strong> '
+          + (n === 1 ? 'minute.' : 'minutes.')
+        : '<span class="text-amber">Off</span> — the prompt is never shown.';
+}
+
+async function saveAiNudge() {
+    const input = document.getElementById('aiNudgeMinutes');
+    const btn   = document.getElementById('aiNudgeSave');
+    const value = parseInt(input.value, 10);
+    if (isNaN(value) || value < 0) { showAiNudgeState(0); input.value = 0; return; }
+
+    btn.disabled = true;
+    try {
+        const r = await apiFetch('/admin/settings/ui', {
+            method: 'PUT',
+            body: JSON.stringify({ aiNudgeMinutes: value })
+        });
+        if (!r.ok) throw new Error('save ' + r.status);
+        const s = await r.json();
+        // The server clamps, so echo back what it actually stored rather than
+        // what was typed — otherwise the box shows a value that is not in force.
+        input.value = s.aiNudgeMinutes;
+        showAiNudgeState(s.aiNudgeMinutes);
+    } catch (e) {
+        document.getElementById('aiNudgeState').innerHTML =
+            '<span class="text-red">Could not save.</span>';
+    }
+    btn.disabled = false;
+}
+
+// ── Data retention (Settings tab) ────────────────────────────────────
+// Read-only. The periods come from the published privacy notice, so they are
+// changed by editing the notice and the configuration together — not from here.
+async function loadRetention() {
+    const state = document.getElementById('retentionState');
+    const tbody = document.getElementById('retentionTbody');
+    if (!state || !tbody) return;
+
+    try {
+        const r = await apiFetch('/admin/retention');
+        if (!r.ok) throw new Error('retention ' + r.status);
+        const data = await r.json();
+
+        state.innerHTML = data.enabled
+            ? '<div class="settings-note"><span class="text-green">Active</span> — '
+              + 'the sweep runs nightly.</div>'
+            : '<div class="settings-note"><span class="text-amber">Switched off</span> — '
+              + 'nothing is being deleted, while the privacy notice tells users it is. '
+              + 'Set RETENTION_ENABLED=true.</div>';
+
+        tbody.innerHTML = (data.rules || []).map(function (x) {
+            // Never run is its own state: a job that has not fired and a job that
+            // found nothing both show zero, and only one of them is a problem.
+            let outcome, when, removed;
+            if (x.neverRun) {
+                outcome = '<span class="text-amber">never run</span>';
+                when    = '—';
+                removed = '—';
+            } else {
+                when    = fmtDateTime(x.ran_at);
+                removed = String(x.rows_removed);
+                if (x.outcome === 'OK')           outcome = '<span class="text-green">ok</span>';
+                else if (x.outcome === 'SKIPPED') outcome = '<span class="text-amber">skipped</span>';
+                else                              outcome = '<span class="text-red">failed</span>';
+                if (x.detail) outcome += '<br><span class="sub">' + escHtml(x.detail) + '</span>';
+            }
+            return '<tr>'
+                 + '<td>' + escHtml(x.label)
+                 + (x.note ? '<br><span class="sub">' + escHtml(x.note) + '</span>' : '')
+                 + '</td>'
+                 + '<td class="text-mono">' + escHtml(x.period) + '</td>'
+                 + '<td class="text-mono" style="font-size:11px">' + escHtml(when) + '</td>'
+                 + '<td class="text-mono">' + escHtml(removed) + '</td>'
+                 + '<td>' + outcome + '</td>'
+                 + '</tr>';
+        }).join('');
+    } catch (e) {
+        console.warn('Could not load retention status:', e);
+        state.innerHTML = '<div class="settings-note">Could not read the retention status.</div>';
+        tbody.innerHTML = '';
+    }
+}
 
 // ── Google API feature flags (Settings tab) ──────────────────────────
 async function loadGoogleSettings() {
