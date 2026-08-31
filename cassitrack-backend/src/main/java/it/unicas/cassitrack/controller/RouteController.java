@@ -3,13 +3,19 @@ package it.unicas.cassitrack.controller;
 import it.unicas.cassitrack.model.Route;
 import it.unicas.cassitrack.model.RouteShape;
 import it.unicas.cassitrack.model.Stop;
+import it.unicas.cassitrack.model.Trip;
+import it.unicas.cassitrack.model.VehiclePosition;
 import it.unicas.cassitrack.repository.RouteRepository;
 import it.unicas.cassitrack.repository.RouteShapeRepository;
 import it.unicas.cassitrack.repository.ScheduledStopRepository;
 import it.unicas.cassitrack.repository.StopRepository;
 import it.unicas.cassitrack.repository.TripRepository;
+import it.unicas.cassitrack.service.RoutePatternEditService;
+import it.unicas.cassitrack.service.RoutePatternService;
+import it.unicas.cassitrack.service.VehicleStateCache;
 import it.unicas.cassitrack.service.TimetableService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +28,7 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/api/v1/routes")
 @RequiredArgsConstructor
+@Slf4j
 public class RouteController {
 
     private final RouteRepository routeRepository;
@@ -30,6 +37,9 @@ public class RouteController {
     private final StopRepository stopRepository;
     private final TripRepository tripRepository;
     private final TimetableService timetableService;
+    private final RoutePatternService routePatternService;
+    private final RoutePatternEditService routePatternEditService;
+    private final VehicleStateCache vehicleStateCache;
 
     private static final Pattern ROUTE_ID_RE = Pattern.compile("^[A-Za-z0-9_\\-]{1,50}$");
     private static final Pattern COLOR_RE    = Pattern.compile("^[0-9A-Fa-f]{6}$");
@@ -69,9 +79,12 @@ public class RouteController {
         List<RouteGeometry> out = new ArrayList<>();
         for (Route r : routeRepository.findAll()) {
             if (!r.isActive()) continue;
+            // Da V26 le fermate della linea si leggono dal pattern, non da una
+            // corsa presa a campione: una linea senza corse programmate ha
+            // comunque un percorso, e prima spariva da questa mappa.
             List<StopPoint> pts = new ArrayList<>();
-            for (var ss : scheduledStopRepository.findRepresentativeSequence(r.getId())) {
-                Stop s = stops.get(ss.getStopId());
+            for (var ps : routePatternService.pattern(r.getId())) {
+                Stop s = stops.get(ps.stopId());
                 if (s != null && s.getLat() != null)
                     pts.add(new StopPoint(s.getId(), s.getName(), s.getLat(), s.getLon()));
             }
@@ -149,6 +162,13 @@ public class RouteController {
     public record PathVertex(Double lat, Double lon, Boolean isStop,
                              String stopId, String stopName, String arrival) {}
 
+    /** "16 — Cassino-Universita", o l'id se la linea non ha nomi. */
+    private static String routeLabel(Route r) {
+        String s = r.getShortName(), l = r.getLongName();
+        if (s != null && l != null) return s + " \u2014 " + l;
+        return s != null ? s : (l != null ? l : r.getId());
+    }
+
     private static ResponseEntity<?> err(HttpStatus status, String msg) {
         return ResponseEntity.status(status).body(Map.of("error", msg));
     }
@@ -220,17 +240,77 @@ public class RouteController {
         return ResponseEntity.ok(routeRepository.save(r));
     }
 
-    @DeleteMapping("/{id}")
-    @Transactional
-    public ResponseEntity<?> deleteRoute(@PathVariable String id) {
+    /** Cosa sparirebbe cancellando questa linea. */
+    public record DeleteImpact(String routeId, String label, long trips, long calls,
+                               int patternStops, long shapeVertices, int busesOnLine) {}
+
+    /**
+     * L'impatto della cancellazione, senza cancellare.
+     *
+     * Le FK verso routes sono ON DELETE CASCADE, quindi il database porterebbe
+     * via corse, orari, pattern e geometria in un colpo solo e in silenzio.
+     * Proprio perché è così facile, val la pena dire prima quanto è grande il
+     * colpo: "cancella LINEA_16" e "cancella 26 corse e 208 arrivi" sono la
+     * stessa azione, ma non la stessa frase.
+     */
+    @GetMapping("/{id}/delete-impact")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> deleteImpact(@PathVariable String id) {
         Route r = routeRepository.findById(id).orElse(null);
         if (r == null) return err(HttpStatus.NOT_FOUND, "Route not found.");
+
         long trips = tripRepository.countByRouteId(id);
-        if (trips > 0)
+        long calls = 0;
+        for (Trip t : tripRepository.findAllByRouteId(id))
+            calls += scheduledStopRepository.findByTripIdOrderByStopSequenceAsc(t.getId()).size();
+
+        int buses = 0;
+        for (VehiclePosition pos : vehicleStateCache.getAll())
+            if (id.equals(pos.getRouteId())) buses++;
+
+        return ResponseEntity.ok(new DeleteImpact(
+                id,
+                routeLabel(r),
+                trips,
+                calls,
+                routePatternService.pattern(id).size(),
+                routeShapeRepository.findByRouteIdOrderBySeqAsc(id).size(),
+                buses));
+    }
+
+    /**
+     * Cancella una linea.
+     *
+     * Senza {@code cascade} rifiuta se ci sono corse: è la protezione che
+     * evita di svuotare un orario con un click distratto. Con {@code cascade}
+     * porta via anche corse, arrivi, pattern e geometria — le FK sono già
+     * ON DELETE CASCADE, quindi qui basta togliere la guardia.
+     *
+     * Non si blocca per i bus in strada: dopo la cancellazione
+     * TripResolutionService semplicemente non trova più una corsa per loro e
+     * spariscono dalla mappa al giro successivo. È una conseguenza corretta —
+     * quella linea non esiste più — e bloccare la cancellazione fino a fine
+     * servizio sarebbe peggio del problema.
+     */
+    @DeleteMapping("/{id}")
+    @Transactional
+    public ResponseEntity<?> deleteRoute(@PathVariable String id,
+                                         @RequestParam(defaultValue = "false") boolean cascade) {
+        Route r = routeRepository.findById(id).orElse(null);
+        if (r == null) return err(HttpStatus.NOT_FOUND, "Route not found.");
+
+        long trips = tripRepository.countByRouteId(id);
+        if (trips > 0 && !cascade)
             return err(HttpStatus.CONFLICT,
                     "Cannot delete: this route has " + trips + " trip(s) in the timetable. "
-                            + "Remove those trips first.");
+                            + "Remove those trips first, or delete the line with all of them.");
+
         routeRepository.delete(r);
+        // La cache del pattern sopravviverebbe alla riga cancellata, e una
+        // linea ricreata con lo stesso id erediterebbe il percorso vecchio.
+        routePatternService.invalidate(id);
+
+        log.info("Linea {} cancellata{}", id, trips > 0 ? " con le sue " + trips + " corse" : "");
         return ResponseEntity.noContent().build();
     }
 
@@ -249,37 +329,112 @@ public class RouteController {
 
     // ── Road geometry of an existing line ────────────────────────────────────
 
-    /** One saved vertex, as returned to the map editor. */
-    public record ShapeVertex(double lat, double lon, boolean isStop) {}
+    /**
+     * One saved vertex, as returned to the map editor.
+     *
+     * stopId è popolato solo sui vertici che sono fermate, accoppiandoli in
+     * ordine con route_stops. Serve perché l'editor deve poter RIMANDARE
+     * indietro il percorso: senza l'id, ricaricare una linea e risalvarla
+     * farebbe sembrare ogni fermata esistente una fermata nuova da creare.
+     */
+    public record ShapeVertex(double lat, double lon, boolean isStop, String stopId) {}
 
     /**
      * @param path      the saved vertices in drawing order
      * @param tripCount how many runs exist on this line — the editor warns that
      *                  re-marking stops will not rewrite them
      */
-    public record ShapeInfo(List<ShapeVertex> path, long tripCount) {}
+    /**
+     * Una fermata del pattern, come la mostra l'editor in modifica.
+     *
+     * offsetSeconds è lo scarto dalla partenza proposto dalla linea. NON è
+     * l'orario di una corsa: le corse hanno i propri, e in modifica non si
+     * toccano — è la cascata a ricalcolarli. Serve a far vedere la forma del
+     * percorso nel tempo ("la terza fermata cade cinque minuti dopo il via")
+     * senza dare l'impressione di un campo compilabile.
+     */
+    public record PatternStop(String stopId, String name, int offsetSeconds) {}
+
+    public record ShapeInfo(List<ShapeVertex> path, long tripCount,
+                            List<PatternStop> stops) {}
 
     @GetMapping("/{id}/shape")
     @Transactional(readOnly = true)
     public ResponseEntity<?> getShape(@PathVariable String id) {
         if (!routeRepository.existsById(id))
             return err(HttpStatus.NOT_FOUND, "Route not found.");
-        List<ShapeVertex> path = routeShapeRepository.findByRouteIdOrderBySeqAsc(id).stream()
-                .map(s -> new ShapeVertex(s.getLat(), s.getLon(), Boolean.TRUE.equals(s.getIsStop())))
+        // L'i-esimo vertice marcato come fermata è l'i-esima fermata del
+        // pattern: è la stessa corrispondenza che il salvataggio costruisce,
+        // letta al contrario. Se le due liste divergono (shape disegnata prima
+        // di V26, o modificata a mano) i vertici in eccesso restano senza id e
+        // l'editor li tratterà come fermate da riagganciare.
+        List<String> patternStops = routePatternService.stopIds(id);
+        List<ShapeVertex> path = new ArrayList<>();
+        int stopIdx = 0;
+        for (RouteShape s : routeShapeRepository.findByRouteIdOrderBySeqAsc(id)) {
+            boolean isStop = Boolean.TRUE.equals(s.getIsStop());
+            String stopId = (isStop && stopIdx < patternStops.size())
+                    ? patternStops.get(stopIdx++) : null;
+            path.add(new ShapeVertex(s.getLat(), s.getLon(), isStop, stopId));
+        }
+        Map<String, String> stopNames = new HashMap<>();
+        for (Stop s : stopRepository.findAllById(patternStops)) stopNames.put(s.getId(), s.getName());
+
+        List<PatternStop> pattern = routePatternService.pattern(id).stream()
+                .map(ps -> new PatternStop(ps.stopId(),
+                        stopNames.getOrDefault(ps.stopId(), ps.stopId()),
+                        ps.defaultOffsetSeconds()))
                 .toList();
-        return ResponseEntity.ok(new ShapeInfo(path, tripRepository.countByRouteId(id)));
+
+        return ResponseEntity.ok(new ShapeInfo(path, tripRepository.countByRouteId(id), pattern));
     }
 
     /**
-     * Replace the drawn geometry of an existing line.
+     * Cosa cambierebbe salvando questo percorso — senza salvarlo.
      *
-     * Deliberately limited to route_shapes: it is read only to draw the line on
-     * the maps and to publish it over NeTEx, never by schedule adherence or ETA
-     * (those use scheduled_stops). So redrawing a path cannot disturb timings.
+     * POST e non GET perché il percorso proposto è un corpo, non una query
+     * string: una linea può avere venti vertici e non stanno in un URL. Non
+     * scrive nulla; il verbo dice solo dove viaggiano i dati.
+     */
+    @PostMapping("/{id}/shape/preview")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> previewShape(@PathVariable String id,
+                                          @RequestBody List<PathVertex> path) {
+        if (!routeRepository.existsById(id))
+            return err(HttpStatus.NOT_FOUND, "Route not found.");
+        if (path == null || path.size() < 2)
+            return err(HttpStatus.BAD_REQUEST, "A path needs at least two points.");
+
+        // Le fermate nuove qui NON vengono create: sarebbe una scrittura, e
+        // un'anteprima che scrive non è un'anteprima. Si usa l'id che avrebbero,
+        // così il conteggio è giusto anche prima che esistano.
+        List<String> stopIds = path.stream()
+                .filter(v -> Boolean.TRUE.equals(v.isStop()))
+                .map(v -> v.stopId() != null && !v.stopId().isBlank()
+                        ? v.stopId().trim() : generatedStopId(v.stopName()))
+                .toList();
+
+        if (stopIds.size() < 2)
+            return err(HttpStatus.BAD_REQUEST,
+                    "A line needs at least two stops marked on its path.");
+
+        return ResponseEntity.ok(routePatternEditService.preview(id, stopIds));
+    }
+
+    /**
+     * Ridefinisce il percorso di una linea: il tracciato disegnato E le sue
+     * fermate, propagando il cambio alle corse.
      *
-     * Stops marked here are NOT propagated to the existing runs: rewriting the
-     * calls of every run would mean inventing their times. New stops drawn on
-     * the map are created, so they can then be used from the Timetable tab.
+     * Fino a V26 questo endpoint RIFIUTAVA di cambiare le fermate, e con
+     * ragione: la sequenza viveva duplicata in ogni corsa, quindi riscriverla
+     * avrebbe voluto dire inventare gli orari di tutte. Ora le fermate
+     * appartengono alla linea e gli orari alla corsa, quindi il cambio si
+     * propaga per costruzione: le fermate sopravvissute NON cambiano orario, e
+     * si interpola solo per quelle nuove — vedi RoutePatternEditService.
+     *
+     * Le due scritture restano distinte e sono entrambe necessarie:
+     *   · route_shapes  — la geometria, cioè come la linea appare sulla mappa
+     *   · route_stops   — quali vertici sono fermate, e in che ordine
      */
     @PutMapping("/{id}/shape")
     @Transactional
@@ -290,42 +445,34 @@ public class RouteController {
         if (path == null || path.size() < 2)
             return err(HttpStatus.BAD_REQUEST, "A path needs at least two points.");
 
-        // The stop vertices must stay exactly as they were. route_shapes.is_stop
-        // mirrors the calls in scheduled_stops: letting the path declare a
-        // different set would (a) make the drawing disagree with what the runs
-        // actually serve, and (b) break the scheduled simulator, which binds
-        // each call to a vertex by coordinates and drops the whole run when it
-        // finds none. Stops are changed from the Timetable tab, per run.
-        List<RouteShape> current = routeShapeRepository.findByRouteIdOrderBySeqAsc(id);
-        if (!current.isEmpty()) {
-            Set<String> before = current.stream()
-                    .filter(s -> Boolean.TRUE.equals(s.getIsStop()))
-                    .map(s -> coordKey(s.getLat(), s.getLon()))
-                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
-            Set<String> after = path.stream()
-                    .filter(v -> Boolean.TRUE.equals(v.isStop()))
-                    .map(v -> coordKey(v.lat(), v.lon()))
-                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
-            if (!before.equals(after))
-                return err(HttpStatus.CONFLICT,
-                        "The stops of this line cannot be changed here: they must keep matching "
-                                + "the calls of its runs. Reshape the road path freely, and edit "
-                                + "stops from the Timetable tab.");
-        }
+        // Le fermate inventate sul disegno vanno create prima: il pattern le
+        // referenzia, e route_stops ha una FK verso stops.
+        createStopsFromPath(path);
 
-        createStopsFromPath(path);   // no-op unless the line had no shape yet
+        List<String> stopIds = path.stream()
+                .filter(v -> Boolean.TRUE.equals(v.isStop()))
+                .map(v -> v.stopId() != null && !v.stopId().isBlank()
+                        ? v.stopId().trim() : generatedStopId(v.stopName()))
+                .toList();
+
+        if (stopIds.size() < 2)
+            return err(HttpStatus.BAD_REQUEST,
+                    "A line needs at least two stops marked on its path.");
+
+        RoutePatternEditService.Result r = routePatternEditService.replacePattern(id, stopIds);
         saveShape(id, path);
-        return ResponseEntity.ok(Map.of("saved", path.size()));
-    }
 
-    /**
-     * Coordinate key at ~1 m, the same tolerance the scheduled simulator uses to
-     * bind a call to its vertex. Comparing rounded strings avoids treating a
-     * float round-trip through JSON as a moved stop.
-     */
-    private static String coordKey(Double lat, Double lon) {
-        if (lat == null || lon == null) return "?";
-        return String.format(java.util.Locale.ROOT, "%.5f,%.5f", lat, lon);
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("saved",            path.size());
+        body.put("stops",            r.stopsAfter());
+        body.put("pattern_changed",  r.changed());
+        body.put("trips_retimed",    r.tripsRetimed());
+        body.put("calls_inserted",   r.callsInserted());
+        body.put("calls_removed",    r.callsRemoved());
+        // Il gestore deve sapere che per questi bus la misura del ritardo
+        // riparte dalla prossima fermata: e' un buco previsto, non un guasto.
+        body.put("buses_reanchored", r.busesReanchored());
+        return ResponseEntity.ok(body);
     }
 
     // ── Map editor support ───────────────────────────────────────────────────

@@ -18,10 +18,25 @@ import lombok.Data;
 @Data
 public class LineStringDTO {
 
+    /**
+     * Obbligatorio in GML 3.2: ogni geometria deve essere identificabile.
+     * Mancava, e da solo bastava a far fallire una validazione GML.
+     */
+    @JacksonXmlProperty(isAttribute = true, namespace = "http://www.opengis.net/gml/3.2", localName = "id")
+    private String gmlId;
+
+    /**
+     * Forma URN invece di "EPSG:4326".
+     *
+     * Non è pedanteria: nella forma corta l'ordine degli assi è ambiguo e
+     * diversi strumenti la leggono lon-lat, ribaltando ogni coordinata
+     * dall'altra parte del mondo. L'URN fissa l'ordine ufficiale di EPSG:4326,
+     * che è lat-lon — cioè esattamente come posList è scritta qui.
+     */
     @JacksonXmlProperty(isAttribute = true, localName = "srsName")
-    private String srsName = "EPSG:4326";
+    private String srsName = "urn:ogc:def:crs:EPSG::4326";
 
     /** "lat lon lat lon …", in path order. */
-    @JacksonXmlProperty(localName = "posList")
+    @JacksonXmlProperty(namespace = "http://www.opengis.net/gml/3.2", localName = "posList")
     private String posList;
 }

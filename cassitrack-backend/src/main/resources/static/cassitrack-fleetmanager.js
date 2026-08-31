@@ -314,9 +314,45 @@ async function toggleBusVisibility(id){
 // the bus marker icon needs no dynamic style at all — a data-status attribute
 // plus static attribute-selector CSS rules (cassitrack-fleetmanager.css) covers
 // every case. SC[status]||SC.UNKNOWN is preserved as a key-selection fallback.
-function busIcon(id,status){
+/**
+ * Inchiostro leggibile SOPRA un colore pieno.
+ *
+ * Diverso da routeInk(), che schiarisce un colore per renderlo leggibile sul
+ * pannello scuro. Qui il colore E' lo sfondo, quindi la scelta è fra testo
+ * chiaro e testo scuro secondo la luminanza: su un giallo linea il bianco
+ * sparisce, sul blu il nero sparisce.
+ */
+function inkOn(bg){
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(bg).trim());
+    if(!m) return '#FFFFFF';
+    const n = parseInt(m[1], 16);
+    // Luminanza percepita: l'occhio pesa molto il verde e poco il blu.
+    const lum = (0.299*((n>>16)&255) + 0.587*((n>>8)&255) + 0.114*(n&255)) / 255;
+    return lum > 0.6 ? '#0B1220' : '#FFFFFF';
+}
+
+/**
+ * Il marker di un bus porta DUE informazioni indipendenti su due canali:
+ *
+ *   · la bolla  → come sta andando (azzurro anticipo, verde in orario,
+ *                 giallo lieve ritardo, rosso oltre i 10 minuti, grigio
+ *                 quando ancora non c'è una misura)
+ *   · l'etichetta → su quale LINEA sta, col colore della linea stessa
+ *
+ * Prima portavano entrambe lo stato, quindi un canale visivo era sprecato:
+ * il colore della linea, che il gestore sceglie in Data Management, sulla
+ * mappa non compariva da nessuna parte.
+ *
+ * Le soglie della bolla sono quelle di ScheduleAdherenceService (−1 / +3 /
+ * +10 minuti), non soglie proprie della mappa: lo stesso mezzo deve avere lo
+ * stesso colore qui, nella tab Trips e nelle Analytics.
+ */
+function busIcon(id,status,routeColor){
     const st = SC[status] ? status : 'UNKNOWN';
-    return L.divIcon({className:'',html:`<div class="bus-icon-wrap"><div class="bus-icon-body" data-status="${st}"><span class="bus-icon-emoji">🚌</span></div><div class="bus-icon-label" data-status="${st}">${escHtml(id)}</div></div>`,iconSize:[60,58],iconAnchor:[18,50]});
+    const col = routeColor || '#4B5563';
+    // data-bg/data-fg invece di style="": la CSP vieta gli stili in linea,
+    // e applyDynStyles() li trasferisce via CSSOM dopo il montaggio.
+    return L.divIcon({className:'',html:`<div class="bus-icon-wrap"><div class="bus-icon-body" data-status="${st}"><span class="bus-icon-emoji">🚌</span></div><div class="bus-icon-label" data-bg="${escHtml(col)}" data-fg="${inkOn(col)}">${escHtml(id)}</div></div>`,iconSize:[60,58],iconAnchor:[18,50]});
 }
 
 async function fetchVehicles(){
@@ -368,9 +404,18 @@ function updateMap(vehicles){
     vehicles.forEach(v=>{
         vehicleData[v.vehicle_id]=v;
         const st=!v.trip_id?'NO_TRIP':(v.schedule_status||'UNKNOWN'),pos=[v.lat,v.lon];
-        if(markers[v.vehicle_id]){markers[v.vehicle_id].setLatLng(pos);markers[v.vehicle_id].setIcon(busIcon(v.vehicle_id,st));}
+        // Colore della linea per l'etichetta. routeColors è riempita all'avvio
+        // da /routes; il grigio è il ripiego per un mezzo senza corsa, che una
+        // linea non ce l'ha.
+        const rc = routeColors[v.route_id] || routeColors[v.route_name] || '#4B5563';
+        if(markers[v.vehicle_id]){
+            markers[v.vehicle_id].setLatLng(pos);
+            markers[v.vehicle_id].setIcon(busIcon(v.vehicle_id,st,rc));
+            applyDynStyles(markers[v.vehicle_id].getElement());
+        }
         else{
-            const m=L.marker(pos,{icon:busIcon(v.vehicle_id,st)}).addTo(map);
+            const m=L.marker(pos,{icon:busIcon(v.vehicle_id,st,rc)}).addTo(map);
+            applyDynStyles(m.getElement());
             m.bindPopup(popupV(v));
             // CSP FIX (A05): popup content (popupV()) carries data-fg/data-bg
             // attributes for its dynamic route-colour and crowding-bar values;
@@ -992,6 +1037,7 @@ function renderRoutesAdmin(){
     let rtMap = null;          // Leaflet instance of the editor
     let rtDrawPts = [];        // [{lat, lon, isStop, stopId, stopName, marker}]
     let rtDrawLine = null;     // preview polyline
+    let rtHitLine  = null;     // copia invisibile e spessa: bersaglio dei click di inserimento
     let rtAllStops = [];       // existing stops, used for snapping
     const SNAP_M = 80;         // metres: within this, reuse the existing stop
 
@@ -1065,18 +1111,100 @@ function renderRoutesAdmin(){
         requestAnimationFrame(() => setTimeout(settle, 30));
     }
 
-    /** Draw a vertex and wire its click-to-delete. */
+    /**
+     * Disegna un vertice e ne collega click, tasto destro e trascinamento.
+     *
+     * Usa L.marker con una divIcon invece di L.circleMarker, che era la scelta
+     * precedente: circleMarker non e' trascinabile, e senza trascinamento
+     * inserire un punto sulla linea non serve a niente — il punto nasce
+     * esattamente SOPRA la linea, quindi la geometria non cambia di un
+     * millimetro finche' non lo si sposta.
+     *
+     * Le fermate NON sono trascinabili. Le loro coordinate non sono geometria
+     * libera: sono quelle della fermata nel catalogo, e il simulatore lega
+     * ogni arrivo al vertice confrontando le coordinate entro un metro.
+     * Trascinarle romperebbe quel legame in silenzio, e la corsa smetterebbe
+     * di essere simulata senza un errore visibile. Per cambiare una fermata si
+     * usa il tasto destro (che la riporta a punto) e se ne marca un'altra.
+     */
     function rtAttachMarker(pt){
-        pt.marker = L.circleMarker([pt.lat, pt.lon], pt.isStop
-                ? {radius:7, color:'#F59E0B', weight:2, fillColor:'#F59E0B', fillOpacity:.9}
-                : {radius:4, color:'#3B82F6', weight:1, fillColor:'#3B82F6', fillOpacity:.9})
-            .addTo(rtMap);
-        if(pt.stopName) pt.marker.bindTooltip(pt.stopName);
+        const cls = pt.isStop ? 'rt-vtx rt-vtx-stop' : 'rt-vtx rt-vtx-plain';
+        const size = pt.isStop ? 16 : 11;
+        pt.marker = L.marker([pt.lat, pt.lon], {
+            draggable: !pt.isStop,
+            keyboard: false,
+            icon: L.divIcon({className:'', html:'<span class="'+cls+'"></span>',
+                             iconSize:[size,size], iconAnchor:[size/2, size/2]})
+        }).addTo(rtMap);
+
+        if(!pt.isStop){
+            // Durante il trascinamento si aggiornano solo le due polilinee, non
+            // l'intero disegno: rtRedraw ricostruisce anche l'elenco fermate
+            // sotto la mappa, e rifarlo a ogni pixel di movimento fa scattare
+            // il puntatore.
+            pt.marker.on('drag', e => {
+                const ll = e.target.getLatLng();
+                pt.lat = +ll.lat.toFixed(6);
+                pt.lon = +ll.lng.toFixed(6);
+                rtUpdateLines();
+            });
+            pt.marker.on('dragend', () => {
+                // Leaflet emette un click subito dopo il rilascio: senza questa
+                // guardia, trascinare un vertice lo cancellerebbe.
+                pt._justDragged = true;
+                setTimeout(() => { pt._justDragged = false; }, 0);
+                rtRedraw();
+            });
+        }
+        pt.marker.bindTooltip(pt.stopName || (pt.isStop ? (pt.stopId || 'stop') : 'point'));
         pt.marker.on('click', ev => {
             L.DomEvent.stopPropagation(ev);
+            if(pt._justDragged) return;          // era la fine di un trascinamento
             const i = rtDrawPts.indexOf(pt);
             if(i >= 0) rtRemoveVertex(i);
         });
+        // Tasto destro su un vertice: lo trasforma da punto a fermata e
+        // viceversa, SENZA toccare la geometria.
+        //
+        // Prima l'unica azione su un vertice era cancellarlo, e i vertici si
+        // aggiungono solo in coda: cambiare una fermata a meta' percorso
+        // significava smontare tutto quello che veniva dopo. Il gesto e' lo
+        // stesso della mappa vuota — destro = fermata — quindi non c'e' una
+        // regola nuova da imparare: destro riguarda l'essere fermata, sinistro
+        // l'esistere.
+        pt.marker.on('contextmenu', ev => {
+            L.DomEvent.stopPropagation(ev);
+            if(ev.originalEvent) L.DomEvent.preventDefault(ev.originalEvent);
+            rtToggleStop(pt);
+        });
+    }
+
+    /** Rende un vertice una fermata, o smette di considerarlo tale. */
+    function rtToggleStop(pt){
+        if(pt.isStop){
+            pt.isStop = false;
+            pt.stopId = null;
+            pt.stopName = null;
+        }else{
+            const near = nearestStop(pt.lat, pt.lon);
+            if(near){
+                // Si aggancia alla fermata esistente e ne prende le coordinate
+                // esatte: il simulatore lega ogni arrivo al vertice entro un
+                // metro, quindi salvare il punto cliccato invece della fermata
+                // vera romperebbe quel legame.
+                pt.stopId = near.id; pt.stopName = near.name;
+                pt.lat = near.lat;   pt.lon = near.lon;
+            }else{
+                const name = window.prompt('Name of the new stop here:');
+                if(!name || !name.trim()) return;
+                pt.stopId = null; pt.stopName = name.trim();
+            }
+            pt.isStop = true;
+        }
+        // Il marker cambia forma e colore: si ridisegna da zero.
+        if(pt.marker) rtMap.removeLayer(pt.marker);
+        rtAttachMarker(pt);
+        rtRedraw();
     }
 
     function rtAddVertex(latlng, isStop){
@@ -1108,6 +1236,54 @@ function renderRoutesAdmin(){
         rtRedraw();
     }
 
+    /**
+     * Inserisce un vertice semplice nel tratto cliccato.
+     *
+     * Serve a modificare un percorso senza smontarlo: prima i vertici si
+     * potevano solo accodare, quindi correggere una curva a meta' strada
+     * voleva dire cancellare tutto cio' che veniva dopo e ridisegnarlo.
+     *
+     * Il punto inserito e' un vertice puramente grafico. Se poi deve diventare
+     * una fermata basta il tasto destro sopra, come su qualsiasi altro
+     * vertice: le due azioni si compongono invece di duplicarsi.
+     */
+    function rtInsertOnSegment(latlng){
+        if(rtDrawPts.length < 2) return;
+
+        // Si lavora in pixel, non in gradi: a questa latitudine un grado di
+        // longitudine vale circa tre quarti di uno di latitudine, quindi la
+        // distanza "piu' vicina" calcolata sui gradi sceglierebbe il tratto
+        // sbagliato sulle diagonali.
+        const clicked = rtMap.latLngToLayerPoint(latlng);
+        const pts = rtDrawPts.map(p => rtMap.latLngToLayerPoint(L.latLng(p.lat, p.lon)));
+
+        let bestIdx = -1, bestD = Infinity, bestPoint = null;
+        for(let i = 0; i + 1 < pts.length; i++){
+            const a = pts[i], b = pts[i+1];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const len2 = dx*dx + dy*dy;
+            // Segmento degenere (due vertici sovrapposti): niente su cui
+            // proiettare, si salta invece di dividere per zero.
+            if(len2 === 0) continue;
+            let t = ((clicked.x - a.x) * dx + (clicked.y - a.y) * dy) / len2;
+            t = Math.max(0, Math.min(1, t));
+            const px = a.x + t*dx, py = a.y + t*dy;
+            const d  = Math.hypot(clicked.x - px, clicked.y - py);
+            if(d < bestD){ bestD = d; bestIdx = i; bestPoint = L.point(px, py); }
+        }
+        if(bestIdx < 0) return;
+
+        // Si usa il punto PROIETTATO sul tratto, non dove ha colpito il click:
+        // il vertice cade cosi' esattamente sulla linea, e trascinando il
+        // percorso non compaiono microscopici zig-zag.
+        const ll = rtMap.layerPointToLatLng(bestPoint);
+        const pt = {lat:+ll.lat.toFixed(6), lon:+ll.lng.toFixed(6),
+                    isStop:false, stopId:null, stopName:null};
+        rtAttachMarker(pt);
+        rtDrawPts.splice(bestIdx + 1, 0, pt);
+        rtRedraw();
+    }
+
     function rtRemoveVertex(i){
         const [pt] = rtDrawPts.splice(i, 1);
         if(pt && pt.marker) rtMap.removeLayer(pt.marker);
@@ -1120,9 +1296,23 @@ function renderRoutesAdmin(){
         rtRedraw();
     }
 
+    /**
+     * Aggiorna solo le due polilinee, senza ricostruire il resto.
+     *
+     * Chiamata a ogni pixel di trascinamento: rtRedraw rifa' anche l'elenco
+     * delle fermate sotto la mappa, e farlo di continuo rende il trascinamento
+     * a scatti.
+     */
+    function rtUpdateLines(){
+        const ll = rtDrawPts.map(p => [p.lat, p.lon]);
+        if(rtDrawLine) rtDrawLine.setLatLngs(ll);
+        if(rtHitLine)  rtHitLine.setLatLngs(ll);
+    }
+
     /** Refresh the preview line, the counter and the stop rows below the map. */
     function rtRedraw(){
         if(rtDrawLine){ rtMap.removeLayer(rtDrawLine); rtDrawLine = null; }
+        if(rtHitLine){  rtMap.removeLayer(rtHitLine);  rtHitLine  = null; }
         if(rtDrawPts.length >= 2){
             // interactive:false + bringToBack: the preview line is redrawn
             // after the markers, so by default it sits on top of them and
@@ -1131,6 +1321,24 @@ function renderRoutesAdmin(){
                                     {color:'#3B82F6', weight:4, opacity:.85,
                                      interactive:false}).addTo(rtMap);
             rtDrawLine.bringToBack();
+
+            // Bersaglio dei click di inserimento: stessa geometria, invisibile
+            // e molto piu' spessa, cosi' un tratto di quattro pixel diventa
+            // comodo da colpire.
+            //
+            // E' una linea SEPARATA e non la stessa resa cliccabile, perche'
+            // quella sopra deve restare interactive:false: viene ridisegnata
+            // dopo i marker, e da cliccabile si ritroverebbe sopra di loro a
+            // ingoiare i click destinati a cancellare un vertice. Questa nasce
+            // gia' spedita in fondo, quindi i marker vincono sempre.
+            rtHitLine = L.polyline(rtDrawPts.map(p=>[p.lat,p.lon]),
+                                   {color:'#000', weight:16, opacity:0,
+                                    interactive:true}).addTo(rtMap);
+            rtHitLine.bringToBack();
+            rtHitLine.on('click', ev => {
+                L.DomEvent.stopPropagation(ev);
+                rtInsertOnSegment(ev.latlng);
+            });
         }
         const stops = rtDrawPts.filter(p=>p.isStop);
         const c = document.getElementById('rtDrawCount');
@@ -1156,10 +1364,25 @@ function renderRoutesAdmin(){
             row.dataset.stopName = s.stopName || '';
             row.dataset.lat      = s.lat;
             row.dataset.lon      = s.lon;
-            const t = times[i] || (i === 0 ? '08:00' : '');
-            row.innerHTML = '<span class="tt-seq">' + (i+1) + '</span>'
-                + '<span class="tt-stop-name">' + escHtml(s.stopName || s.stopId) + '</span>'
-                + '<input type="time" class="bm-input tt-time" value="' + escHtml(t) + '">';
+            const label = escHtml(s.stopName || s.stopId || '—');
+            if(rtEditId){
+                // MODIFICA: nessun orario da digitare. Una corsa ha i propri
+                // orari e la cascata li ricalcola; qui si mostra lo scarto
+                // proposto dalla linea, che dice la forma del percorso nel
+                // tempo senza fingere di essere un campo compilabile.
+                const ps  = rtPattern[i];
+                const kept = ps && ps.stopId === s.stopId;
+                row.innerHTML = '<span class="tt-seq">' + (i+1) + '</span>'
+                    + '<span class="tt-stop-name">' + label + '</span>'
+                    + (kept
+                        ? '<span class="tt-offset">+' + rtFmtOffset(ps.offsetSeconds) + '</span>'
+                        : '<span class="tt-offset tt-offset-new">new</span>');
+            }else{
+                const t = times[i] || (i === 0 ? '08:00' : '');
+                row.innerHTML = '<span class="tt-seq">' + (i+1) + '</span>'
+                    + '<span class="tt-stop-name">' + label + '</span>'
+                    + '<input type="time" class="bm-input tt-time" value="' + escHtml(t) + '">';
+            }
             list.appendChild(row);
         });
     }
@@ -1183,6 +1406,109 @@ function setRtMsg(txt, ok){
     el.classList.toggle('ok',  !!txt && !!ok);
 }
 
+// Percorso caricato nell'editor durante una modifica. Distingue "non ho
+// toccato il percorso" (si salvano solo i campi) da "l'ho aperto e magari
+// cambiato" (serve la cascata): senza questa distinzione, rinominare una linea
+// ne riscriverebbe l'orario di tutte le corse per niente.
+let rtPathLoaded = false;
+// Pattern della linea come sta nel database, caricato insieme al percorso.
+// Serve solo a MOSTRARE gli scarti: gli orari veri appartengono alle corse.
+let rtPattern = [];
+
+/** 156 -> "2:36", per gli scarti dalla partenza. */
+function rtFmtOffset(sec){
+    const s = Math.max(0, sec|0);
+    return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+
+function rtHidePreview(){
+    const el = document.getElementById('rtPreview');
+    if(el){ el.hidden = true; el.innerHTML = ''; }
+}
+
+/**
+ * Carica nell'editor il percorso salvato della linea.
+ *
+ * I vertici che sono fermate arrivano con il loro stopId (lo aggiunge
+ * getShape accoppiandoli al pattern): senza, risalvare farebbe sembrare ogni
+ * fermata gia' esistente una fermata nuova da creare.
+ */
+async function rtLoadExistingPath(routeId){
+    const r = await fetch(`${API}/routes/${encodeURIComponent(routeId)}/shape`,
+                          {headers:{'Accept':'application/json'}});
+    if(!r.ok) throw new Error('shape');
+    const info = await r.json();
+
+    await rtOpenMapEditor();
+    rtClearDrawing();
+    // Il pattern caricato serve a mostrare gli scarti accanto alle fermate.
+    // Va tenuto DOPO rtOpenMapEditor, che popola rtAllStops: senza i nomi
+    // l'elenco mostrerebbe gli id grezzi (GIA, EDN, CRS...), che non dicono
+    // niente a chi guarda una mappa.
+    rtPattern = info.stops || [];
+    const nameById = {};
+    rtAllStops.forEach(s => { nameById[s.id] = s.name; });
+    rtPattern.forEach(ps => { if(ps.name) nameById[ps.stopId] = ps.name; });
+
+    (info.path || []).forEach(v => {
+        const pt = {lat:v.lat, lon:v.lon, isStop:!!v.isStop, stopId:v.stopId || null};
+        if(pt.stopId && nameById[pt.stopId]) pt.stopName = nameById[pt.stopId];
+        rtAttachMarker(pt);
+        rtDrawPts.push(pt);
+    });
+    rtRedraw();
+    if(rtDrawPts.length){
+        rtMap.fitBounds(rtDrawPts.map(p=>[p.lat,p.lon]), {padding:[30,30]});
+    }
+    rtPathLoaded = true;
+    return info;
+}
+
+/** Chiede al backend cosa cambierebbe, senza salvare. */
+async function rtFetchPreview(routeId, path){
+    const r = await fetch(`${API}/routes/${encodeURIComponent(routeId)}/shape/preview`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(path)
+    });
+    if(!r.ok){
+        let msg = 'Preview failed.';
+        try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
+        throw new Error(msg);
+    }
+    return r.json();
+}
+
+/** Mostra il riepilogo dell'anteprima e restituisce il testo per la conferma. */
+function rtShowPreview(pv){
+    const el = document.getElementById('rtPreview');
+    if(!el) return '';
+    if(!pv.changed){
+        el.hidden = false;
+        el.innerHTML = '<div class="rt-preview-ok">The path was redrawn, but its stops are unchanged — no run will be re-timed.</div>';
+        return '';
+    }
+    const li = (arr, cls) => arr.map(s => `<li class="${cls}">${escHtml(s)}</li>`).join('');
+    el.hidden = false;
+    el.innerHTML = `
+        <div class="rt-preview-title">This will change ${pv.tripsAffected} run(s) of this line</div>
+        <div class="rt-preview-grid">
+            <div><span class="rt-preview-lbl">Stops</span> ${pv.stopsBefore} → ${pv.stopsAfter}</div>
+            <div><span class="rt-preview-lbl">Buses re-anchored</span> ${pv.busesReanchored}</div>
+        </div>
+        ${pv.added.length   ? `<ul class="rt-preview-list">${li(pv.added,'rt-add')}</ul>`     : ''}
+        ${pv.removed.length ? `<ul class="rt-preview-list">${li(pv.removed,'rt-del')}</ul>`   : ''}
+        <div class="rt-preview-note">
+            Stops that stay keep their exact times. Only the new ones get a time,
+            interpolated inside each run's own schedule.
+            ${pv.busesReanchored ? ' Buses currently on this line will show “LIVE” until they reach their next stop.' : ''}
+        </div>`;
+    const parts = [`${pv.tripsAffected} run(s) of this line will be re-timed.`];
+    if(pv.added.length)   parts.push(`Added: ${pv.added.join(', ')}.`);
+    if(pv.removed.length) parts.push(`Removed: ${pv.removed.join(', ')}.`);
+    if(pv.busesReanchored) parts.push(`${pv.busesReanchored} bus(es) will lose their delay measurement until the next stop.`);
+    return parts.join('\n') + '\n\nProceed?';
+}
+
 async function openRouteForm(route){
     rtEditId = route ? route.id : null;
     document.getElementById('rtFormTitle').textContent =
@@ -1194,8 +1520,34 @@ async function openRouteForm(route){
     const itn       = document.getElementById('rtItinerary');
     const busField  = document.getElementById('rtBusField');
     const stopsList = document.getElementById('rtStops');
+    const pathEdit  = document.getElementById('rtPathEdit');
     if(itn)      itn.hidden      = !!route;
     if(busField) busField.hidden = !!route;
+
+    // In modifica il percorso non e' piu' intoccabile: da V24 le fermate
+    // appartengono alla linea e cambiarle si propaga alle corse. Resta pero'
+    // dietro un pulsante, perche' la maggior parte delle modifiche a una linea
+    // riguarda nome, colore o stato.
+    if(pathEdit) pathEdit.hidden = !route;
+    rtPathLoaded = false;
+    rtHidePreview();
+
+    // Il pulsante "Edit path" riadatta il pannello dell'itinerario alla
+    // modifica (niente righe di orario, altra etichetta). Va rimesso a posto
+    // qui, o riaprendo il form in CREAZIONE si troverebbe un pannello monco:
+    // senza "+ Add stop" e con il titolo sbagliato.
+    const addStopBtn = document.getElementById('rtAddStopBtn');
+    if(addStopBtn) addStopBtn.hidden = !!route;
+    const itnHead = document.querySelector('#rtItinerary .tt-manual-head .bm-lbl');
+    if(itnHead) itnHead.textContent = route
+            ? 'Path and stops of this line'
+            : 'First run of this line — stops and times';
+    const itnHint = document.querySelector('#rtItinerary .rt-itn-hint');
+    if(itnHint) itnHint.hidden = !!route;
+    const pathHint = document.getElementById('rtPathHint');
+    if(pathHint) pathHint.textContent =
+            'Changing the stops of this line re-times all of its runs. '
+          + 'You will see exactly what changes before anything is saved.';
 
     if(!route){
         await ttLoadStopOptions();
@@ -1222,6 +1574,8 @@ async function openRouteForm(route){
 function closeRouteForm(){
     document.getElementById('rtForm').hidden = true;
     rtEditId = null;
+    rtPathLoaded = false;
+    rtHidePreview();
     setRtMsg('');
 }
 
@@ -1269,6 +1623,33 @@ async function saveRoute(){
     }
     const url    = editing ? `${API}/routes/${encodeURIComponent(rtEditId)}` : `${API}/routes`;
     const method = editing ? 'PUT' : 'POST';
+
+    // Modifica con percorso aperto: prima si mostra l'impatto, poi si scrive.
+    // Le due scritture restano separate perche' sono due cose diverse — i
+    // campi della linea e il suo percorso — e la seconda puo' ri-tempificare
+    // decine di corse. Si chiede conferma una volta sola, sull'insieme.
+    let shapePath = null;
+    if(editing && rtPathLoaded){
+        if(rtDrawPts.length < 2){ setRtMsg('The path needs at least two points.'); return; }
+        shapePath = rtDrawPts.map(pt => ({
+            lat: pt.lat, lon: pt.lon, isStop: !!pt.isStop,
+            stopId: pt.stopId, stopName: pt.stopName, arrival: null
+        }));
+        if(shapePath.filter(p=>p.isStop).length < 2){
+            setRtMsg('Mark at least two stops on the path (right click).'); return;
+        }
+        setRtMsg('Checking what would change…', true);
+        let pv;
+        try{ pv = await rtFetchPreview(rtEditId, shapePath); }
+        catch(e){ setRtMsg(e.message || 'Preview failed.'); return; }
+
+        const question = rtShowPreview(pv);
+        // Nessuna domanda se le fermate non cambiano: ridisegnare la strada
+        // non tocca nessun orario, e chiedere conferma per nulla insegna solo
+        // a cliccare "ok" senza leggere.
+        if(question && !window.confirm(question)){ setRtMsg(''); return; }
+    }
+
     setRtMsg('Saving…', true);
     try{
         const r = await fetch(url, {
@@ -1276,20 +1657,73 @@ async function saveRoute(){
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify(payload)
         });
-        if(r.ok){ closeRouteForm(); await loadRoutesAdmin(); }
-        else{
+        if(!r.ok){
             let msg = 'Save failed.';
             try{ const j = await r.json(); if(j && j.error) msg = j.error; }catch(_){}
-            setRtMsg(msg);
+            setRtMsg(msg); return;
         }
+
+        if(shapePath){
+            const s = await fetch(`${API}/routes/${encodeURIComponent(rtEditId)}/shape`, {
+                method:'PUT', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(shapePath)
+            });
+            if(!s.ok){
+                let msg = 'The line was saved, but its path was not.';
+                try{ const j = await s.json(); if(j && j.error) msg = j.error; }catch(_){}
+                setRtMsg(msg); return;   // il form resta aperto: c'e' ancora da fare
+            }
+        }
+        closeRouteForm();
+        await loadRoutesAdmin();
     }catch(e){ setRtMsg('Network error while saving.'); }
 }
 
 async function deleteRoute(id){
     const route = rtRoutes.find(x=>x.id===id);
-    if(!window.confirm(`Delete route ${route ? route.id : id}? This cannot be undone.`)) return;
+
+    // Si chiede PRIMA al backend cosa sparirebbe. Cancellare una linea con le
+    // sue corse e' irreversibile e le FK sono ON DELETE CASCADE, quindi il
+    // database lo farebbe in silenzio: "cancella LINEA_16" e "cancella 26
+    // corse e 208 arrivi" sono la stessa azione ma non la stessa frase, e chi
+    // clicca deve leggere la seconda.
+    let impact = null;
     try{
-        const r = await fetch(`${API}/routes/${encodeURIComponent(id)}`, {method:'DELETE'});
+        const r = await fetch(`${API}/routes/${encodeURIComponent(id)}/delete-impact`,
+                              {headers:{'Accept':'application/json'}});
+        if(r.ok) impact = await r.json();
+    }catch(e){ /* si prosegue con la conferma semplice */ }
+
+    const label = impact ? impact.label : (route ? route.id : id);
+    let question;
+    let cascade = false;
+
+    if(impact && impact.trips > 0){
+        cascade = true;
+        const lines = [
+            `Delete line ${label} AND everything scheduled on it?`,
+            '',
+            `· ${impact.trips} run(s)`,
+            `· ${impact.calls} scheduled arrival(s)`,
+            `· ${impact.patternStops} stop(s) in its route`,
+            `· ${impact.shapeVertices} drawn point(s)`
+        ];
+        if(impact.busesOnLine > 0){
+            lines.push('', `${impact.busesOnLine} bus(es) are running this line right now. `
+                         + 'They will disappear from the map at the next poll.');
+        }
+        lines.push('', 'The stops themselves are NOT deleted — only this line and its timetable.',
+                       'This cannot be undone.');
+        question = lines.join('\n');
+    }else{
+        question = `Delete line ${label}? This cannot be undone.`;
+    }
+
+    if(!window.confirm(question)) return;
+
+    try{
+        const url = `${API}/routes/${encodeURIComponent(id)}` + (cascade ? '?cascade=true' : '');
+        const r = await fetch(url, {method:'DELETE'});
         if(r.ok){ await loadRoutesAdmin(); }
         else{
             let msg = 'Delete failed.';
@@ -2257,6 +2691,39 @@ const rtClearBtn = document.getElementById('rtClearBtn');
 if(rtClearBtn) rtClearBtn.addEventListener('click', rtClearDrawing);
 
 // Routes > itinerary editor (defines the line's path on create)
+// Modifica del percorso di una linea esistente: carica il tracciato salvato
+// nell'editor e lo rende modificabile. Il pannello dei tempi resta chiuso —
+// in modifica gli orari non si scrivono a mano, li ricalcola la cascata.
+const rtEditPathBtn = document.getElementById('rtEditPathBtn');
+if(rtEditPathBtn) rtEditPathBtn.addEventListener('click', async () => {
+    if(!rtEditId) return;
+    rtEditPathBtn.disabled = true;
+    const hint = document.getElementById('rtPathHint');
+    try{
+        const itn = document.getElementById('rtItinerary');
+        if(itn) itn.hidden = false;
+        const stopsList = document.getElementById('rtStops');
+        if(stopsList){ stopsList.hidden = true; stopsList.innerHTML = ''; }
+        const addBtn = document.getElementById('rtAddStopBtn');
+        if(addBtn) addBtn.hidden = true;
+        const head = document.querySelector('#rtItinerary .tt-manual-head .bm-lbl');
+        if(head) head.textContent = 'Path and stops of this line';
+        const itnHint = document.querySelector('#rtItinerary .rt-itn-hint');
+        if(itnHint) itnHint.hidden = true;
+
+        const info = await rtLoadExistingPath(rtEditId);
+        if(hint){
+            hint.textContent = info.tripCount
+                ? `${info.tripCount} run(s) on this line will be re-timed if you change its stops.`
+                : 'This line has no runs yet.';
+        }
+    }catch(e){
+        if(hint) hint.textContent = 'Could not load the saved path of this line.';
+    }finally{
+        rtEditPathBtn.disabled = false;
+    }
+});
+
 const rtAddStopBtn = document.getElementById('rtAddStopBtn');
 if(rtAddStopBtn) rtAddStopBtn.addEventListener('click', () => itnAddStop('rtStops'));
 const rtStopsEl = document.getElementById('rtStops');

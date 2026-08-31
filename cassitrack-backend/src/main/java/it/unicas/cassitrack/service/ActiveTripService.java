@@ -451,11 +451,14 @@ public class ActiveTripService {
                 .build();
         tripRepository.save(trip);
 
+        // Non si copia più lo stopId: quale fermata occupi ogni posizione lo
+        // dice il pattern della linea, e la corsa nuova lo eredita per il solo
+        // fatto di appartenere a quella linea. Restano gli orari, che da qui
+        // in poi sono suoi e modificabili singolarmente.
         List<ScheduledStop> created = new ArrayList<>();
         for (ScheduledStop t : template) {
             ScheduledStop ss = new ScheduledStop();
             ss.setTrip(trip);
-            ss.setStopId(t.getStopId());
             ss.setStopSequence(t.getStopSequence());
             ss.setArrivalSeconds(departureSeconds + (t.getArrivalSeconds() - base));
             created.add(ss);

@@ -13,18 +13,44 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
 
     List<ScheduledStop> findByTripId(String tripId);
     List<ScheduledStop> findByTripRouteIdOrderByStopSequenceAsc(String routeId);
+    // JOIN FETCH su trip e route: da V26 la fermata di una riga di orario si
+    // ricava dal pattern della LINEA, quindi chi legge queste righe deve poter
+    // risalire alla linea. Trip.route e ScheduledStop.trip sono entrambi LAZY,
+    // e i chiamanti principali — RouteMatchingService, ETAService,
+    // TripResolutionService — girano nel gestore MQTT, cioè FUORI da una
+    // sessione Hibernate. Senza il fetch esplicito la navigazione fallisce con
+    // LazyInitializationException a ogni messaggio GPS.
     @Query("SELECT ss FROM ScheduledStop ss " +
-            "WHERE ss.trip.id = (SELECT MIN(t.id) FROM Trip t WHERE t.route.id = :routeId) " +
+            "JOIN FETCH ss.trip t JOIN FETCH t.route " +
+            "WHERE ss.trip.id = (SELECT MIN(x.id) FROM Trip x WHERE x.route.id = :routeId) " +
             "ORDER BY ss.stopSequence")
     List<ScheduledStop> findRepresentativeSequence(@Param("routeId") String routeId);
 
-    List<ScheduledStop> findByTripIdOrderByStopSequenceAsc(String tripId);
+    @Query("SELECT ss FROM ScheduledStop ss " +
+            "JOIN FETCH ss.trip t JOIN FETCH t.route " +
+            "WHERE ss.trip.id = :tripId " +
+            "ORDER BY ss.stopSequence")
+    List<ScheduledStop> findByTripIdOrderByStopSequenceAsc(@Param("tripId") String tripId);
 
+    /**
+     * Prossimi passaggi a una fermata.
+     *
+     * Da V26 la fermata non è più una colonna di ScheduledStop: si arriva a
+     * lei attraverso la linea della corsa, in RouteStop, confrontando la
+     * posizione nella sequenza.
+     */
+    // Join esplicita con ON, non una join implicita per virgola: mescolare
+    // JOIN FETCH e prodotto cartesiano nella stessa query è ambiguo e alcuni
+    // provider lo rifiutano. Qui il FETCH serve al chiamante (StopController
+    // legge trip.route per etichettare il passaggio), la join su RouteStop
+    // serve solo a filtrare per fermata.
     @Query("""
         SELECT ss FROM ScheduledStop ss
         JOIN FETCH ss.trip t
         JOIN FETCH t.route r
-        WHERE ss.stopId = :stopId
+        JOIN RouteStop rs
+          ON rs.routeId = r.id AND rs.stopSequence = ss.stopSequence
+        WHERE rs.stopId = :stopId
           AND ss.arrivalSeconds >= :fromSeconds
         ORDER BY ss.arrivalSeconds ASC
         """)
@@ -44,13 +70,25 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
             "FROM ScheduledStop s GROUP BY s.trip.route.id")
     List<Object[]> findOperatingHoursByRoute();
 
-    @Query("SELECT ss.trip.route.id, ss.trip.route.shortName, ss.trip.route.longName, " +
-            "s.id, s.name, s.lat, s.lon, MIN(ss.stopSequence) " +
-            "FROM ScheduledStop ss, Stop s " +
-            "WHERE ss.stopId = s.id AND s.active = true AND ss.trip.route.active = true " +
-            "GROUP BY ss.trip.route.id, ss.trip.route.shortName, ss.trip.route.longName, " +
-            "s.id, s.name, s.lat, s.lon " +
-            "ORDER BY ss.trip.route.id, MIN(ss.stopSequence)")
+    /**
+     * Le fermate di ogni linea attiva, in ordine di percorso.
+     *
+     * Da V26 legge direttamente il pattern invece di dedurlo dalle corse. Il
+     * GROUP BY che serviva a collassare le 1884 righe duplicate in 142 non ha
+     * più ragione di esistere: la tabella contiene già una riga per posizione.
+     * Ne segue anche che una linea senza corse programmate compare comunque,
+     * col suo percorso — prima spariva, il che era sbagliato.
+     */
+    @Query("""
+        SELECT r.id, r.shortName, r.longName,
+               s.id, s.name, s.lat, s.lon, rs.stopSequence
+        FROM RouteStop rs, Stop s, Route r
+        WHERE rs.stopId  = s.id
+          AND rs.routeId = r.id
+          AND s.active   = true
+          AND r.active   = true
+        ORDER BY r.id, rs.stopSequence
+        """)
     List<Object[]> findStopsGroupedByRoute();
 
     /**
@@ -203,10 +241,10 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
                                         @Param("to") int to,
                                         @Param("excludeTripId") String excludeTripId);
 
-    // FK guard for stop deletion: scheduled_stops.stop_id references stops(id)
-    // ON DELETE CASCADE — a delete would silently wipe timetable rows, so the
-    // controller counts references and refuses instead of relying on the DB.
-    long countByStopId(String stopId);
+    // Il guardiano sulla cancellazione di una fermata è passato a
+    // RouteStopRepository.countByStopId: da V26 è route_stops a referenziare
+    // stops, ed è quella FK (ON DELETE RESTRICT) che ora protegge la rete.
+    // Qui non resta nulla da contare: scheduled_stops non conosce le fermate.
 
     /**
      * Trips in service RIGHT NOW, for every bus at once.
@@ -291,10 +329,12 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
      * Columns: [0] stopId, [1] lat, [2] lon
      */
     @Query("""
-        SELECT ss.stopId, s.lat, s.lon
-        FROM ScheduledStop ss, Stop s
-        WHERE ss.stopId = s.id
-          AND ss.trip.id = :tripId
+        SELECT rs.stopId, s.lat, s.lon
+        FROM ScheduledStop ss, RouteStop rs, Stop s
+        WHERE ss.trip.id      = :tripId
+          AND rs.routeId      = ss.trip.route.id
+          AND rs.stopSequence = ss.stopSequence
+          AND rs.stopId       = s.id
           AND ss.stopSequence = (SELECT MAX(x.stopSequence) FROM ScheduledStop x
                                  WHERE x.trip.id = :tripId)
         """)
@@ -304,8 +344,9 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
      * Every call of every trip, joined with route, bus and stop — the exploded
      * timetable (one row per trip+stop), as exported to CSV.
      *
-     * Stop is joined on the id because ScheduledStop keeps stopId as a plain
-     * column, not as a JPA relation (same approach as findStopsGroupedByRoute).
+     * Da V26 la fermata arriva dal pattern della linea (RouteStop), non dalla
+     * riga di orario: è la join che ricostruisce la vista che scheduled_stops
+     * offriva da sola prima della normalizzazione.
      *
      * Columns: [0] tripId, [1] routeId, [2] routeShortName, [3] routeLongName,
      *          [4] busId, [5] targa, [6] stopSequence, [7] stopId,
@@ -314,9 +355,11 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     @Query("""
         SELECT ss.trip.id, ss.trip.route.id, ss.trip.route.shortName, ss.trip.route.longName,
                ss.trip.bus.busId, ss.trip.bus.targa,
-               ss.stopSequence, ss.stopId, s.name, ss.arrivalSeconds
-        FROM ScheduledStop ss, Stop s
-        WHERE ss.stopId = s.id
+               ss.stopSequence, rs.stopId, s.name, ss.arrivalSeconds
+        FROM ScheduledStop ss, RouteStop rs, Stop s
+        WHERE rs.routeId      = ss.trip.route.id
+          AND rs.stopSequence = ss.stopSequence
+          AND rs.stopId       = s.id
         ORDER BY ss.trip.route.id, ss.trip.id, ss.stopSequence
         """)
     List<Object[]> findAllStopTimes();

@@ -9,6 +9,7 @@ import it.unicas.cassitrack.model.ScheduledStop;
 import it.unicas.cassitrack.model.Stop;
 import it.unicas.cassitrack.repository.RouteRepository;
 import it.unicas.cassitrack.repository.ScheduledStopRepository;
+import it.unicas.cassitrack.repository.RouteStopRepository;
 import it.unicas.cassitrack.repository.StopRepository;
 import it.unicas.cassitrack.service.ETAService;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +47,7 @@ public class StopController {
     private final ScheduledStopRepository scheduledStopRepository;
     private final RouteRepository         routeRepository;
     private final StopRepository          stopRepository;
+    private final RouteStopRepository     routeStopRepository;
 
     @GetMapping("/{stopId}/arrivals")
     @Operation(
@@ -161,11 +163,15 @@ public class StopController {
     public ResponseEntity<?> deleteStop(@PathVariable String id) {
         Stop s = stopRepository.findById(id).orElse(null);
         if (s == null) return err(HttpStatus.NOT_FOUND, "Stop not found.");
-        long refs = scheduledStopRepository.countByStopId(id);
-        if (refs > 0)
+        // Da V26 è route_stops a referenziare stops, con ON DELETE RESTRICT.
+        // Il database rifiuterebbe comunque, ma con un vincolo violato; qui si
+        // dice prima, nominando le linee, così il gestore sa dove intervenire.
+        List<String> servingRoutes = routeStopRepository.findRouteIdsServing(id);
+        if (!servingRoutes.isEmpty())
             return err(HttpStatus.CONFLICT,
-                    "Cannot delete: this stop is used in " + refs + " scheduled arrival(s). "
-                            + "Remove it from the timetable first.");
+                    "Cannot delete: this stop is on the route of " + servingRoutes.size()
+                            + " line(s) (" + String.join(", ", servingRoutes) + "). "
+                            + "Remove it from those routes first.");
         stopRepository.delete(s);
         return ResponseEntity.noContent().build();
     }

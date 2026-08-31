@@ -19,6 +19,15 @@ public class FramesDTO {
     @JacksonXmlProperty(localName = "ServiceFrame")
     private ServiceFrameDTO serviceFrame;
 
+    /**
+     * Prima del TimetableFrame, perché le ServiceJourney che stanno lì
+     * referenziano i DayType definiti qui: un documento si legge dall'alto, e
+     * un riferimento che precede la sua definizione costringe il consumatore a
+     * due passate.
+     */
+    @JacksonXmlProperty(localName = "ServiceCalendarFrame")
+    private ServiceCalendarFrameDTO serviceCalendarFrame;
+
     @JacksonXmlProperty(localName = "TimetableFrame")
     private TimetableFrameDTO timetableFrame;
 }

@@ -8,6 +8,16 @@ import lombok.Data;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class CallDTO {
 
+    /**
+     * Obbligatorio: in NeTEx una Call è un DataManagedObject e ogni
+     * DataManagedObject deve essere identificabile.
+     */
+    @JacksonXmlProperty(isAttribute = true, localName = "id")
+    private String id;
+
+    @JacksonXmlProperty(isAttribute = true, localName = "version")
+    private String version = "1";
+
     @JacksonXmlProperty(isAttribute = true, localName = "order")
     private Integer order;
 

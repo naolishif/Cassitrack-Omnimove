@@ -731,7 +731,9 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .bus-icon-wrap{display:flex;flex-direction:column;align-items:center}
 .bus-icon-body{width:36px;height:36px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2.5px solid white;box-shadow:0 3px 14px rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center}
 .bus-icon-emoji{transform:rotate(45deg);font-size:15px}
-.bus-icon-label{margin-top:3px;color:white;font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:3px;box-shadow:0 2px 6px rgba(0,0,0,.5);white-space:nowrap}
+/* color e background arrivano da busIcon() via data-fg/data-bg: il bianco
+   fisso spariva sulle linee gialle o chiare. */
+.bus-icon-label{margin-top:3px;font-family:var(--mono);font-size:9px;padding:2px 5px;border-radius:3px;box-shadow:0 2px 6px rgba(0,0,0,.5);white-space:nowrap}
 
 /* Vehicle map popup */
 .vpop{padding:11px;min-width:200px}
@@ -745,19 +747,25 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .vpop-bar{height:100%;border-radius:2px}
 .vpop-crowd{font-family:var(--mono);font-size:9px;color:#4B5563;margin-top:3px}
 
-/* Status colour table — ON_TIME / SLIGHTLY_LATE / SIGNIFICANTLY_LATE / EARLY / UNKNOWN / NO_TRIP */
-.bus-icon-body[data-status="ON_TIME"],.bus-icon-label[data-status="ON_TIME"],
+/* Tavola dei colori di stato — solo la BOLLA e la striscia della card.
+   L'etichetta ne è uscita: adesso porta il colore della LINEA, applicato da
+   busIcon() via data-bg, perché bolla ed etichetta dicono due cose diverse.
+   Le soglie sono quelle di ScheduleAdherenceService (−1 / +3 / +10 min). */
+.bus-icon-body[data-status="ON_TIME"],
 .vcard-stripe[data-status="ON_TIME"]{background:#22C55E}
-.bus-icon-body[data-status="SLIGHTLY_LATE"],.bus-icon-label[data-status="SLIGHTLY_LATE"],
+.bus-icon-body[data-status="SLIGHTLY_LATE"],
 .vcard-stripe[data-status="SLIGHTLY_LATE"]{background:#F59E0B}
-.bus-icon-body[data-status="SIGNIFICANTLY_LATE"],.bus-icon-label[data-status="SIGNIFICANTLY_LATE"],
+.bus-icon-body[data-status="SIGNIFICANTLY_LATE"],
 .vcard-stripe[data-status="SIGNIFICANTLY_LATE"]{background:#EF4444}
-.bus-icon-body[data-status="EARLY"],.bus-icon-label[data-status="EARLY"],
+.bus-icon-body[data-status="EARLY"],
 .vcard-stripe[data-status="EARLY"]{background:#06B6D4}
-.bus-icon-body[data-status="UNKNOWN"],.bus-icon-label[data-status="UNKNOWN"],
+/* Grigio, non verde: "non lo so ancora" invece di affermare una puntualità
+   che nessuno ha misurato. È lo stato di ogni bus appena partito, prima di
+   raggiungere la sua prima fermata. */
+.bus-icon-body[data-status="UNKNOWN"],
 .vcard-stripe[data-status="UNKNOWN"]{background:#4B5563}
-.bus-icon-body[data-status="NO_TRIP"],.bus-icon-label[data-status="NO_TRIP"],
-.vcard-stripe[data-status="NO_TRIP"]{background:#F59E0B}
+.bus-icon-body[data-status="NO_TRIP"],
+.vcard-stripe[data-status="NO_TRIP"]{background:#4B5563}
 
 .vpop-id[data-status="ON_TIME"],.vpop-delay[data-status="ON_TIME"]{color:#22C55E}
 .vpop-id[data-status="SLIGHTLY_LATE"],.vpop-delay[data-status="SLIGHTLY_LATE"]{color:#F59E0B}
@@ -1305,6 +1313,10 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 
 /* Timetable: stop-by-stop time editor for one run */
 .tt-stops{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow:auto;padding-right:4px}
+/* display:flex batte l'attributo hidden, quindi nasconderla da JS con
+   .hidden = true non aveva alcun effetto: il pannello degli orari
+   restava visibile in modifica, dove non c'e' nulla da digitare. */
+.tt-stops[hidden]{display:none}
 .tt-stop-row{display:flex;align-items:center;gap:10px}
 .tt-seq{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:22px;text-align:right}
 .tt-stop-name{flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1572,3 +1584,44 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
         page-break-inside:avoid;
     }
 }
+
+/* Anteprima della modifica di percorso: cosa cambierebbe salvando.
+   Bordo ambra e non rosso — non e' un errore, e' una conseguenza da leggere. */
+.rt-preview{
+    border:1px solid rgba(245,158,11,.35);
+    background:rgba(245,158,11,.06);
+    border-radius:10px;
+    padding:12px 14px;
+    margin-bottom:12px;
+}
+.rt-preview[hidden]{display:none}
+.rt-preview-title{font-size:12px;font-weight:700;color:var(--amber);margin-bottom:8px}
+.rt-preview-grid{display:flex;gap:22px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;margin-bottom:8px}
+.rt-preview-lbl{color:var(--dim);text-transform:uppercase;letter-spacing:1px;font-size:9px;margin-right:6px}
+.rt-preview-list{list-style:none;margin:0 0 8px;padding:0;font-family:var(--mono);font-size:11px}
+.rt-preview-list li{padding:2px 0 2px 16px;position:relative}
+/* Il segno prima del nome dice il verso senza affidarsi al solo colore. */
+.rt-preview-list li.rt-add::before{content:'+';position:absolute;left:0;color:var(--green);font-weight:700}
+.rt-preview-list li.rt-del::before{content:'\2212';position:absolute;left:0;color:var(--red);font-weight:700}
+.rt-preview-list li.rt-add{color:var(--green)}
+.rt-preview-list li.rt-del{color:var(--red)}
+.rt-preview-note{font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--dim)}
+.rt-preview-ok{font-family:var(--mono);font-size:11px;color:var(--green)}
+
+/* Scarto dalla partenza, mostrato in sola lettura quando si modifica una
+   linea: e' una proprieta' del percorso, non un orario da compilare. */
+.tt-offset{font-family:var(--mono);font-size:11px;color:var(--dim);min-width:64px;text-align:right}
+.tt-offset-new{color:var(--green)}
+
+/* Vertici dell'editor di percorso.
+   Erano circleMarker di Leaflet (elementi SVG); ora sono divIcon, perche'
+   L.marker si puo' trascinare e circleMarker no. L'aspetto e' quello di
+   prima: cerchio ambra per le fermate, blu piu' piccolo per i punti. */
+.rt-vtx{display:block;width:100%;height:100%;border-radius:50%;box-sizing:border-box}
+.rt-vtx-plain{background:#3B82F6;border:1px solid #93C5FD;cursor:grab}
+.rt-vtx-plain:active{cursor:grabbing}
+.rt-vtx-stop{background:#F59E0B;border:2px solid #FCD34D;cursor:pointer}
+/* Il punto trascinato passa sopra gli altri e si ingrandisce appena, cosi'
+   si vede dove sta andando anche sopra un tratto affollato. */
+.leaflet-marker-draggable.leaflet-drag-target .rt-vtx-plain{transform:scale(1.35);box-shadow:0 0 0 3px rgba(59,130,246,.35)}
+.rt-hint-dim{color:var(--dim);opacity:.85}

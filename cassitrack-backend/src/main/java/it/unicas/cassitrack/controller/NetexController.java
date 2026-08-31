@@ -5,6 +5,7 @@ import it.unicas.cassitrack.model.*;
 import it.unicas.cassitrack.model.Route;
 import it.unicas.cassitrack.model.Stop;
 import it.unicas.cassitrack.repository.*;
+import it.unicas.cassitrack.service.RoutePatternService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -32,6 +33,16 @@ public class NetexController {
     private final BusRepository busRepository;
     private final RouteShapeRepository routeShapeRepository;
     private final DataVersionRepository dataVersionRepository;
+    private final RoutePatternService routePatternService;
+
+    /**
+     * L'unico tipo di giorno del documento. Costante perche' vi puntano sia il
+     * ServiceCalendarFrame che ogni ServiceJourney: scriverlo due volte a mano
+     * significherebbe poter sbagliare da una parte sola, e un riferimento a un
+     * DayType inesistente e' il genere di errore che nessun test coglie e ogni
+     * validatore segnala.
+     */
+    private static final String DAY_TYPE_ID = "CASSITRACK:DayType:Everyday";
 
     public NetexController(StopRepository stopRepository,
                            RouteRepository routeRepository,
@@ -39,7 +50,8 @@ public class NetexController {
                            ScheduledStopRepository scheduledStopRepository,
                            BusRepository busRepository,
                            RouteShapeRepository routeShapeRepository,
-                           DataVersionRepository dataVersionRepository) {
+                           DataVersionRepository dataVersionRepository,
+                           RoutePatternService routePatternService) {
         this.stopRepository = stopRepository;
         this.routeRepository = routeRepository;
         this.tripRepository = tripRepository;
@@ -47,6 +59,7 @@ public class NetexController {
         this.busRepository = busRepository;
         this.routeShapeRepository = routeShapeRepository;
         this.dataVersionRepository = dataVersionRepository;
+        this.routePatternService = routePatternService;
     }
 
     // ── helper: converti secondi in formato NeTEx HH:mm:ss ──────────────────
@@ -165,9 +178,16 @@ public class NetexController {
                 dto.setPresentation(new PresentationDTO(route.getColor(), route.getTextColor()));
             }
 
-            // Publish the path as a GML-style posList so consumers (OmniMove)
-            // get the geometry with the rest of the network. Omitted entirely
-            // for lines without a shape.
+            // La geometria stradale, dentro <Extensions>.
+            //
+            // Era un figlio diretto di <Line>, dove NeTEx non la prevede: una
+            // Line non ha un LineString, la geometria appartiene ai RouteLink
+            // via LinkSequenceProjection. Extensions è il punto che lo standard
+            // riserva al contenuto non previsto, quindi un validatore lo
+            // attraversa invece di fallire.
+            //
+            // Omessa del tutto per le linee senza tracciato: assente e vuota
+            // sono due affermazioni diverse.
             List<RouteShape> shape = shapesByRoute.get(route.getId());
             if (shape != null && shape.size() >= 2) {
                 StringBuilder pos = new StringBuilder(shape.size() * 22);
@@ -176,8 +196,12 @@ public class NetexController {
                     pos.append(p.getLat()).append(' ').append(p.getLon());
                 }
                 LineStringDTO ls = new LineStringDTO();
+                // gml:id obbligatorio, e deve essere un NCName: non può
+                // iniziare con una cifra né contenere ':', quindi l'id della
+                // linea da solo non basterebbe.
+                ls.setGmlId("CASSITRACK-shape-" + route.getId().replaceAll("[^A-Za-z0-9_-]", "_"));
                 ls.setPosList(pos.toString());
-                dto.setLineString(ls);
+                dto.setExtensions(new LineExtensionsDTO(ls));
             }
             return dto;
         }).collect(Collectors.toList());
@@ -187,6 +211,9 @@ public class NetexController {
             ServiceJourneyDTO journeyDto = new ServiceJourneyDTO();
             journeyDto.setId("CASSITRACK:ServiceJourney:" + trip.getId());
             journeyDto.setLineRef(new RefDTO("CASSITRACK:Line:" + trip.getRoute().getId()));
+            // Ogni corsa dichiara i giorni in cui vale. Uno solo, perche' il
+            // database non distingue: vedi ServiceCalendarFrameDTO.
+            journeyDto.setDayTypes(List.of(new RefDTO(DAY_TYPE_ID)));
 
             // VehicleRef in extensions (associazione non standard nel core NeTEx)
             if (trip.getBus() != null) {
@@ -194,14 +221,32 @@ public class NetexController {
                         new ServiceJourneyExtensionsDTO("CASSITRACK:Vehicle:" + trip.getBus().getBusId()));
             }
 
-            List<ScheduledStop> stopsForThisTrip = scheduledStopRepository.findByTripId(trip.getId());
+            // Ordinata: le Call di una ServiceJourney descrivono un percorso, e
+            // pubblicarle nell'ordine in cui il database le restituisce non è
+            // una garanzia che il consumatore possa dare per buona.
+            List<ScheduledStop> stopsForThisTrip =
+                    scheduledStopRepository.findByTripIdOrderByStopSequenceAsc(trip.getId());
+            // Da V26 la fermata arriva dal pattern della linea. Il formato sul
+            // filo NON cambia: si continuano a emettere Call che portano sia la
+            // fermata sia l'orario. Emettere un vero ServiceJourneyPattern
+            // sarebbe ora possibile e più aderente allo standard, ma è un
+            // cambio di contratto verso OmniMove e va concordato, non subito.
+            String patternRouteId = trip.getRoute() != null ? trip.getRoute().getId() : null;
             if (!stopsForThisTrip.isEmpty()) {
                 int totalStops = stopsForThisTrip.size();
                 List<CallDTO> netexCalls = stopsForThisTrip.stream().map(sStop -> {
                     CallDTO callDto = new CallDTO();
+                    // id obbligatorio. Corsa + posizione lo rende univoco in
+                    // tutto il documento anche sugli anelli, dove la stessa
+                    // fermata compare due volte nella stessa corsa.
+                    callDto.setId("CASSITRACK:Call:" + trip.getId()
+                                  + ":" + sStop.getStopSequence());
                     callDto.setOrder(sStop.getStopSequence());
-                    callDto.setScheduledStopPointRef(
-                            new RefDTO("CASSITRACK:ScheduledStopPoint:" + sStop.getStopId()));
+                    String patternStopId = routePatternService.stopIdAt(
+                            patternRouteId, sStop.getStopSequence());
+                    callDto.setScheduledStopPointRef(new RefDTO(
+                            "CASSITRACK:ScheduledStopPoint:"
+                            + (patternStopId != null ? patternStopId : "UNKNOWN")));
                     String time = secondsToTime(sStop.getArrivalSeconds());
                     if (time != null) {
                         int pos = sStop.getStopSequence();
@@ -219,6 +264,15 @@ public class NetexController {
 
             return journeyDto;
         }).collect(Collectors.toList());
+
+        // ── SERVICE CALENDAR FRAME ──────────────────────────────────────
+        // Un solo DayType: il database ha un orario unico ripetuto ogni
+        // giorno, e inventare distinzioni che i dati non fanno sarebbe
+        // peggio che dichiarare la semplicita' vera.
+        ServiceCalendarFrameDTO calendarFrame = new ServiceCalendarFrameDTO();
+        calendarFrame.setDayTypes(List.of(new DayTypeDTO(
+                DAY_TYPE_ID, "Every day",
+                new PropertiesOfDayDTO(new PropertyOfDayDTO()))));
 
         ServiceFrameDTO serviceFrame = new ServiceFrameDTO();
         serviceFrame.setScheduledStopPoints(netexSSPs);
@@ -253,6 +307,7 @@ public class NetexController {
         frames.setResourceFrame(resourceFrame);
         frames.setSiteFrame(siteFrame);
         frames.setServiceFrame(serviceFrame);
+        frames.setServiceCalendarFrame(calendarFrame);
         frames.setTimetableFrame(timetableFrame);
 
         CompositeFrameDTO compositeFrame = new CompositeFrameDTO();
