@@ -7,11 +7,16 @@ import it.unicas.omnimove.dto.ChatResponse;
 import it.unicas.omnimove.dto.StopArrivalDTO;
 import it.unicas.omnimove.dto.VehicleDTO;
 import it.unicas.omnimove.model.JourneyLog;
+import it.unicas.omnimove.model.UserConsent;
 import it.unicas.omnimove.model.Route;
 import it.unicas.omnimove.model.Stop;
+import it.unicas.omnimove.model.FavoriteStop;
+import it.unicas.omnimove.model.UserPreferences;
+import it.unicas.omnimove.repository.FavoriteStopRepository;
 import it.unicas.omnimove.repository.JourneyLogRepository;
 import it.unicas.omnimove.repository.RouteRepository;
 import it.unicas.omnimove.repository.StopRepository;
+import it.unicas.omnimove.repository.UserPreferencesRepository;
 import it.unicas.omnimove.util.GeoUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +51,9 @@ public class AiOrchestrationService {
     private final StopRepository stopRepository;
     private final RouteRepository routeRepository;
     private final JourneyLogRepository journeyLogRepository;
+    private final FavoriteStopRepository favoriteStopRepository;
+    private final UserPreferencesRepository preferencesRepository;
+    private final ConsentService consentService;
     private final WeatherService weatherService;
     private final GreenIndexService greenIndexService;
     private final BikeSharingService bikeSharingService;
@@ -68,6 +76,9 @@ public class AiOrchestrationService {
                                   StopRepository stopRepository,
                                   RouteRepository routeRepository,
                                   JourneyLogRepository journeyLogRepository,
+                                  FavoriteStopRepository favoriteStopRepository,
+                                  UserPreferencesRepository preferencesRepository,
+                                  ConsentService consentService,
                                   WeatherService weatherService,
                                   GreenIndexService greenIndexService,
                                   BikeSharingService bikeSharingService) {
@@ -75,6 +86,9 @@ public class AiOrchestrationService {
         this.stopRepository = stopRepository;
         this.routeRepository = routeRepository;
         this.journeyLogRepository = journeyLogRepository;
+        this.favoriteStopRepository = favoriteStopRepository;
+        this.preferencesRepository = preferencesRepository;
+        this.consentService = consentService;
         this.weatherService = weatherService;
         this.greenIndexService = greenIndexService;
         this.bikeSharingService = bikeSharingService;
@@ -340,44 +354,19 @@ public class AiOrchestrationService {
             sb.append("\nWEATHER: unavailable.\n");
         }
 
-        // ── 2. Personalisation (logged-in traveller history) ────────────
-        if (userId != null) {
-            try {
-                List<JourneyLog> trips = journeyLogRepository.findByUserId(userId);
-                if (!trips.isEmpty()) {
-                    trips.sort(Comparator.comparing(JourneyLog::getCreatedAt).reversed());
-                    List<JourneyLog> recent = trips.stream().limit(5).toList();
-
-                    sb.append("\n=== THIS TRAVELLER'S RECENT JOURNEYS ===\n");
-                    recent.forEach(j -> sb
-                            .append("  - ").append(j.getMode())
-                            .append(" ").append(j.getOriginName())
-                            .append(" \u2192 ").append(j.getDestName())
-                            .append(" (Green ").append(j.getGreenIndex())
-                            .append(", \u20ac").append(String.format("%.2f", j.getCostEuros()))
-                            .append(")\n"));
-
-                    // Most-used mode — lets the AI personalise suggestions
-                    Map<String, Long> modeCount = new HashMap<>();
-                    trips.forEach(j -> modeCount.merge(j.getMode(), 1L, Long::sum));
-                    String favMode = modeCount.entrySet().stream()
-                            .max(Map.Entry.comparingByValue())
-                            .map(Map.Entry::getKey).orElse(null);
-                    if (favMode != null)
-                        sb.append("  Preferred mode: ").append(favMode)
-                                .append(" (used ").append(modeCount.get(favMode)).append(" times)\n");
-
-                    double totalCo2Saved = trips.stream()
-                            .mapToDouble(j -> Math.max(0,
-                                    greenIndexService.computeCo2Grams("CAR", j.getDistanceKm())
-                                            - j.getCo2Grams()))
-                            .sum();
-                    sb.append("  Total CO\u2082 saved vs car: ")
-                            .append(String.format("%.1f", totalCo2Saved / 1000.0)).append(" kg\n");
-                }
-            } catch (Exception e) {
-                log.warn("Could not load traveller history: {}", e.getMessage());
-            }
+        // ── 2. Personalisation — only with the traveller's consent ──────
+        //
+        // Everything below is this person's own history, and it went into the
+        // prompt for everyone: the PROFILING consent was collected at sign-up,
+        // stored in the ledger, shown as a switch in Preferences, and then read
+        // by nobody. A consent asked for and ignored is worse than one never
+        // asked for, so the switch now decides.
+        //
+        // What is NOT gated: lines, stops, live buses, weather, tariffs. Those
+        // are the service the traveller asked for, identical for everyone, and
+        // the assistant is no use without them.
+        if (userId != null && hasProfilingConsent(userId)) {
+            appendTravellerProfile(sb, userId);
         }
 
         sb.append("\nALL STOPS: ");
@@ -459,6 +448,129 @@ public class AiOrchestrationService {
             sb.append("    (").append(located.size() - FLEET_DETAIL_LIMIT)
               .append(" more not listed — the map shows them all.)\n");
         return sb.toString();
+    }
+
+    /**
+     * Whether this traveller has agreed to their history being used.
+     *
+     * <p>Absent means no: PROFILING is a real consent under art. 6(1)(a), so
+     * silence is a refusal, and an acknowledgement given under a superseded
+     * privacy notice is reported as false by the ledger and counts as one too.
+     * Any failure reading it is also treated as a no — the assistant losing some
+     * context is a far smaller problem than using data we were told not to.
+     */
+    private boolean hasProfilingConsent(Long userId) {
+        try {
+            return Boolean.TRUE.equals(
+                    consentService.currentStateFor(userId).get(UserConsent.TYPE_PROFILING));
+        } catch (Exception e) {
+            log.warn("Could not read the profiling consent for user {}: {}", userId, e.getMessage());
+            return false;
+        }
+    }
+
+    /** How many journeys are listed one by one before the rest are summarised. */
+    private static final int JOURNEY_DETAIL_LIMIT = 150;
+
+    /**
+     * The traveller's own picture: every journey, their preferences, their
+     * saved stops.
+     *
+     * <p>Every journey rather than the last five — a pattern is what makes a
+     * suggestion personal, and five trips do not show one. Retention caps the
+     * history at twelve months, so "every" is already a bounded number; the
+     * limit below is only there so that one unusually heavy user cannot push
+     * the request past what the model will read.
+     */
+    private void appendTravellerProfile(StringBuilder sb, Long userId) {
+        try {
+            List<JourneyLog> trips = journeyLogRepository.findByUserId(userId);
+            if (!trips.isEmpty()) {
+                trips.sort(Comparator.comparing(JourneyLog::getCreatedAt).reversed());
+
+                sb.append("\n=== THIS TRAVELLER'S JOURNEYS (")
+                  .append(trips.size()).append(", newest first) ===\n");
+                trips.stream().limit(JOURNEY_DETAIL_LIMIT).forEach(j -> sb
+                        .append("  - ").append(j.getCreatedAt().toLocalDate())
+                        .append(" ").append(j.getMode())
+                        .append(" ").append(j.getOriginName())
+                        .append(" \u2192 ").append(j.getDestName())
+                        .append(" (Green ").append(j.getGreenIndex())
+                        .append(", \u20ac").append(String.format(java.util.Locale.ROOT, "%.2f", j.getCostEuros()))
+                        .append(")\n"));
+                if (trips.size() > JOURNEY_DETAIL_LIMIT)
+                    sb.append("  (").append(trips.size() - JOURNEY_DETAIL_LIMIT)
+                      .append(" older journeys not listed; the totals below count them all.)\n");
+
+                Map<String, Long> modeCount = new HashMap<>();
+                trips.forEach(j -> modeCount.merge(j.getMode(), 1L, Long::sum));
+                String favMode = modeCount.entrySet().stream()
+                        .max(Map.Entry.comparingByValue())
+                        .map(Map.Entry::getKey).orElse(null);
+                if (favMode != null)
+                    sb.append("  Preferred mode: ").append(favMode)
+                      .append(" (used ").append(modeCount.get(favMode)).append(" times)\n");
+
+                double totalCo2Saved = trips.stream()
+                        .mapToDouble(j -> Math.max(0,
+                                greenIndexService.computeCo2Grams("CAR", j.getDistanceKm())
+                                        - j.getCo2Grams()))
+                        .sum();
+                sb.append("  Total CO\u2082 saved vs car: ")
+                  .append(String.format(java.util.Locale.ROOT, "%.1f", totalCo2Saved / 1000.0))
+                  .append(" kg\n");
+            }
+        } catch (Exception e) {
+            log.warn("Could not load traveller history: {}", e.getMessage());
+        }
+
+        // ── Saved stops. Names, not ids: "UNI" means nothing to the model. ──
+        try {
+            List<FavoriteStop> favourites = favoriteStopRepository.findByUserIdOrderByCreatedAtAsc(userId);
+            if (!favourites.isEmpty()) {
+                sb.append("\nTHIS TRAVELLER'S SAVED STOPS: ");
+                sb.append(favourites.stream()
+                        .map(f -> stopRepository.findById(f.getStopId())
+                                .map(Stop::getName).orElse(f.getStopId()))
+                        .reduce((a, b) -> a + ", " + b).orElse(""));
+                sb.append("\n  These are the places they come back to — worth preferring when a\n")
+                  .append("  question does not name one.\n");
+            }
+        } catch (Exception e) {
+            log.warn("Could not load favourite stops: {}", e.getMessage());
+        }
+
+        // ── Settings they chose themselves, so answers do not contradict them ──
+        try {
+            preferencesRepository.findById(userId).ifPresent(p -> {
+                sb.append("\nTHIS TRAVELLER'S PREFERENCES:\n");
+                if (p.getDefaultJourneyMode() != null)
+                    sb.append("  Default mode: ").append(p.getDefaultJourneyMode()).append("\n");
+                appendFlag(sb, "Avoids crowded buses", p.getAvoidHighOccupancy());
+                appendFlag(sb, "Wants walking legs shown", p.getShowWalking());
+                appendFlag(sb, "Prefers a bike over the bus", p.getPreferBikeOverBus());
+                appendFlag(sb, "Prefers the bus when it rains", p.getRainPrefersBus());
+                if (p.getMaxBikeWalkMetres() != null)
+                    sb.append("  Will walk at most ").append(p.getMaxBikeWalkMetres())
+                      .append(" m to reach a bike or scooter\n");
+                if (p.getOccupancyThresholdPct() != null)
+                    sb.append("  Considers a bus crowded above ")
+                      .append(p.getOccupancyThresholdPct()).append("% full\n");
+                // The onboarding answers, 1-5. What the traveller says matters to
+                // them, which is not always what their journeys suggest.
+                sb.append("  Priorities out of 5 — speed ").append(p.getAnswerTime())
+                  .append(", cost ").append(p.getAnswerCost())
+                  .append(", environment ").append(p.getAnswerEco())
+                  .append(", reliability ").append(p.getAnswerReliability()).append("\n");
+            });
+        } catch (Exception e) {
+            log.warn("Could not load traveller preferences: {}", e.getMessage());
+        }
+    }
+
+    private static void appendFlag(StringBuilder sb, String label, Boolean value) {
+        if (value != null) sb.append("  ").append(label).append(": ")
+                             .append(value ? "yes" : "no").append("\n");
     }
 
     // ════════════════════════════════════════════════════════════════════
