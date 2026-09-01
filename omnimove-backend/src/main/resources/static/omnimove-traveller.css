@@ -2412,6 +2412,68 @@ body {
     .me-halo { animation: none; transform: scale(1.2); opacity: 0.5; }
 }
 
+/* ── The card the assistant is pointing at ──
+   The traveller comes back from a chat to a list of five cards and has to find
+   the one that was just discussed. An accent edge and a line saying why, rather
+   than a colour alone: "the one in blue" means nothing a minute later, and the
+   reason is what makes the recommendation checkable instead of obeyed. */
+.route-card--ai {
+    border: 2px solid var(--primary, #2563eb) !important;
+    box-shadow: 0 4px 18px rgba(37, 99, 235, .18);
+}
+.ai-reco-tag {
+    display: block;
+    margin: -2px 0 8px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .2px;
+    color: var(--primary, #2563eb);
+    text-transform: none;
+}
+
+/* ── How old the proposed routes are ──
+   The cards show absolute times, which never look stale even when they are, so
+   this is the only thing on screen that says the list is being kept true.
+   Deliberately quiet: it is reassurance, not information to act on. */
+.routes-freshness {
+    text-align: center;
+    padding: 10px 0 2px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-soft);
+    opacity: .75;
+}
+
+/* ── Position along a started journey ──
+   The blue dot above says "you are somewhere"; this says "you are HERE on this
+   route, pointing that way". It keeps the dot's blue — the colour is what makes
+   both read as the traveller — and changes the shape, because a heading is
+   something a circle cannot express. It sits ON the drawn line, snapped to it,
+   so the eye reads position along the route rather than distance from it. */
+.jr-arrow-icon { background: none; border: none; }
+.jr-arrow {
+    width: 30px;
+    height: 30px;
+    /* The rotation is written inline from the route's own bearing */
+    transition: transform .3s ease-out;
+    transform-origin: 50% 50%;
+    will-change: transform;
+}
+.jr-arrow svg { display: block; width: 30px; height: 30px; }
+/* White casing over the coloured route line it stands on, dark hairline over
+   pale streets — the same two-ring trick that keeps .me-dot legible anywhere */
+.jr-arrow .jr-arrow-body {
+    fill: #2563eb;
+    stroke: #ffffff;
+    stroke-width: 2.4;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 1px 3px rgba(15, 23, 42, 0.45));
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .jr-arrow { transition: none; }
+}
+
 /* ── Network legend — which colour is which line ──
    The map opens with every line drawn on it, so the legend is what turns a
    tangle of colours into a readable network: one chip per line, tap to bring

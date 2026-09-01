@@ -302,6 +302,7 @@ public class TravellerController {
                 .preferBikeOverBus(false)
                 .rainPrefersBus(true)
                 .notifyDelays(true)
+                .showLivePosition(true)
                 .maxBikeWalkMetres(500)
                 .answerTime(3).answerCost(3).answerEco(3).answerReliability(3)
                 .occupancyThresholdPct(80)
@@ -326,6 +327,7 @@ public class TravellerController {
         if (from.getPreferBikeOverBus()    != null) into.setPreferBikeOverBus(from.getPreferBikeOverBus());
         if (from.getRainPrefersBus()       != null) into.setRainPrefersBus(from.getRainPrefersBus());
         if (from.getNotifyDelays()         != null) into.setNotifyDelays(from.getNotifyDelays());
+        if (from.getShowLivePosition()     != null) into.setShowLivePosition(from.getShowLivePosition());
         if (from.getMaxBikeWalkMetres()    != null) into.setMaxBikeWalkMetres(from.getMaxBikeWalkMetres());
         if (from.getAnswerTime()           != null) into.setAnswerTime(from.getAnswerTime());
         if (from.getAnswerCost()           != null) into.setAnswerCost(from.getAnswerCost());

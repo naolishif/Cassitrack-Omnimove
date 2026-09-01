@@ -286,7 +286,11 @@ public class JourneyController {
         if (principal != null && !rateLimiter.allowJourneySearch(principal.getUsername()))
             return ResponseEntity.status(429).build();
 
-        journeyEventService.recordJourneySearchQuery(); // FR-OM-009: count raw searches
+        // FR-OM-009: count raw searches — but only the ones a person asked for.
+        // The results screen re-plans itself while it is open so the departure
+        // times stay true, and those repeats are the same question, not new ones.
+        if (!request.isRefresh())
+            journeyEventService.recordJourneySearchQuery();
         JourneyResponse response = plannerService.plan(request);
 
         return ResponseEntity.ok(response);
