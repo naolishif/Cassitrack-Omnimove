@@ -116,6 +116,7 @@ const OMNI_T = {
     msg_server_short:'Cannot reach server.',
     // Sign in with Google
     or_continue:'or',
+    google_unicas_only:'Only accounts of the University of Cassino and Southern Lazio',
     // Account → Password
     section_password:'Password',
     pwd_intro_change:'Change the password you use to sign in.',
@@ -578,6 +579,7 @@ const OMNI_T = {
     msg_server_short:'Impossibile raggiungere il server.',
     // Accesso con Google
     or_continue:'oppure',
+    google_unicas_only:'Solo account dell\'Universit\u00e0 degli Studi di Cassino e del Lazio Meridionale',
     // Account → Password
     section_password:'Password',
     pwd_intro_change:'Cambia la password che usi per accedere.',
