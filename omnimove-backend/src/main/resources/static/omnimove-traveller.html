@@ -581,6 +581,16 @@
                         </div>
                     </div>
                     <div class="settings-section">
+                        <span class="section-label" data-i18n="label_live_journey">While travelling</span>
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label" data-i18n="pref_live_position">Show my position on the route</div>
+                                <div class="pref-desc" data-i18n="desc_live_position">Once a journey starts, an arrow on the drawn route shows where you are along it, and we notice when you reach your destination. Your position stays on this device — it is never sent or saved. Turn it off and, while a journey is running, nothing will say where you are relative to the route, and arrival will only be declared when you tap End Journey or when the time runs out.</div>
+                            </div>
+                            <div class="toggle on" id="prefLivePosition" onclick="togglePref(this)"></div>
+                        </div>
+                    </div>
+                    <div class="settings-section">
                         <span class="section-label" data-i18n="label_save_changes">Save Changes</span>
                         <button class="action-btn btn-green" onclick="savePreferences()"
                                 style="width:auto;padding:9px 22px;font-size:13px"
@@ -821,6 +831,45 @@
         <div class="confirm-actions">
             <button class="confirm-no" onclick="closeLogoutModal()" data-i18n="btn_no">No</button>
             <button class="confirm-yes" id="confirmLogoutBtn" onclick="logout()" data-i18n="btn_yes">Yes</button>
+        </div>
+    </div>
+</div>
+
+<!-- The assistant asking to press Start Journey. It is the one thing it does
+     that records a trip — the fare, the CO2, the eco points, the Last Routes
+     entry — so the last step across that line is the traveller's, not the
+     model's judgement of whether they agreed. -->
+<div id="aiStartModal" class="confirm-modal" onclick="if (event.target === this) cancelAiStart()">
+    <div class="confirm-card" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="aiStartTitle">
+        <div class="confirm-icon" style="color:var(--primary,#2563eb)">🤖</div>
+        <div class="confirm-title" id="aiStartTitle" data-i18n="ai_start_title">Start this journey?</div>
+        <p class="confirm-body" id="aiStartBody"></p>
+        <div class="confirm-actions">
+            <button class="confirm-no" onclick="cancelAiStart()" data-i18n="btn_cancel">Cancel</button>
+            <button class="confirm-yes" style="background:var(--green,#10b981)"
+                    onclick="confirmAiStart()" data-i18n="btn_start_journey">Start Journey</button>
+        </div>
+    </div>
+</div>
+
+<!-- The end of a journey that nobody tapped End Journey for: either the
+     destination was reached, or the estimate ran out. The second is a question,
+     not an announcement — the traveller may still be on the bus — so it offers
+     Resume, and resuming leaves the running journey untouched rather than
+     starting a new one. -->
+<div id="arrivalModal" class="confirm-modal" onclick="onJourneyEndBackdrop(event)">
+    <div class="confirm-card" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="arrivalTitle">
+        <div class="confirm-icon" id="arrivalIcon" style="color:var(--green,#10b981)">🎉</div>
+        <!-- No data-i18n on the title or the buttons: which of the two endings
+             this is gets decided when the popup opens, and applyTranslations()
+             would put the arrival wording back over a journey that merely ran
+             out of time. -->
+        <div class="confirm-title" id="arrivalTitle">You have arrived</div>
+        <p class="confirm-body" id="arrivalBody"></p>
+        <div class="confirm-actions">
+            <button class="confirm-no" id="journeyEndDismissBtn" onclick="dismissJourneyEndPopup()">OK</button>
+            <button class="confirm-yes" id="journeyEndResumeBtn" style="background:var(--green,#10b981);display:none"
+                    onclick="resumeJourney()">Resume</button>
         </div>
     </div>
 </div>

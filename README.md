@@ -1,528 +1,512 @@
 # CASSITRACK + OMNIMOVE
 ### Real-Time Smart Mobility Platform for Cassino
 **University of Cassino and Southern Lazio (UNICAS) — 2025/2026**
-**CINI Smart City University Challenge — 10th Edition**
+**I-CiTies Challenge 2026 — Brescia, September 2026**
 
 ---
 
 ## What Is This?
-Two interconnected systems built for Cassino's **Bus 16** (MAGNI Autoservizi),
 
-CASSITRACK is a real-time bus fleet monitoring system built for **MAGNI Autoservizi Linea 16**
-— the bus that connects Cassino city centre to the UNICAS Campus via Via Folcara.
+Two Spring Boot systems that together cover the urban bus network of Cassino:
+one watches the fleet, the other plans journeys on top of it.
 
-**OMNIMOVE** is the multimodal journey planning layer built on top of CASSITRACK,
-allowing passengers to compare Bus, Bike, Scooter, and Walking options with real-time data,
-cost estimates, and Green Index CO₂ scoring.
+**CASSITRACK** is the fleet-monitoring backend. It ingests on-board telemetry over
+MQTT, resolves each position to a trip, a route and a stop, computes schedule
+adherence, and publishes the result as a REST/SSE API plus two interoperability
+feeds (NeTEx for the static network, SIRI for the live one).
 
-The motivation is personal and real: Bus 16 has **zero live tracking**.
-Passengers stand at the stop with no idea if the bus is 2 minutes away or 20. This system fixes that.
+**OMNIMOVE** is the traveller-facing multimodal journey planner. It mirrors
+CASSITRACK's network over the NeTEx feed, consumes its live telemetry over SSE,
+and ranks Bus / Bike / Scooter / Walk options by time, cost, CO₂ or a personal
+preference profile.
 
-CASSITRACK is the backend of the OMNIMOVE smart mobility platform.  
-It receives GPS positions from buses (via MQTT), stores them, and  
-exposes a REST API so OMNIMOVE and the fleet dashboard can show live bus locations and estimated arrival times.
+The two never share a database. OMNIMOVE talks to CASSITRACK **only over HTTP**,
+which is what makes them separately deployable.
+
+| System | What it does | Port | Base path |
+|---|---|---|---|
+| **CASSITRACK** | Fleet monitoring — live positions, trip resolution, delay, analytics, data management | `8280` | `/cassitrack` |
+| **OMNIMOVE** | Journey planning — multimodal search, Green Index, traveller app, admin console | `8180` | `/omnimove` |
+
 ---
 
-| System | What it does | Port   |
-|---|---|--------|
-| **CASSITRACK** | Real-time fleet monitoring — live bus positions, ETA, schedule adherence | `8280` |
-| **OMNIMOVE** | Multimodal journey planner — bus, walk, bike, scooter with Green Index CO₂ scoring | `8180` |
+## The Network It Runs On
 
+The data is the real Cassino urban network, not a demo line:
 
+| | |
+|---|---|
+| Lines | **18**, each uniquely numbered and colour-coded; every non-loop line also has its return as a line of its own (`<id>_R`) |
+| Stops | **45**, with real coordinates (a handful interpolated between surveyed ones) |
+| Trips | Departures **every 30 minutes, 06:00 → 23:00, both directions** |
+| Vehicles | **37** registered buses; four of them are bound to physical ESP32/OBU units (`BUS1`…`BUS4`) |
+| Geometry | All 18 lines have a road-routed polyline in `route_shapes` (OSRM-generated, editable on the map), so buses follow streets instead of cutting across blocks |
+
+The stop pattern belongs to the **line** (`route_stops`), the times belong to the
+**trip** (`scheduled_stops`) — the same JourneyPattern / ServiceJourney split
+Transmodel and NeTEx make. See `V27__route_stop_patterns.sql`.
+
+---
 
 ## System Architecture
 
 ```
-Bus (ESP32 GPS tracker)  ←→  GPS Simulator (Python)
-         ↓  LoRa / MQTT
-Eclipse Mosquitto Broker
-         ↓
-Spring Boot Backend (port 8280)
-  ├── PostgreSQL + PostGIS   (routes, stops, schedules)
-  ├── InfluxDB               (GPS time-series history)
-  ├── Redis                  (live position cache)
-  ├── Schedule Adherence     (on time / late detection)
-  ├── ETA Service            (arrival predictions)
-  ├── Google Maps API        (traffic-aware travel times)
-  ├── AI Orchestration       (Claude API + RAG pattern)
-  ├── GTFS Realtime Feed     (national NAP standard)
-  └── Journey Planner        (multimodal OMNIMOVE)
-         ↓
-REST API (OpenAPI 3.0 documented)
-         ↓
-├── cassitrack-fleetmanager.html   (desktop dashboard, includes live map)
-└── cassitrack-pwa/          (mobile PWA, installable)
+ESP32 / OBU units                    gps_simulator3.py  ·  tools/simulate_bus*.py
+        │  MQTT/TLS 8883                      │  MQTT 1883
+        │  cassitrack/obu/{id}/pos            │  cassitrack/{vehicle_id}/position
+        └──────────────┬──────────────────────┘
+                       ▼
+        Eclipse Mosquitto (auth + per-topic ACL)
+                       ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │  CASSITRACK — Spring Boot, port 8280                    │
+  │    MqttMessageHandler   vehicle → trip → stop → delay   │
+  │    PostgreSQL+PostGIS   routes, stops, trips, users     │
+  │    InfluxDB             telemetry time series           │
+  │    Redis                live vehicle state              │
+  │    Analytics · Reports (CSV/XLSX/PDF) · Data management  │
+  └───────┬──────────────┬───────────────┬──────────────────┘
+          │ NeTEx        │ SSE           │ SIRI VM
+          │ /api/static  │ /telemetry    │ /api/v1/siri
+          ▼              ▼               ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │  OMNIMOVE — Spring Boot, port 8180                      │
+  │    StaticDataSyncService   mirrors the network          │
+  │    TelemetrySyncService    live buses → Redis + Influx  │
+  │    JourneyPlannerService   Dijkstra + transfers         │
+  │    GreenIndexService · PreferenceWeights · Elerent      │
+  │    GDPR: consents · retention · export · research tiers │
+  └───────┬─────────────────────────────────────────────────┘
+          │
+          ├── Google Maps Distance Matrix   (traffic-aware ETA)
+          ├── Elerent / RideAtom            (bike & scooter availability)
+          ├── OpenWeatherMap                (weather-aware ranking)
+          └── Regolo (Seeweb, EU)           (AI assistant, OpenAI-compatible)
+
+  Static frontends are served by the backends themselves, from src/main/resources/static.
 ```
 
 ---
 
 ## Features
 
-| Feature | Description | Status |
+### CASSITRACK — fleet side
+
+| Feature | Notes |
+|---|---|
+| Live bus tracking | MQTT ingestion, position validated (bounding box + max age) before it is trusted |
+| Two MQTT inputs | Local broker for simulators; optional TLS broker for the real OBU/ESP32 compact schema |
+| Trip resolution | Vehicle → bus → current trip → route, from the registry and the clock |
+| Schedule adherence | `EARLY` / `ON_TIME` / `SLIGHTLY_LATE` (>3 min) / `SIGNIFICANTLY_LATE` (>10 min) |
+| Next-stop matching | Haversine + approach/recession gates, so a stop is "reached" once and not oscillating |
+| Live map | Fleet-manager dashboard with lines drawn from `route_shapes` in each line's colour |
+| Analytics | Active lines, average delay, delay by route, busiest hours, passengers, CO₂, network view |
+| Report export | The same dataset as CSV, XLSX or PDF — no extra dependencies, written by hand |
+| Data management | CRUD for buses, stops, routes and trips, plus a map route-shape editor with preview |
+| Admin panel | Users, roles, login/activity audit |
+| NeTEx feed | Full static network as a NeTEx `PublicationDelivery` document |
+| Version counters | Cheap change-detection endpoint backed by DB triggers, so consumers poll it instead of the whole document |
+| SIRI Vehicle Monitoring | XML feed of live vehicle activity, optionally filtered by route |
+| SSE telemetry stream | Push feed consumed by OMNIMOVE |
+| AI assistant | Fleet-side chat over Anthropic Claude |
+| Security | JWT, role-based access, security audit log, token blacklist, login-attempt throttling |
+
+### OMNIMOVE — traveller side
+
+| Feature | Notes |
+|---|---|
+| Multimodal search | Bus, Bike, Scooter, Walk, with walking legs to and from the stops |
+| Transfers | Dijkstra over the stop graph — a journey with one change is found when no direct line exists |
+| Traffic-aware ETA | Google Maps Distance Matrix from the bus's own GPS position; falls back to nearest stop, then to a 25 km/h estimate |
+| Rankings | Fastest, Cheapest, Greenest, or **Custom** from the traveller's preference profile |
+| Preference profile | Four onboarding answers become weights (time / cost / eco / reliability) — derived, never stored as numbers |
+| Green Index | 0–100 per option, from EEA-style CO₂ factors (bus 68 g/pax·km against a 170 g/km car baseline) |
+| Weather awareness | Rain and wind demote bike and scooter; "bus only when raining" is a per-account setting |
+| Elerent integration | Live bike/scooter availability and operating zones from the RideAtom API, read-only; realistic mock when no key is configured |
+| Live bus positions | Shown on the traveller map and during an active journey |
+| Timetable browser | Departures by line and terminus |
+| Favourites | Favourite stops and favourite journeys, both re-runnable in one tap |
+| Journey history | Recorded per account, with stats |
+| AI assistant | Multi-turn, personalised, bilingual; may fill and run a search, but may only *start* a journey when the traveller said so in as many words |
+| Accounts | Email/password with verification, password reset, Sign in with Google, optional reCAPTCHA v2 on login |
+| Admin console | Users, analytics, retention runs, UI/security/Google feature switches, analytics export |
+| Messages | Travellers can write to the operators; replies land in the app |
+| Bilingual UI | English and Italian, ~235 translated strings |
+| GDPR layer | Privacy notice, cookie policy, consent ledger, personal-data export, nightly retention, three-tier research pipeline (off by default) |
+| Rate limiting | Per-account hourly caps on journey search and stop arrivals — a cost ceiling as much as an abuse one |
+
+---
+
+## Standards and Interoperability
+
+| Standard | Where | Endpoint |
 |---|---|---|
-| Live Bus Tracking | GPS positions every 15 seconds via MQTT | ✅ Working |
-| Schedule Adherence | Green / Amber / Red bus status | ✅ Working |
-| ETA Prediction | "Bus arrives in 4 min" at your stop | ✅ Working |
-| Traffic-Aware ETA | Real-time travel time via Google Maps Distance Matrix API | ✅ Working |
-| Crowd Estimation | BLE device count → passenger density | ✅ Working |
-| AI Chatbot | Natural language queries in EN + IT | ✅ Working |
-| GTFS Realtime Feed | Standard feed for Italy national NAP | ✅ Working |
-| Journey Planner | Bus / Bike / Scooter / Walk comparison | ✅ Working |
-| Green Index | CO₂ score per journey option | ✅ Working |
-| Elerent Integration | Local bike and e-scooter pricing | ✅ Working |
-| Mobile PWA | Installable on iPhone via Safari | ✅ Working |
-| REST API | OpenAPI 3.0 fully documented | ✅ Working |
+| **NeTEx** | Static network export (stops, lines, patterns, trips, calendars, geometry) | `GET /cassitrack/api/static/netex` |
+| **SIRI** Vehicle Monitoring | Live vehicle activity | `GET /cassitrack/api/v1/siri/vehicle-monitoring` |
+| **MQTT** | Telemetry ingestion — full schema locally, compact OBU schema over TLS | `cassitrack/{id}/position`, `cassitrack/obu/{id}/pos` |
+| **SSE** | Live telemetry push to OMNIMOVE (`X-Api-Key`) | `GET /cassitrack/api/v1/telemetry/stream` |
+| **OpenAPI 3** | Both backends | `/api/swagger-ui` (authentication required) |
+
+`netex.xml` in the repository root is a captured sample of the NeTEx output;
+`validate_siri.py` and `tools/netex_element_order.py` help check both documents
+against the official XSDs.
 
 ---
 
 ## Prerequisites
 
-Make sure you have these installed before starting:
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (must be running)
-- [Java 21 JDK](https://adoptium.net/) (not 17, not 25 — exactly **21**)
-- [Python 3.x](https://www.python.org/downloads/) (install with "Add to PATH" checked)
-- [IntelliJ IDEA](https://www.jetbrains.com/idea/) (Community or Ultimate)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — running
+- **Java 17 JDK** ([Temurin](https://adoptium.net/)) — both `pom.xml` files target 17, and so do the Dockerfiles
+- Python 3.10+ for the simulators and the tools in `tools/`
+- IntelliJ IDEA (or any IDE that runs a Spring Boot main class)
 - Git
 
 ---
-## Project Structure
+
+## Repository Layout
 
 ```
-cassitrack-complete-v2/
-├── cassitrack-backend/        # Spring Boot — fleet monitoring API (port 8080)
-├── omnimove-backend/          # Spring Boot — journey planner API (port 8081)
-├── cassitrack-pwa/            # PWA for mobile (served on port 3000)
-├── mosquitto/                 # MQTT broker config
-├── gps_simulator.py           # Python GPS simulator for Bus 16
-├── cassitrack-login.html      # CASSITRACK entry point (live map is inside the fleet manager dashboard after login)
-├── omnimove-login.html        # OMNIMOVE login page
-└── docker-compose.yml         # All infrastructure in one file
+cassitrack_&_omnimove/
+├── cassitrack-backend/                 # Fleet monitoring — port 8280, context /cassitrack
+│   ├── docker-compose.yml              # postgres(5433) influxdb(8086) redis(6379) mosquitto(1883)
+│   ├── Dockerfile                      # multi-stage build, non-root runtime
+│   ├── mosquitto/config/               # broker conf + ACL (passwd is generated, never committed)
+│   ├── .env.example                    # copy to .env
+│   └── src/main/
+│       ├── java/it/unicas/cassitrack/
+│       │   ├── config/                 # MQTT (local + OBU), Influx, Security, Web
+│       │   ├── controller/             # vehicles, buses, trips, routes, stops, analytics,
+│       │   │                           #   reports, users, auth, ai, siri, netex, telemetry
+│       │   ├── service/                # trip resolution, adherence, ETA, analytics,
+│       │   │                           #   route patterns/edit, report export, audit
+│       │   ├── mqtt/MqttMessageHandler.java
+│       │   ├── dto/netex/  dto/siri/   # feed document models
+│       │   ├── model/  repository/  security/
+│       └── resources/
+│           ├── application.yml
+│           ├── db/migration/           # Flyway V1 … V28
+│           └── static/                 # login, fleet manager, admin (HTML/CSS/JS)
+│
+├── omnimove-backend/                   # Journey planner — port 8180, context /omnimove
+│   ├── docker-compose.yml              # omnimove-postgres(5432) influxdb(8087) redis(6380)
+│   ├── Dockerfile
+│   ├── .env.example
+│   └── src/main/
+│       ├── java/it/unicas/omnimove/
+│       │   ├── client/                 # CassitrackClient, RideAtom/Elerent, mock provider
+│       │   ├── controller/             # journeys, traveller, admin, auth, privacy, ai
+│       │   ├── service/                # planner, green index, preferences, sync (static +
+│       │   │                           #   telemetry), weather, Google Maps, consent,
+│       │   │                           #   retention, research pipeline, mail, rate limiting
+│       │   ├── security/  model/  repository/  util/
+│       └── resources/
+│           ├── application.yml
+│           ├── db/migration/           # Flyway V1 … V35
+│           └── static/                 # traveller app, admin console, login, privacy,
+│                                       #   cookie policy, self-hosted fonts + Leaflet + Chart.js
+│
+├── gps_simulator2.py                   # schedule-driven simulator (position computed from the clock)
+├── gps_simulator3.py                   # motion simulator — delay, early running, breakdowns emerge
+├── tools/
+│   ├── simulate_bus.py                 # reference simulator (free-running)
+│   ├── simulate_bus_scheduled.py       # timetable-following variant
+│   ├── build_route_shapes_osrm.py      # generate route geometry from a routing engine
+│   ├── import_route_shapes.py          # import geometry drawn with crea_path.html
+│   ├── crea_path.html                  # manual route-drawing editor
+│   ├── bridge.py                       # MQTT/TLS → WebSocket bridge for browsers
+│   ├── netex_element_order.py          # resolve the child order NeTEx XSDs impose
+│   └── vendor_fonts.py                 # self-host Google Fonts (no user IP leaves the server)
+│
+├── docs/privacy/                       # DPIA (draft) + privacy change summary
+├── elerent_en.md / elerent_it.md       # Elerent / ATOM Mobility integration notes
+├── netex.xml                           # sample NeTEx output
+├── validate_siri.py                    # validate a SIRI document against the XSD
+└── requirements.txt                    # Python deps for simulators and tools
 ```
 
+---
 
-## How to Run — Step by Step
+## How to Run
 
-### ⚠️ Always follow this exact order
-Clone the repository
+### Step 1 — Configure the environment
+
+Each backend reads its secrets from a `.env` file that is **never committed**.
 
 ```bash
-git clone https://github.com/naolishif/cassitrack.git
-cd cassitrack
+cp cassitrack-backend/.env.example cassitrack-backend/.env
+cp omnimove-backend/.env.example   omnimove-backend/.env
 ```
 
-### Step 1 — Start Docker Infrastructure
+Then fill both in. The values that must match across the two files:
 
-Open Docker Desktop first and wait for the whale icon to appear in the taskbar. Then in PowerShell:
-
-```bash
-cd cassitrack-backend
-docker compose up -d postgres influxdb redis mosquitto
-```
-
-```bash
-cd ..
-cd omnimove-backend
-docker compose up -d omnimove-postgres omnimove-influxdb omnimove-redis
-```
-
-Verify all containers are healthy:
-
-```bash
-docker compose ps
-```
-
-Expected output:
-```
-cassitrack-postgres    running (healthy)
-cassitrack-influxdb    running (healthy)
-cassitrack-redis       running (healthy)
-cassitrack-mosquitto   running (healthy)
-```
-
-| Service | Port | Credentials |
+| CASSITRACK | OMNIMOVE | Why |
 |---|---|---|
-| PostgreSQL | 5432 | user: `cassitrack` / pass: `cassitrack_dev` / db: `cassitrack` |
-| InfluxDB | 8086 | user: `cassitrack` / pass: `cassitrack_dev` / org: `unicas` |
-| Redis | 6379 | password: `cassitrack_dev` |
-| MQTT Broker | 1883 | no auth (local dev) |
+| `SSE_API_TOKEN` | `CASSITRACK_API_TOKEN` | OMNIMOVE authenticates to the SSE and NeTEx feeds with it |
+| — | `CASSITRACK_URL`, `CASSITRACK_NETEX_URL` | must point at the running CASSITRACK, including the `/cassitrack` context path |
 
----
+Generate strong secrets with `openssl rand -base64 48`. `JWT_SECRET` must be at
+least 32 characters in both.
 
-### Step 2 — Set API Keys in IntelliJ
+Everything else degrades gracefully when left **empty**: no `GOOGLE_MAPS_API_KEY`
+means haversine ETAs, no `AI_API_KEY` means canned assistant answers, no
+`ELERENT_PUBLIC_KEY` means the mock bike fleet, no `GOOGLE_OAUTH_CLIENT_ID`
+means the login page simply does not draw the Google button, no
+`RECAPTCHA_*` keys means the login check stays off whatever the admin switch says.
 
-The AI chatbot requires an Anthropic API key, and the traffic-aware ETA requires a Google Maps API key. Never put them in a file — always set them as environment variables inside IntelliJ.
+Keep the *variables* present even when their value is blank — a few placeholders
+in `application.yml` have no fallback and the app refuses to start if the
+variable is missing altogether. Copying `.env.example` wholesale is the safe move.
 
-1. Open IntelliJ → Run → **Edit Configurations**
-2. Select **CassitrackApplication**
-3. Click **Modify options → Environment variables**
-4. Add: `ANTHROPIC_API_KEY=sk-ant-api03-your-key-here`
-5. Click OK, then select **OmnimoveApplication** and add both:
-   ```
-   ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
-   GOOGLE_MAPS_API_KEY=AIza-your-key-here
-   ```
+### Step 2 — Start the infrastructure
 
-> Get a free Anthropic key at [console.anthropic.com](https://console.anthropic.com)
-> Get a Google Maps key at [console.cloud.google.com](https://console.cloud.google.com) — enable **Distance Matrix API**
-
-> **Note:** `GOOGLE_MAPS_API_KEY` goes only on **OmnimoveApplication** — the traffic endpoint lives on OMNIMOVE (port 8081). If not set, responses fall back to `"dataSource": "CASSITRACK"`.
-
-
----
-
-### Step 3 — Run the Backend in IntelliJ
-
-1. File → Open → select the `cassitrack-complete-v2` folder
-2. Wait for Maven to download dependencies (first time takes a few minutes)
-3. Make sure the **Project SDK is set to Java 21**: File → Project Structure → Project → SDK
-
----
-
-In IntelliJ, run both applications (in this order):
-
-1. Run **CassitrackApplication** (port 8080)
-2. Run **OmnimoveApplication** (port 8081)
-
-Verify they started:
-- CASSITRACK Swagger: http://localhost:8080/swagger-ui.html
-- OMNIMOVE Swagger: http://localhost:8081/swagger-ui.html
-
-### Step 4 — Run the GPS Simulator
-
-Open a **new PowerShell window** and run:
+Start Docker Desktop first, then:
 
 ```bash
-# Install dependency (first time only)
-pip install paho-mqtt
-
-# Simulate 2 buses, publish every 15 seconds
-cd Desktop\cassitrack-fresh
-python gps_simulator.py --buses 2 --interval 15
-python gps_simulator2.py
+docker compose -f cassitrack-backend/docker-compose.yml up -d postgres influxdb redis mosquitto
 ```
-
-Expected output:
-```
-✅ Connected to MQTT broker at localhost:1883
-🚌 Simulating 2 buses on Linea 16 — Cassino
-
-📤 MAGNI-001 | lat=41.4917 | speed=32.5 km/h | BLE=12
-📤 MAGNI-002 | lat=41.5020 | speed=0.0 km/h  | BLE=7
-```
-
-Leave this window open while developing.
-
----
-
-### Step 5 — Open the frontend
-
-Serve the HTML files with a local HTTP server (required — do not open directly as `file://`):
-
-```powershell
-python -m http.server 3000
-```
-
-Then open in browser:
-- **CASSITRACK**: http://localhost:8080/cassitrack-login.html (log in — the live map is the default view inside the fleet manager dashboard)
-- **OMNIMOVE**: http://localhost:3000/omnimove-login.html
-
----
-
-## Startup Order (Important)
-
-Always start in this exact order:
-
-```
-1. Docker Desktop
-2. docker compose up -d
-3. IntelliJ → CassitrackApplication
-4. IntelliJ → OmnimoveApplication
-5. python gps_simulator.py
-6. python -m http.server 3000
-7. Open browser
-```
-
-### Step 6 — Run the Mobile PWA (Optional)
-
-Open a **third PowerShell window**:
 
 ```bash
-cd Desktop\cassitrack-fresh\cassitrack-pwa
-python -m http.server 3000
+docker compose -f omnimove-backend/docker-compose.yml up -d omnimove-postgres omnimove-influxdb omnimove-redis
 ```
 
-Find your laptop IP address:
+All ports are bound to `127.0.0.1` — nothing is reachable from the LAN.
+
+| Service | Host port | Notes |
+|---|---|---|
+| CASSITRACK PostgreSQL + PostGIS | 5433 | db `cassitrack` |
+| CASSITRACK InfluxDB | 8086 | org `unicas`, bucket `vehicle_telemetry` |
+| CASSITRACK Redis | 6379 | password required |
+| Mosquitto | 1883 | anonymous access disabled, per-topic ACL |
+| OMNIMOVE PostgreSQL | 5432 | db `omnimovedb` |
+| OMNIMOVE InfluxDB | 8087 | org `omnimove_org`, bucket `omnimove_bucket` |
+| OMNIMOVE Redis | 6380 | password required |
+
+### Step 3 — Create the MQTT users
+
+The broker refuses anonymous clients, and the password file is deliberately not
+in Git, so each developer generates their own:
+
 ```bash
-ipconfig
-# Look for IPv4 Address under Wi-Fi adapter
+docker exec -it cassitrack-mosquitto mosquitto_passwd -c /mosquitto/config/passwd cassitrack-backend
 ```
 
-Update the API URL in `cassitrack-pwa/app.js` line 1:
-```javascript
-const API = 'http://YOUR-IP-HERE:8280/api/v1';
+```bash
+docker exec -it cassitrack-mosquitto mosquitto_passwd /mosquitto/config/passwd cassitrack-bus
 ```
 
-Also add your IP to the CORS allowed origins in `SecurityConfig.java`:
-```java
-config.setAllowedOrigins(List.of(
-    "http://localhost:3000",
-    "null",
-    "http://YOUR-IP-HERE:3000"
-));
+Put `cassitrack-backend`'s credentials in `MQTT_USERNAME` / `MQTT_PASSWORD`, give
+the simulator the `cassitrack-bus` ones, then `docker compose restart mosquitto`.
+
+### Step 4 — Run the backends
+
+In IntelliJ, add the `.env` contents as environment variables on each run
+configuration (Run → Edit Configurations → Modify options → Environment
+variables), then start, in this order:
+
+1. **CassitrackApplication** → http://localhost:8280/cassitrack/
+2. **OmnimoveApplication** → http://localhost:8180/omnimove/
+
+Flyway runs the migrations on first start. OMNIMOVE imports the network from
+CASSITRACK's NeTEx feed at startup and re-imports within a minute of any change,
+so **CASSITRACK must be up first**.
+
+To run the backends in containers instead of the IDE, each compose file keeps
+its app behind a `full` profile:
+
+```bash
+docker compose -f cassitrack-backend/docker-compose.yml --profile full up -d
 ```
 
-Restart Spring Boot, then on your iPhone open Safari and go to:
-```
-http://YOUR-IP-HERE:3000
+```bash
+docker compose -f omnimove-backend/docker-compose.yml --profile full up -d
 ```
 
-To install: **Share button → Add to Home Screen → Add**
+### Step 5 — Feed it some buses
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+```
+
+```bash
+python gps_simulator3.py
+```
+
+`gps_simulator3.py` integrates real motion along the routed geometry, so delay,
+early running, breakdowns and signal loss happen on their own rather than being
+switched on. `gps_simulator2.py` is the older schedule-driven one: always
+punctual, useful when you want a quiet fleet.
+
+Both read the fleet and the timetable straight from PostgreSQL, picking up the
+database credentials from `cassitrack-backend/.env` on their own. The MQTT
+credentials are the *bus* ones — `MQTT_BUS_USERNAME` / `MQTT_BUS_PASSWORD` in the
+environment, or `--mqtt-username` / `--mqtt-password` on the command line.
+
+### Step 6 — Open the apps
+
+| App | URL | Who |
+|---|---|---|
+| CASSITRACK login | http://localhost:8280/cassitrack/ | fleet manager, admin |
+| Fleet manager dashboard | `cassitrack-fleetmanager.html` (after login) | `FLEET_MANAGER` |
+| CASSITRACK admin panel | `cassitrack-admin.html` (after login) | `ADMIN` |
+| OMNIMOVE login | http://localhost:8180/omnimove/ | traveller, admin |
+| Traveller app | `omnimove-traveller.html` (after login) | `TRAVELLER` |
+| OMNIMOVE admin console | `omnimove-admin.html` (after login) | `ADMIN` |
+
+There is no separate static file server: both backends serve their own
+frontends, and the pages are gated by the same rules as the APIs behind them.
 
 ---
 
-## Common Issues
+## API Reference
 
-| Problem | Fix |
+Interactive docs (authentication required — no free reconnaissance):
+
+- CASSITRACK: http://localhost:8280/cassitrack/api/swagger-ui
+- OMNIMOVE: http://localhost:8180/omnimove/api/swagger-ui
+
+### CASSITRACK — `http://localhost:8280/cassitrack`
+
+| Method | Endpoint | Access |
+|---|---|---|
+| GET | `/api/v1/vehicles` · `/{id}` · `/count` · `/fleet-size` | public |
+| GET | `/api/v1/stops` · `/{id}/arrivals` · `/{id}/schedule` | public |
+| GET | `/api/v1/routes` · `/{id}/shape` | public |
+| GET | `/api/v1/siri/vehicle-monitoring` | public |
+| GET | `/api/v1/telemetry/latest` (deprecated) | public |
+| GET | `/api/v1/telemetry/stream` (SSE) | `X-Api-Key` |
+| GET | `/api/static/netex` · `/api/static/version` | `X-Api-Key` |
+| GET/POST/PUT/DELETE | `/api/v1/buses` · `/api/v1/trips` · `/api/v1/routes` · `/api/v1/stops` | `FLEET_MANAGER` |
+| GET | `/api/v1/analytics/**` (summary, adherence, busiest-hours, delay-by-route, co2, network, …) | `FLEET_MANAGER` |
+| POST | `/api/v1/reports/export` (CSV / XLSX / PDF) | authenticated (driven from the fleet-manager UI) |
+| POST | `/api/v1/ai/chat` | `FLEET_MANAGER`, `ADMIN` |
+| GET/POST/PUT/DELETE | `/api/v1/users/**` | `ADMIN` |
+| POST | `/api/v1/auth/login` · `/logout` | public / authenticated |
+
+### OMNIMOVE — `http://localhost:8180/omnimove`
+
+| Method | Endpoint | Access |
+|---|---|---|
+| POST | `/api/v1/journeys/search` | traveller / admin |
+| POST | `/api/v1/journeys/select` | traveller / admin |
+| GET | `/api/v1/journeys/stops` · `/stops/{id}/arrivals` | traveller / admin |
+| GET | `/api/v1/journeys/live-buses` | traveller / admin |
+| GET | `/api/v1/journeys/routes/{id}/stops` · `/shape` · `/routes/shapes` | traveller / admin |
+| GET | `/api/v1/journeys/timetable/routes` · `/{routeId}` | traveller / admin |
+| GET | `/api/v1/journeys/bikes` · `/bikes/zones` | traveller / admin |
+| GET | `/api/v1/journeys/weather` · `/geocode/reverse` | traveller / admin |
+| GET/PUT | `/api/v1/traveller/me` · `/preferences` · `/ui-settings` | traveller |
+| GET | `/api/v1/traveller/history` · `/stats` | traveller |
+| GET/POST/DELETE | `/api/v1/traveller/favorite-stops` · `/favorites` | traveller |
+| POST/GET | `/api/v1/traveller/messages` | traveller |
+| POST | `/api/v1/ai/chat` | traveller / admin |
+| POST/GET | `/api/v1/privacy/consents` · `/export` | public (record) / authenticated |
+| POST | `/api/v1/auth/register` · `/login` · `/google` · `/forgot-password` · `/reset-password` | public |
+| GET | `/api/v1/auth/me` · `/verify` | authenticated |
+| DELETE | `/api/v1/auth/account` | authenticated |
+| GET/PUT/DELETE | `/api/v1/admin/**` (users, analytics, retention, settings) | `ADMIN` |
+
+### Example — journey search
+
+```bash
+curl -X POST http://localhost:8180/omnimove/api/v1/journeys/search \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"origin_lat":41.493833,"origin_lon":13.828778,"origin_name":"Piazza San Benedetto","dest_lat":41.47583,"dest_lon":13.82894,"dest_name":"Universita Folcara"}'
+```
+
+### Example — live fleet
+
+```bash
+curl http://localhost:8280/cassitrack/api/v1/vehicles
+```
+
+### Example — static network version
+
+```bash
+curl -H "X-Api-Key: $SSE_API_TOKEN" http://localhost:8280/cassitrack/api/static/version
+```
+
+---
+
+## Journey Planner — Modes and Fares
+
+| Mode | Provider | Fare | CO₂ (g/pax·km) |
+|---|---|---|---|
+| 🚌 Bus | Cassino urban network | €1.00 per boarding (a change costs two) | 68 |
+| 🚲 Bike | Elerent | €1.00 unlock + €0.29/min | 0 |
+| 🛴 E-Scooter | Elerent | €1.00 unlock + €0.25/min (+ €5.00 refundable hold) | 0 |
+| 🚶 Walk | — | free | 0 |
+
+Green Index = `100 − (CO₂ / CO₂ of the same trip by car) × 100`, with the car
+baseline at 170 g/km. The traveller app shows the full derivation per option.
+
+Elerent fares live in configuration (`elerent.*` in OMNIMOVE's
+`application.yml`), not in the planner, so a price change is a config change.
+
+---
+
+## Privacy and Data Protection
+
+The GDPR work is real and is documented in `docs/privacy/`:
+
+- **Published texts** — `privacy.html` and `cookie-policy.html`, versioned by
+  `PRIVACY_POLICY_VERSION`; bumping it re-asks for consent.
+- **Consent ledger** — every consent recorded with its policy version.
+- **Data export** — a traveller can download their own data from the app.
+- **Retention** — a nightly job enforces the periods the notice states
+  (journeys 365 d, security logs 365 d, consents 730 d, unverified accounts 24 h)
+  and records every run, successes and failures alike. **On by default.**
+- **Research pipeline** — a three-tier lifecycle (operational → pseudonymous →
+  aggregate with k-anonymity ≥ 10). **Off by default**, and it should stay off
+  until the DPIA has been signed off by the University's DPO.
+- **No third-country asset loads** — fonts, Leaflet and Chart.js are all
+  self-hosted, so no user IP reaches Google's CDNs.
+- **AI provider** — the default assistant provider is Regolo (Seeweb, Italy):
+  EU data residency and zero retention, which matters because the assistant is
+  handed the traveller's journey history.
+
+`docs/privacy/DPIA-omnimove-cassitrack.md` is an explicitly labelled **technical
+draft**: it is not a valid DPIA until completed, reviewed by the DPO and
+approved by the University.
+
+---
+
+## Security Notes
+
+- Secrets live in `.env` only, never in `application.yml` or `docker-compose.yml`.
+- All infrastructure ports bind to `127.0.0.1`.
+- Container images are pinned by digest, not by mutable tag.
+- Mosquitto: anonymous access disabled, per-topic ACL — a bus publisher can
+  write its own topic and nothing else.
+- Swagger UI requires authentication on both backends.
+- JWT with a server-side blacklist on logout; login-attempt throttling; a
+  dedicated security audit log on both sides.
+- Incoming positions are validated (Cassino bounding box, max age 300 s) before
+  they are stored or trusted.
+- `mvn verify` runs OWASP Dependency-Check; suppressions are in
+  `owasp-suppressions.xml` in each module.
+
+> **Outstanding:** early commits contained secrets in tracked `env` files. The
+> history still needs `git filter-repo` treatment and every exposed secret needs
+> rotating — see the notice in `.gitignore`.
+
+---
+
+## Simulators and Tools
+
+| Script | What it is for |
 |---|---|
-| Spring Boot crashes on start | Docker must be running first — PostgreSQL is inside Docker |
-| Map shows "Backend offline" | Check that CassitrackApplication is running on port 8080 |
-| AI chat says "Sorry, I could not process your request" | Check ANTHROPIC_API_KEY is set in IntelliJ Run Configurations |
-| Java compile error `Unexpected token 'class'` | You are using Java 25. Switch to Java 21 in Project Structure |
-| No buses on map | Run `python gps_simulator.py` |
-| Phone can't access the app on LAN | Run `ipconfig` in PowerShell, get your laptop IP, and update `CASSITRACK_API` in `cassitrack-pwa/app.js` |
-| `ANTHROPIC_API_KEY` not found | Environment variables set in PowerShell are invisible to IntelliJ — set them in Run Configurations instead |
-
----
-
-## Tech Stack
-
-**Backend**
-- Java 21 + Spring Boot 3.2.5
-- PostgreSQL + PostGIS (spatial queries)
-- InfluxDB (GPS time-series data)
-- Redis (real-time cache)
-- Eclipse Mosquitto (MQTT broker)
-- Flyway (database migrations)
-
-**Frontend**
-- Leaflet.js (interactive maps)
-- Progressive Web App (PWA) with service worker
-- Vanilla HTML/CSS/JavaScript
-
-**Data Standards**
-- GTFS Realtime (Protocol Buffers)
-- MQTT for GPS telemetry ingestion
-
-**APIs**
-- Anthropic Claude API (AI assistant)
-- Google Maps Distance Matrix API (traffic-aware ETA)
-- Open-Meteo (weather)
-- Elerent (bike/scooter availability)
-
----
-
-## API Endpoints
-Both backends expose Swagger UI for interactive API exploration:
-
-- CASSITRACK: http://localhost:8080/swagger-ui.html
-- OMNIMOVE: http://localhost:8081/swagger-ui.html
-
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/v1/vehicles` | All active bus positions |
-| GET | `/api/v1/vehicles/{id}` | Single vehicle detail |
-| GET | `/api/v1/stops/{id}/arrivals` | ETA at a specific stop |
-| GET | `/api/v1/traffic/eta?stopId={id}` | Traffic-aware ETA via Google Maps (OMNIMOVE port 8081) |
-| POST | `/api/v1/ai/chat` | AI chatbot query |
-| POST | `/api/v1/journeys/search` | Multimodal journey planning |
-| GET | `/api/v1/feed/gtfs-rt` | GTFS Realtime feed (Protobuf) |
-| GET | `/api/v1/feed/gtfs-rt/debug` | GTFS Realtime (human readable) |
-| GET | `/api/swagger-ui` | Full API documentation |
-
-### AI Chat Example
-
-```bash
-curl -X POST http://localhost:8080/api/v1/ai/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "When does the next bus reach Campus?", "language": "en"}'
-```
-
-### Journey Planner Example
-
-```bash
-curl -X POST http://localhost:8080/api/v1/journeys/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "origin_lat": 41.5020,
-    "origin_lon": 13.8200,
-    "origin_name": "Via Folcara",
-    "dest_lat": 41.4892,
-    "dest_lon": 13.8282,
-    "dest_name": "Cassino Stazione FS"
-  }'
-```
-
-### Traffic-Aware ETA Example
-
-```bash
-# All active buses heading to Campus Folcara (with real-time traffic)
-# No coordinates needed — runs on OMNIMOVE (port 8081)
-curl http://localhost:8081/api/v1/traffic/eta?stopId=FOLCARA-CAMPUS
-```
-
-Example response:
-```json
-[
-  {
-    "vehicleId": "MAGNI-001",
-    "stopId": "FOLCARA-CAMPUS",
-    "estimatedArrival": "2026-06-08T10:55:31Z",
-    "durationSeconds": 553,
-    "trafficDurationSeconds": 519,
-    "trafficDelaySeconds": -34,
-    "distanceMetres": 3200,
-    "dataSource": "GOOGLE_MAPS"
-  }
-]
-```
-
-`dataSource` is `"GOOGLE_MAPS"` when the key is configured, `"CASSITRACK"` as fallback.
-
-> **Note:** The endpoint lives on OMNIMOVE (port 8081), not CASSITRACK.
-> Google Maps uses the route start (Cassino Stazione) as origin and the
-> requested stop as destination — no user coordinates required.
-
----
-
-## Known Bus Stops — Linea 16
-
-| Stop ID | Name | Coordinates |
-|---|---|---|
-| CASSINO-STAZIONE | Cassino Stazione FS | 41.4892, 13.8282 |
-| CASSINO-CENTRO | Cassino Centro | 41.4917, 13.8314 |
-| CASSINO-OSPEDALE | Ospedale S. Scolastica | 41.4955, 13.8330 |
-| FOLCARA-VIA | Via Folcara | 41.5020, 13.8200 |
-| FOLCARA-CAMPUS | Campus UNICAS Folcara | 41.5041, 13.8189 |
-
----
-
-With the simulator running, test these endpoints in your browser  
-or with curl:
-
-```bash  
-# Get all active vehicles (the one being simulated)  
-curl http://localhost:8080/api/v1/vehicles  
-  
-# Get a specific vehicle  
-curl http://localhost:8080/api/v1/vehicles/MAGNI-001  
-  
-# Count active vehicles  
-curl http://localhost:8080/api/v1/vehicles/count  
-  
-# Get stop arrivals (stub for now, returns empty list)  
-curl http://localhost:8080/api/v1/stops/CASSINO-CENTRO/arrivals  
-```  
-Full API docs:
-- **Swagger UI:** http://localhost:8080/api/swagger-ui
-- **OpenAPI JSON:** http://localhost:8080/api/docs
----
-## Project Structure
-
-```
-cassitrack-fresh/
-├── docker-compose.yml                    ← Infrastructure
-├── gps_simulator.py                      ← Bus GPS simulator
-├── mosquitto/config/mosquitto.conf       ← MQTT broker config
-├── cassitrack-pwa/                       ← Mobile PWA
-│   ├── index.html                        ← App shell
-│   ├── app.js                            ← All app logic
-│   ├── style.css                         ← Mobile-first styles
-│   ├── manifest.json                     ← PWA install config
-│   └── sw.js                             ← Service worker (offline)
-└── cassitrack-backend/                   ← Spring Boot backend
-    ├── pom.xml                           ← Maven dependencies
-    └── src/main/java/it/unicas/cassitrack/
-        ├── config/
-        │   ├── MqttConfig.java           ← MQTT connection
-        │   ├── InfluxConfig.java         ← InfluxDB client
-        │   └── SecurityConfig.java       ← JWT + CORS
-        ├── controller/
-        │   ├── VehicleController.java    ← /api/v1/vehicles
-        │   ├── StopController.java       ← /api/v1/stops
-        │   ├── AiController.java         ← /api/v1/ai/chat
-        │   ├── JourneyController.java    ← /api/v1/journeys
-        │   ├── GtfsRealtimeController.java ← /api/v1/feed
-        │   ├── TrafficController.java    ← /api/v1/traffic (NEW)
-        │   └── AuthController.java       ← /api/v1/auth
-        ├── service/
-        │   ├── VehicleService.java       ← Vehicle business logic
-        │   ├── VehicleStateCache.java    ← Redis live cache
-        │   ├── ETAService.java           ← Arrival prediction
-        │   ├── ScheduleAdherenceService.java ← Late detection
-        │   ├── AiOrchestrationService.java   ← Claude API + RAG
-        │   ├── GtfsRealtimeService.java  ← GTFS-RT feed builder
-        │   ├── JourneyPlannerService.java ← Multimodal planner
-        │   ├── GreenIndexService.java    ← CO₂ scoring
-        │   ├── RouteMatchingService.java ← Haversine distance
-        │   ├── GoogleMapsService.java    ← Distance Matrix API client (NEW)
-        │   └── TrafficAwareETAService.java ← Traffic-aware ETA logic (NEW)
-        ├── model/
-        │   ├── VehiclePosition.java      ← JPA entity
-        │   ├── ScheduledStop.java        ← Stop entity
-        │   └── User.java                 ← Auth entity
-        ├── dto/                          ← API request/response shapes
-        ├── mqtt/
-        │   └── MqttMessageHandler.java   ← Processes incoming GPS
-        └── resources/
-            ├── application.yml           ← All configuration
-            └── db/migration/
-                ├── V1__initial_schema.sql ← Tables
-                └── V2__seed_master_data.sql ← Bus 16 timetable
-```
-
----
-
-## Journey Planner — Transport Modes
-
-| Mode | Provider | Pricing | Green Index |
-|---|---|---|-------------|
-| 🚌 Bus | Magni Autoservizi | €1.00 flat | ~85/100     |
-| 🚲 Bike | Elerent (Cassino) | €0.50 unlock + €0.15/min | 100/100     |
-| 🛴 E-Scooter | Elerent (Cassino) | €1.00 unlock + €0.25/min | 0/100       |
-| 🚶 Walk | — | Free | 100/100     |
-
-Green Index based on EEA CO₂ emission factors per passenger-km.
-
----
-
-## Useful Commands
-
-```bash
-# View logs of all services
-docker compose logs -f
-
-# View only a specific service
-docker compose logs -f mosquitto
-
-# Stop everything (keeps data)
-docker compose down
-
-# Stop everything AND delete all data (fresh start)
-docker compose down -v
-
-# Connect to PostgreSQL directly
-docker exec -it cassitrack-postgres psql -U cassitrack -d cassitrack
-
-# See live bus positions in the database
-SELECT vehicle_id, lat, lon, speed_kmh, received_at
-FROM vehicle_positions
-ORDER BY received_at DESC LIMIT 10;
-
-# Check GTFS Realtime feed (human readable)
-curl http://localhost:8080/api/v1/feed/gtfs-rt/debug
-```
+| `gps_simulator3.py` | The one to use. Real motion along `route_shapes`; delay and early running are physical outcomes, not parameters. `--force-breakdown <vehicle-id>`, `--force-signal-loss <vehicle-id>` and `--raw` are there for targeted tests. |
+| `gps_simulator2.py` | Position computed from the clock — always on time, no traffic, straight lines between stops. |
+| `tools/simulate_bus.py` | Reference simulator: free-running, does not follow the timetable. |
+| `tools/simulate_bus_scheduled.py` | The reference movement model made to depart on the timetable. |
+| `tools/crea_path.html` | Draw a line's geometry by hand on a map, export `percorsiX.json`. |
+| `tools/import_route_shapes.py` | Turn that JSON into a `route_shapes` migration. |
+| `tools/build_route_shapes_osrm.py` | Same output, generated automatically from a routing engine. |
+| `tools/bridge.py` | Bridge the TLS MQTT broker to a WebSocket a browser can read. |
+| `tools/vendor_fonts.py` | Re-download and re-vendor the self-hosted fonts. |
+| `validate_siri.py` | Validate a SIRI document against the official XSD (`pip install lxml`). |
+| `tools/netex_element_order.py` | Resolve the child order a NeTEx type requires across its inheritance chain. |
 
 ---
 
@@ -530,39 +514,67 @@ curl http://localhost:8080/api/v1/feed/gtfs-rt/debug
 
 | Problem | Cause | Fix |
 |---|---|---|
-| `Connection to localhost:5432 refused` | Docker not running | Start Docker Desktop first |
-| `Backend offline` on phone | Wrong IP in app.js | Run `ipconfig` and update `app.js` |
-| AI says "could not process" | API key not set | Add `ANTHROPIC_API_KEY` in IntelliJ Run Configurations |
-| No buses on map | Simulator not running | Run `python gps_simulator.py --buses 2` |
-| Phone cannot reach backend | CORS not configured | Add your IP to `SecurityConfig.java` allowed origins |
-| Container name conflict | Old containers still registered | Run `docker compose down` then `docker compose up -d` |
-| Tomcat error on startup | Database miss-match | Run `docker compose down -v` to reset all data, then start again. If necessary, in application.yml change ddl-auto:update to create-drop |
-| Omnimove cannot receive Influx data from Cassitrack | Create and use your own token | From InfluxDB UI in port 8087, go in Load Data, clone the token and copy-paste it in the application.yml of omnimove (found in the lower section of the file) |
-| `/api/v1/traffic/eta` returns `dataSource: "CASSITRACK"` | Google Maps key not set | Add `GOOGLE_MAPS_API_KEY` in IntelliJ Run Configurations for **OmnimoveApplication** |
-| `/api/v1/traffic/eta` returns 403 | Endpoint not whitelisted in Security | Add `.requestMatchers("/api/v1/traffic/**").permitAll()` in omnimove `SecurityConfig.java` |
-| Flyway checksum mismatch on startup | Migration file modified after first run | Run `UPDATE flyway_schema_history SET checksum = <new_value> WHERE version = '1';` on the DB |
+| `Connection refused` on 5432/5433 | Docker not running | Start Docker Desktop, then bring the compose stacks up |
+| Backend exits at startup complaining about a missing property | `.env` not loaded into the run configuration | Environment variables set in a shell are invisible to IntelliJ — put them in Run → Edit Configurations |
+| Flyway `validate` failure on start | A migration file was edited after it had been applied | Reset the database (`docker compose down -v`) or fix the checksum row in `flyway_schema_history` |
+| Hibernate schema validation error | Database predates the current migrations | `docker compose down -v`, then start again so Flyway rebuilds from V1 |
+| No buses on the map | Simulator not running, or MQTT credentials wrong | Run `python gps_simulator3.py`; check the broker accepted the `cassitrack-bus` user |
+| Broker container stuck "unhealthy" | `passwd` file missing | Generate the MQTT users (Step 3) and restart Mosquitto |
+| OMNIMOVE shows no lines or stops | The NeTEx import never ran | Start CASSITRACK first; check `CASSITRACK_NETEX_URL` includes `/cassitrack`, and that `CASSITRACK_API_TOKEN` equals CASSITRACK's `SSE_API_TOKEN` |
+| OMNIMOVE gets no live buses | SSE stream not reachable or token mismatch | Same token pair; check `CASSITRACK_URL` |
+| OMNIMOVE cannot write to InfluxDB | Wrong token | Generate one in the InfluxDB UI on port 8087 and set `INFLUX_TOKEN` in `omnimove-backend/.env` |
+| ETAs look like straight-line estimates | `GOOGLE_MAPS_API_KEY` unset or Distance Matrix API not enabled | Set the key on **OmnimoveApplication**; the fallback chain is by design |
+| The AI assistant only gives canned answers | `AI_API_KEY` unset (OMNIMOVE) or `ANTHROPIC_API_KEY` unset (CASSITRACK) | Set the relevant key; the fallback is deliberate, not a failure |
+| No "Sign in with Google" button | `GOOGLE_OAUTH_CLIENT_ID` unset, or the origin is not registered | Register the origin (no path) in Google Cloud Console and set the ID |
+| reCAPTCHA switch is on but nothing appears | Keys not configured | Without both keys the check stays off on purpose — a widget nobody can solve would lock everyone out |
+| Browser blocked by CORS or CSP | Origin not listed | Add it to `CORS_ALLOWED_ORIGINS` (both apps) and `CSP_CONNECT_EXTRA` (CASSITRACK) |
 
 ---
 
-## Phase 2 — Planned Features
+## Useful Commands
 
-- Real ESP32 hardware installed on MAGNI buses
-- Elerent real API integration (live vehicle locations)
-- Driver Android app (voluntary GPS tracking)
-- SIRI Vehicle Monitoring for Lazio RAP
-- React PWA upgrade with TypeScript
-- Contact Magni Autoservizi for official GTFS data
+```bash
+docker compose -f cassitrack-backend/docker-compose.yml logs -f mosquitto
+```
+
+```bash
+docker exec -it cassitrack-postgres psql -U cassitrack -d cassitrack -c "SELECT vehicle_id, lat, lon, speed_kmh, received_at FROM vehicle_positions ORDER BY received_at DESC LIMIT 10;"
+```
+
+```bash
+docker compose -f cassitrack-backend/docker-compose.yml down -v
+```
 
 ---
 
-## Team
+## What Is Next
 
-University of Cassino and Southern Lazio (UNICAS)
-Telecommunications Engineering — 2025/2026
-Distributed Programming Course
+- Real OBU hardware on more vehicles (`BUS4` still needs reflashing from `BUS2L`)
+- Elerent production API key, replacing the mock availability provider
+- A service calendar: trips currently run every day, with no weekday/Saturday distinction
+- Official timetable data from the network operator, replacing the interpolated intermediate times
+- DPIA completion and DPO sign-off before the research pipeline is enabled anywhere real
 
-**Competition:** CINI Smart City University Challenge, 10th Edition
-**Conference:** I-CiTies 2026, University of Brescia + Polytechnic University of Milan
+---
+
+## Credits
+
+**Scientific direction — University of Cassino and Southern Lazio**
+Prof. Mario Molinara (software development coordinator, scientific director of
+the AIDA Laboratory) · Prof. Mauro D'Apuzzo (sustainable mobility) ·
+Prof. Luigi Ferrigno (Technology Transfer Office, which sponsored the activity) ·
+Prof. Francesco Iacoviello (President of CASI, which provided the network
+infrastructure and expertise)
+
+**Commissioning body and partners**
+Municipality of Cassino (commissioning body) · Elerent (bike and scooter
+position data) · Seeweb (the AI that powers the assistant)
+
+**Development team**
+Massimiliano Carello · Giacomo Alberto Napolitano · Naoli Shiferaw Biru ·
+Ferran Montero · Mar González Montesinos
+
+**Context:** I-CiTies Challenge 2026, Brescia, September 2026.
 
 ---
 

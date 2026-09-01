@@ -194,6 +194,10 @@ async function loadPreferences() {
         _prefsScopedToCustom = p.applyPrefsToPresets === false;
         set('prefNotifyDelays',   p.notifyDelays);
         _notifyDelays = p.notifyDelays !== false;
+        // Absent means on: a profile saved before V35 has no opinion, and the
+        // arrow is what a map following a journey is expected to do.
+        set('prefLivePosition',   p.showLivePosition !== false);
+        _showLivePosition = p.showLivePosition !== false;
 
         // The four answers and the crowding threshold
         setAnswer('ansTime',        p.answerTime);
@@ -226,6 +230,15 @@ let _prefsScopedToCustom = false;
 
 /** "Route delay alerts": watched only while a started journey is running. */
 let _notifyDelays = true;
+
+/**
+ * "Show my position on the route": false means a started journey says nothing
+ * about where the traveller is, and never ends itself on arrival.
+ *
+ * Declared up here beside its neighbour rather than next to the code that uses
+ * it, because loadPreferences() is called at the top level and writes both.
+ */
+let _showLivePosition = true;
 
 const SORT_OF_MODE = { ECO: 'eco', BUDGET: 'budget', FAST: 'fast', CUSTOM: 'custom' };
 const MODE_OF_SORT = { eco: 'ECO', budget: 'BUDGET', fast: 'FAST', custom: 'CUSTOM' };
@@ -307,6 +320,7 @@ async function savePreferences() {
         rainPrefersBus:     isOn('prefRainPrefersBus'),
         applyPrefsToPresets: isOn('prefApplyToPresets'),
         notifyDelays:       isOn('prefNotifyDelays'),
+        showLivePosition:   isOn('prefLivePosition'),
         maxBikeWalkMetres:  parseInt(document.getElementById('prefMaxBikeWalk')?.value, 10) || 500,
         // Someone editing the panel has plainly met the questions already
         onboardingDone:     true,
@@ -331,6 +345,10 @@ async function savePreferences() {
         _notifyDelays        = body.notifyDelays;
         // A watch already running follows the new setting straight away
         if (!_notifyDelays) stopDelayWatch();
+        // "At any moment" means during the journey too: switching it off takes
+        // the arrow off the map now, and with it the automatic arrival.
+        _showLivePosition    = body.showLivePosition;
+        if (!_showLivePosition) stopLivePosition();
         setSort(SORT_OF_MODE[body.defaultJourneyMode] || 'eco');
         showToast(t('toast_prefs_saved'));
     } catch (e) {
@@ -1826,7 +1844,9 @@ function mapPointOf(el) {
 
 // ── Filter / sort state ──────────────────────────────────────────
 let activeSort  = 'eco';   // 'eco' | 'budget' | 'fast'  — always exactly one
-let activeModes = [];      // [] = all modes; otherwise subset of BUS/BIKE/SCOOTER (WALK always included)
+// [] = every mode. Otherwise the chips that are lit, which are only ever
+// BUS/BIKE/SCOOTER; doSearch adds WALK to them — see the note there.
+let activeModes = [];
 
 const SORT_VALUES = ['eco', 'budget', 'fast', 'custom'];
 
@@ -2034,9 +2054,17 @@ async function doSearch() {
             // computed at all rather than merely how they are ordered.
             sort_preset: MODE_OF_SORT[activeSort] || 'CUSTOM'
         };
-        // Only constrain modes when the traveler picked specific ones via the chips.
+        // Only constrain modes when the traveller picked specific ones via the chips.
+        //
+        // WALK travels with them. The chips are Bus, Bike and Scooter — there is
+        // no Walk chip — so picking "Bus" is a statement about which VEHICLES to
+        // consider, not a request to stop walking. Sending the bare selection
+        // dropped walking from the results through a control the traveller was
+        // never offered; whether walking appears at all is decided by the "Show
+        // walking options" preference, which the planner applies after this and
+        // still has the final say.
         if (activeModes.length > 0) {
-            payload.modes = [...activeModes];
+            payload.modes = [...activeModes, 'WALK'];
         }
         if (_pickerHour !== null) {
             const hh = String(_pickerHour).padStart(2, '0');
@@ -2045,27 +2073,464 @@ async function doSearch() {
             if (_pickerMode === 'arrive') payload.arrive_by = true;
         }
 
-        const r = await apiFetch('/journeys/search', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-        if (r.status === 429) throw new Error('rate_limited');
-        if (!r.ok) throw new Error('Search failed');
-        const data = await r.json();
+        // ── The request ──
+        // Fetching and rendering are two failures, not one. They used to share a
+        // catch, so a bug in drawing a card reported itself as "could not load
+        // routes" — an error about the network, for a request that had already
+        // succeeded. Whoever read that message went looking in the wrong place.
+        let data;
+        try {
+            const r = await apiFetch('/journeys/search', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            if (!r.ok) {
+                // The body carries the server's own reason now; read it before
+                // deciding what to say, and log it whatever we decide.
+                const detail = await readError(r);
+                console.error('[SEARCH] HTTP', r.status, detail, 'payload:', payload);
+
+                if (r.status === 429) throw new SearchError(t('err_rate_limited'));
+                if (r.status >= 500)  throw new SearchError(tf('err_server',   { status: r.status }));
+                throw new SearchError(tf('err_rejected', { status: r.status }));
+            }
+            data = await r.json();
+
+        } catch (e) {
+            // A SearchError already carries the sentence for this status. Anything
+            // else reaching here is the fetch itself failing — no connection, DNS,
+            // a dropped request — which is a different problem with a different fix.
+            if (!(e instanceof SearchError)) console.error('[SEARCH] network failure:', e);
+            showSearchError(e instanceof SearchError ? e.message : t('err_offline'));
+            return;
+        }
+
+        // ── The results ──
         window._currentOrigin = origin;
         window._currentDest   = dest;
         window._lastSearchData = data;
-        renderRoutes(data);
+        // The question that was actually asked. The refresh re-sends this rather
+        // than re-reading the fields, which may have been edited since without
+        // anybody pressing Search.
+        window._lastSearchPayload = payload;
+
+        try {
+            renderRoutes(data);
+            startRoutesRefresh();
+        } catch (e) {
+            // The plan is sound and the traveller cannot see it: say that, and
+            // put the option that broke in the console for whoever looks next.
+            console.error('[SEARCH] could not render the results:', e, 'data:', data);
+            showSearchError(t('err_render'));
+        }
     } catch (e) {
-        const msg = e.message === 'rate_limited'
-            ? t('err_rate_limited')
-            : t('err_load_routes');
-        document.querySelector('.routes-list').innerHTML =
-            '<div style="text-align:center;padding:40px 20px;color:var(--red)">'
-            + '<div style="font-size:28px;margin-bottom:10px">⚠️</div>'
-            + `<div style="font-size:13px;font-weight:600">${msg}</div>`
-            + '</div>';
+        console.error('[SEARCH] unexpected failure:', e);
+        showSearchError(t('err_load_routes'));
     }
+}
+
+/** An HTTP failure that already knows what to tell the traveller. */
+class SearchError extends Error {}
+
+/** The server's own explanation, or the raw body, or nothing. Never throws. */
+async function readError(response) {
+    try {
+        const text = await response.text();
+        if (!text) return '(empty body)';
+        try {
+            const j = JSON.parse(text);
+            return j.error ? `${j.error}: ${j.message || ''}` : text.slice(0, 300);
+        } catch (_) {
+            return text.slice(0, 300);
+        }
+    } catch (_) {
+        return '(body unreadable)';
+    }
+}
+
+function showSearchError(message) {
+    document.querySelector('.routes-list').innerHTML =
+        '<div style="text-align:center;padding:40px 20px;color:var(--red)">'
+        + '<div style="font-size:28px;margin-bottom:10px">⚠️</div>'
+        + `<div style="font-size:13px;font-weight:600">${escHtml(message)}</div>`
+        + '</div>';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// THE ASSISTANT ACTING ON THE APP
+// ══════════════════════════════════════════════════════════════════
+// The reply may carry an action: fill the two fields, run the search,
+// recommend one of the results, and — only when the traveller agreed to it in
+// so many words — press Start Journey. The model decides what; this decides
+// whether that what is possible, and does it.
+//
+// NOTHING HERE TRUSTS THE MODEL
+// A stop name is resolved against the stops the app actually knows, and one it
+// cannot resolve stops the action rather than guessing at a nearby-sounding
+// place — planning a journey to the wrong village is worse than planning none.
+// The criterion is read from a fixed table. Start Journey needs a named
+// criterion before it will fire, on this side as well as the server's.
+//
+// THE RECOMMENDATION IS A STANDING ONE
+// It is kept as a rule ("the fastest by bus"), not as a chosen card, and it is
+// re-applied every time the list re-renders. The results re-plan themselves
+// while they are open, so the fastest option at 17:40 need not be the fastest
+// at 17:45 — a recommendation pinned to a card would quietly become a
+// recommendation for the wrong one.
+
+/** The standing recommendation, or null. { pick, worst, mode, start } */
+let _aiPick = null;
+
+/** Accent-blind, punctuation-blind comparison: the model writes prose, not ids. */
+function _aiNorm(s) {
+    return String(s || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+/**
+ * A place the assistant named, as something the search fields can hold.
+ *
+ * @returns a stop id, 'GPS', or null when nothing matches — which is a refusal,
+ *          not a fallback. There is no sensible default for "where are you
+ *          going", and the nearest-looking name is how a traveller ends up
+ *          routed somewhere they never asked for.
+ */
+function resolveAiPlace(name) {
+    const n = _aiNorm(name);
+    if (!n) return null;
+    if (n === 'gps' || n === _aiNorm(t('my_location')) || n === 'my location' || n === 'la mia posizione')
+        return 'GPS';
+
+    const stops = Object.values(STOPS);
+    // Last resort ignores spacing too: a model that writes "Staz FFSS" for
+    // "Staz. FF.SS." has named the right stop, and the tiers above it keep this
+    // one from being reached by anything less definite.
+    const squash = v => _aiNorm(v).replace(/ /g, '');
+    const hit = stops.find(s => _aiNorm(s.name) === n)
+             || stops.find(s => _aiNorm(s.id)   === n)
+             || stops.find(s => _aiNorm(s.name).startsWith(n))
+             || stops.find(s => _aiNorm(s.name).includes(n))
+             || stops.find(s => squash(s.name) === squash(n))
+             || stops.find(s => squash(s.name).includes(squash(n)));
+    return hit ? hit.id : null;
+}
+
+/**
+ * Which of the returned options the recommendation points at.
+ *
+ * <p>Scored here rather than by setting the sort dropdown, for two reasons: the
+ * traveller's own ranking must not be changed underneath them just because they
+ * asked a question, and "the opposite" — the slowest, the least green — is not
+ * one of the four rankings the dropdown offers.
+ */
+function aiBestOption(options, spec) {
+    if (!Array.isArray(options) || !options.length || !spec) return null;
+
+    let pool = options;
+    if (spec.mode) {
+        // A chain counts as its parts: "the fastest by bus" should still find a
+        // bus-and-scooter itinerary if that is the only bus there is.
+        const exact  = options.filter(o => o.mode === spec.mode);
+        const within = options.filter(o => String(o.mode).split('_').includes(spec.mode));
+        pool = exact.length ? exact : (within.length ? within : options);
+    }
+
+    // Higher is better in every row, so "worst" is simply the other end
+    const score = {
+        FAST:   o => -sortValueOr(o.duration_minutes, Number.MAX_SAFE_INTEGER),
+        CHEAP:  o => -sortValueOr(o.cost_euros,       Number.MAX_SAFE_INTEGER),
+        ECO:    o =>  sortValueOr(o.green_index,      0),
+        CUSTOM: o =>  customScore(o, pool)
+    }[spec.pick];
+    if (!score) return null;
+
+    const ranked = [...pool].sort((a, b) => score(b) - score(a));
+    return spec.worst ? ranked[ranked.length - 1] : ranked[0];
+}
+
+/** The one line that says why this card and not another. */
+function aiRecommendationReason(opt, spec) {
+    const key = 'ai_why_' + spec.pick + (spec.worst ? '_worst' : '');
+    const value = {
+        FAST:   opt.duration_minutes,
+        CHEAP:  (opt.cost_euros ?? 0).toFixed(2),
+        ECO:    opt.green_index,
+        CUSTOM: null
+    }[spec.pick];
+    let why = tf(key, { v: value });
+    // Only claim the mode when the option actually is one. Asked for the fastest
+    // by bike on a search that returned no bike, aiBestOption falls back to the
+    // whole set — and "the fastest by bike" over a scooter card would be a
+    // sentence the card itself contradicts.
+    const honoured = spec.mode && String(opt.mode).split('_').includes(spec.mode);
+    if (honoured) why += tf('ai_why_mode', { mode: t('mode_' + spec.mode.toLowerCase()) || spec.mode });
+    return why;
+}
+
+/**
+ * Draws the standing recommendation onto whatever is currently rendered.
+ *
+ * <p>Called at the end of every render, so it survives the automatic refresh
+ * and follows the results when they change.
+ */
+function applyAiRecommendation() {
+    if (!_aiPick || !window._lastSearchData) return;
+
+    const opt = aiBestOption(window._lastSearchData.options, _aiPick);
+    if (!opt) return;
+
+    const key  = optionKey(opt);
+    const card = document.getElementById('card-' + key);
+    if (!card) return;
+
+    card.classList.add('route-card--ai');
+
+    const label = document.createElement('div');
+    label.className = 'ai-reco-tag';
+    label.textContent = '🤖 ' + t('ai_reco_label') + ' · ' + aiRecommendationReason(opt, _aiPick);
+    card.insertBefore(label, card.firstChild);
+
+    // Agreed in the chat, but not yet done. Starting a journey is the one thing
+    // the assistant does that writes anything down — the fare, the CO2, the eco
+    // points, the Last Routes entry — and whether the traveller really agreed is
+    // a judgement the model makes from their words. The last step across that
+    // line is a button, so the guarantee is in the app rather than in a prompt.
+    //
+    // Consumed here rather than on the next render: the results refresh
+    // themselves every minute, and a flag left standing would ask again, and
+    // again, for as long as the list stayed open.
+    if (_aiPick.start) {
+        _aiPick.start = false;
+        askAiStart(key, opt);
+        return;
+    }
+
+    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/** The option waiting on a yes, or null. */
+let _aiStartPending = null;
+
+/** Names the itinerary and why it was chosen, then waits. */
+function askAiStart(key, opt) {
+    _aiStartPending = key;
+
+    const body = document.getElementById('aiStartBody');
+    if (body) body.textContent = tf('ai_start_body', {
+        opt: (MODE_ICONS[opt.mode] || '') + ' ' + (opt.mode_label || opt.mode),
+        why: aiRecommendationReason(opt, _aiPick)
+    });
+
+    const modal = document.getElementById('aiStartModal');
+    if (modal) modal.classList.add('open');
+}
+
+function confirmAiStart() {
+    const key = _aiStartPending;
+    closeAiStart();
+    if (!key) return;
+
+    // The list may have re-planned while the question was on screen. It should
+    // not have — canRefreshRoutes holds off while this is open — but starting a
+    // journey on an option that is no longer offered is not a thing to leave to
+    // that holding true.
+    if (!(window._routeOptions || {})[key]) { showToast(t('err_load_routes'), true); return; }
+
+    selectMode(key);
+    showToast(t('ai_started_for_you'));
+    startJourney();
+}
+
+function cancelAiStart() {
+    closeAiStart();
+    // The card keeps its recommendation: refusing to be driven is not refusing
+    // the suggestion, and it is still one tap away.
+    showToast(t('ai_start_cancelled'));
+}
+
+function closeAiStart() {
+    _aiStartPending = null;
+    const modal = document.getElementById('aiStartModal');
+    if (modal) modal.classList.remove('open');
+}
+
+/**
+ * Runs what the assistant was asked to do.
+ *
+ * <p>Both ends are resolved before anything is written, so a half-understood
+ * instruction leaves the fields as they were instead of half-filled.
+ */
+async function applyAiAction(action) {
+    if (!action) return;
+
+    const from = action.from ? resolveAiPlace(action.from) : null;
+    const to   = action.to   ? resolveAiPlace(action.to)   : null;
+
+    if (action.from && !from) { showToast(tf('ai_place_unknown', { name: action.from }), true); return; }
+    if (action.to   && !to)   { showToast(tf('ai_place_unknown', { name: action.to   }), true); return; }
+
+    if (from) setStop(document.getElementById('originSelect'), from);
+    if (to)   setStop(document.getElementById('destSelect'),   to);
+
+    _aiPick = action.pick
+        ? { pick: action.pick, worst: !!action.worst, mode: action.mode || null, start: !!action.start }
+        : null;
+
+    // Out of the way: what happens next happens on the map and in the list
+    closeAI();
+    await doSearch();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// KEEPING THE PROPOSED ROUTES TRUE
+// ══════════════════════════════════════════════════════════════════
+// The cards carry absolute times — "17:42 → 18:05" — so they never look stale.
+// That is the problem: at 17:45 the card still reads 17:42 and still offers to
+// start a journey on a bus that has gone. Nothing on screen says so, because a
+// clock face does not fade. So the results re-plan themselves while they are
+// open, and what the traveller reads is what the timetable says now.
+//
+// WHAT IS RE-ASKED, AND WHAT IS NOT
+// The refresh re-sends the payload of the last search that actually ran, not
+// the current state of the fields. Someone half-way through typing a new
+// destination has not asked for anything yet, and a background refresh must not
+// quietly answer a question they are still writing.
+//
+// IT MUST NOT COUNT
+// /journeys/search increments "Journey Searches", the denominator of the
+// selection rate on the operator's dashboard. Repeats carry refresh:true and
+// the server leaves the counter alone — one search asked for is one search.
+// They still pass the rate limiter, which is the guard that matters here: every
+// plan is a billed routing request, so the refresh has to earn its cost.
+//
+// WHEN IT RUNS
+// Only while somebody is actually looking: the results on screen, the tab
+// visible, no card opened, no journey started, and a search for "now" rather
+// than for a time the traveller picked — a plan for 18:00 tomorrow does not go
+// stale. A hidden tab refreshes nothing at all, and gets one refresh when it
+// comes back, which is the moment the times are most likely to be wrong.
+
+/** How often the open results re-plan themselves. */
+const ROUTES_REFRESH_MS = 60000;
+
+/** Coming back to the tab re-plans only if what is on screen is older than this. */
+const ROUTES_STALE_MS = 45000;
+
+let _routesRefreshTimer = null;
+let _routesFetchedAt = 0;
+let _routesRefreshing = false;
+
+/**
+ * True when re-planning now would be useful and would not interrupt anybody.
+ *
+ * <p>Each clause is a way the refresh would be wrong rather than merely
+ * unnecessary: no payload means no search has run; a picked time means the plan
+ * is not relative to now; an open detail sheet or a running journey means the
+ * traveller has committed to one of these options and pulling the list out from
+ * under them would take it away.
+ */
+function canRefreshRoutes() {
+    if (!window._lastSearchPayload || !window._lastSearchData) return false;
+    if (_pickerHour !== null) return false;
+    if (selectedJourney) return false;
+    if (document.getElementById('routeDetailSheet')?.classList.contains('open')) return false;
+    // A question naming one of these options is on screen; re-planning would
+    // change what the traveller is being asked about while they read it.
+    if (_aiStartPending) return false;
+    if (document.hidden) return false;
+    // The results live in the map pane; anywhere else they are not being read
+    return document.getElementById('pane-map')?.classList.contains('active') === true;
+}
+
+/**
+ * Re-plans the last search and redraws the cards.
+ *
+ * <p>Silent by design. A refresh that fails leaves the previous results exactly
+ * where they were: they are a few minutes old, which is worse than fresh ones
+ * and very much better than an error panel where the traveller's routes used to
+ * be. The rate limiter answering 429 is the ordinary case of that.
+ */
+async function refreshRoutes() {
+    if (_routesRefreshing || !canRefreshRoutes()) return;
+    _routesRefreshing = true;
+
+    const list = document.querySelector('.routes-list');
+    const scrollTop = list ? list.scrollTop : 0;
+    markRoutesUpdating();
+
+    try {
+        const r = await apiFetch('/journeys/search', {
+            method: 'POST',
+            // refresh:true — plan it, but do not count it as a new search
+            body: JSON.stringify({ ...window._lastSearchPayload, refresh: true })
+        });
+        if (!r.ok) throw new Error('refresh ' + r.status);
+        const data = await r.json();
+
+        // Checked again: the await gave the traveller a second in which to open
+        // a card or start a journey, and redrawing the list would close it.
+        if (!canRefreshRoutes()) return;
+
+        window._lastSearchData = data;
+        _routesFetchedAt = Date.now();
+        renderRoutes(data);
+        // Where they were reading, not the top of the list
+        if (list) list.scrollTop = scrollTop;
+    } catch (e) {
+        // The whole error, not just its message: a refresh can fail at the
+        // request or at the redraw, and only the stack says which.
+        console.warn('[ROUTES] refresh failed:', e);
+    } finally {
+        _routesRefreshing = false;
+        markRoutesFreshness();
+    }
+}
+
+/** Starts the cycle. Called by every search that returns results. */
+function startRoutesRefresh() {
+    stopRoutesRefresh();
+    _routesFetchedAt = Date.now();
+    markRoutesFreshness();
+    _routesRefreshTimer = setInterval(refreshRoutes, ROUTES_REFRESH_MS);
+}
+
+function stopRoutesRefresh() {
+    if (_routesRefreshTimer) clearInterval(_routesRefreshTimer);
+    _routesRefreshTimer = null;
+    _routesFetchedAt = 0;
+}
+
+/**
+ * A background tab is told nothing and asks for nothing. Returning to it is the
+ * one moment the times on screen are certainly out of date, so that is where
+ * the catch-up belongs — one request, not the minutes' worth that were skipped.
+ */
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (!_routesRefreshTimer) return;
+    if (Date.now() - _routesFetchedAt > ROUTES_STALE_MS) refreshRoutes();
+});
+
+/** The line under the cards that says how old they are. */
+function routesFreshnessEl() {
+    return document.getElementById('routesFreshness');
+}
+
+function markRoutesUpdating() {
+    const el = routesFreshnessEl();
+    if (el) el.textContent = t('routes_updating');
+}
+
+function markRoutesFreshness() {
+    const el = routesFreshnessEl();
+    if (!el) return;
+    el.textContent = _routesFetchedAt
+        ? tf('routes_updated', { time: _fmtHHMM(new Date(_routesFetchedAt)) })
+        : '';
 }
 
 // ── Route rendering ───────────────────────────────────────────────
@@ -2149,6 +2614,8 @@ function renderRoutes(data) {
 
     if (!data.options || data.options.length === 0) {
         list.innerHTML = noticeHtml + `<div style="padding:20px;color:var(--text-soft);font-size:13px">${t('no_routes')}</div>`;
+        // Nothing on screen whose times could go stale
+        stopRoutesRefresh();
         return;
     }
 
@@ -2217,7 +2684,16 @@ function renderRoutes(data) {
         ${btn.label}
     </button>
 </div>`;
-    }).join('');
+    }).join('')
+    // Says the times are being kept true rather than leaving the traveller to
+    // wonder how old a departure at 17:42 is.
+    + '<div class="routes-freshness" id="routesFreshness"></div>';
+
+    markRoutesFreshness();
+    // Re-applied here, not once after the search: the list re-renders on every
+    // refresh and on every change of ranking, and the recommendation has to
+    // follow the results rather than the card it first landed on.
+    applyAiRecommendation();
 }
 
 /**
@@ -2474,6 +2950,15 @@ function clearJourneySelection() {
     // of them leaves a journey to watch. endJourney stops it too, but this is
     // the path every other teardown takes.
     stopDelayWatch();
+    stopLivePosition();
+
+    // A "time is up" still on screen asks whether to resume a journey that is
+    // being taken apart right now, and Resume would put minutes on a counter
+    // that no longer exists. The arrival popup is left alone on purpose: it
+    // reports something already finished, and it is shown through this very
+    // teardown.
+    if (_journeyEndReason === 'time') closeArrivalPopup();
+    _activeJourneyDestName = null;
 
     // Live ETA countdown, bus polling, bus markers and the dashed preview
     clearInterval(window._etaInterval);
@@ -3002,17 +3487,10 @@ async function startJourney() {
               </button>
             </div>`;
 
-        let remaining = durationMin;
-        window._etaInterval = setInterval(() => {
-            if (remaining > 0) {
-                remaining--;
-                const el = document.getElementById('etaCounter');
-                if (el) el.textContent = remaining + ' min';
-            } else {
-                clearInterval(window._etaInterval);
-                showToast(t('toast_arrived'));
-            }
-        }, 60000);
+        // Remembered so the clock can name the destination when it runs out,
+        // without reaching back into a search that may be long gone.
+        _activeJourneyDestName = dest.name;
+        startEtaCountdown(durationMin);
 
         showToast(tf('toast_journey_started', { min: durationMin }));
 
@@ -3038,6 +3516,12 @@ async function startJourney() {
         // for delays. Only now — a search the traveller merely looked at is not
         // something they are waiting for.
         startDelayWatch((window._routeOptions || {})[selectedJourney.key || selectedJourney.mode]);
+
+        // And from here the map can say where along the route the traveller has
+        // got, and notice by itself when they reach the end of it.
+        startLivePosition(
+            { lat: dest.lat, lon: dest.lon, name: dest.name },
+            journeyRoutePath(origin, dest));
 
     } catch (err) {
         console.error('startJourney failed:', err);
@@ -3237,8 +3721,13 @@ function resetSearchFields() {
     // Without this the sort chips would re-render the stale cards through
     // setSort(), putting the completed journey straight back on screen.
     window._lastSearchData = null;
+    window._lastSearchPayload = null;
+    // The assistant's recommendation belonged to the search being cleared
+    _aiPick = null;
+    if (_aiStartPending) closeAiStart();
     window._currentOrigin  = null;
     window._currentDest    = null;
+    stopRoutesRefresh();
 }
 
 /**
@@ -3859,6 +4348,11 @@ async function sendAI(presetText) {
         if (Array.isArray(data.suggestions) && data.suggestions.length) {
             renderSuggestions(data.suggestions);
         }
+
+        // …and do what was agreed, if anything was. After the bubble is on
+        // screen: the traveller should read what is about to happen before the
+        // panel closes under them.
+        if (data.action) applyAiAction(data.action);
     } catch (e) {
         waitMsg.textContent = t('ai_conn_error');
     } finally {
@@ -5050,6 +5544,354 @@ async function checkDelay() {
         // A missed poll is not worth telling anyone about; the next one follows
         console.warn('[DELAY] poll failed:', e);
     }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// WHERE YOU ARE ALONG THE ROUTE
+// ══════════════════════════════════════════════════════════════════
+// Not navigation. There are no instructions, no re-routing, no "turn left in
+// 200 m": the itinerary was decided before the journey started and does not
+// change. All this answers is the one question a drawn line cannot — how far
+// along it you have got — with an arrow sitting ON the line, pointing the way
+// the line goes.
+//
+// SNAPPED, NOT PLOTTED
+// The fix is projected onto the drawn path and the arrow is placed at the
+// projection, not at the raw coordinate. Two reasons. A raw dot drifting ten
+// metres beside the line invites the reading "you are off route", which is
+// false — it is GPS noise on a pavement the geometry does not model. And the
+// arrow's heading comes from the segment it lands on, so it points along the
+// journey rather than wherever the phone happens to be facing.
+//
+// NOTHING IS KEPT
+// The position never leaves the device: it moves a marker and is measured
+// against the destination. No request carries it, nothing writes it down, and
+// the watch stops the moment the journey does.
+//
+// ARRIVAL
+// The same fix says when the destination has been reached, which is the third
+// way a journey can end — the other two being End Journey and the clock. It
+// only ends a journey that was somewhere else first (see `armed`): a trip whose
+// destination is where you already stand would otherwise close itself on its
+// first fix, before the traveller had gone anywhere.
+
+/** Close enough to call it arrived. Wider than GPS noise, tighter than a block. */
+const ARRIVAL_RADIUS_M = 75;
+
+/**
+ * A fix vaguer than this cannot end a journey. Indoors or under cover the
+ * browser will happily report a position with 500 m of error, and that circle
+ * covers the destination from streets away — the journey would close while the
+ * traveller was still on the bus.
+ */
+const ARRIVAL_MAX_ACCURACY_M = 150;
+
+let _livePos = null;
+
+/**
+ * The geometry the journey actually drew, in the order it is travelled.
+ *
+ * Rebuilt from the legs rather than borrowed from the fitBounds array: that one
+ * gets the GPS point pushed onto it, and a route that detours to wherever the
+ * traveller was standing is not the route.
+ */
+function journeyRoutePath(origin, dest) {
+    const drawn = ((selectedJourney && selectedJourney.legs) || [])
+        .filter(l => l.stop_coords && l.stop_coords.length)
+        .flatMap(l => l.stop_coords.map(c => [c[0], c[1]]));
+    return drawn.length > 1
+        ? drawn
+        : [[origin.lat, origin.lon], [dest.lat, dest.lon]];
+}
+
+/**
+ * The point on the path closest to a position, and the direction the path runs
+ * there.
+ *
+ * <p>Flat-earth on purpose: a journey spans a few kilometres, and over that a
+ * local metres-per-degree conversion is accurate to centimetres while costing
+ * one cosine instead of a haversine per segment.
+ *
+ * @returns {{lat:number, lon:number, bearing:number, offRouteM:number}|null}
+ */
+function projectOntoRoute(lat, lon, path) {
+    if (!Array.isArray(path) || path.length < 2) return null;
+
+    const mPerLat = 111320;
+    const mPerLon = 111320 * Math.cos(lat * Math.PI / 180);
+    if (!isFinite(mPerLon) || Math.abs(mPerLon) < 1) return null;
+
+    // Metres east and north of the fix, which puts the fix itself at the origin
+    // and turns "distance to this segment" into "distance from (0,0)".
+    const east  = p => (p[1] - lon) * mPerLon;
+    const north = p => (p[0] - lat) * mPerLat;
+
+    let best = null;
+    for (let i = 0; i < path.length - 1; i++) {
+        const ax = east(path[i]),     ay = north(path[i]);
+        const bx = east(path[i + 1]), by = north(path[i + 1]);
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        // A repeated coordinate has no direction to offer, and would divide by zero
+        if (len2 === 0) continue;
+
+        let tt = -(ax * dx + ay * dy) / len2;
+        tt = Math.max(0, Math.min(1, tt));          // stay on the segment, not its line
+        const px = ax + tt * dx, py = ay + tt * dy;
+        const d2 = px * px + py * py;
+
+        if (!best || d2 < best.d2) {
+            best = { d2, px, py, bearing: (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360 };
+        }
+    }
+    if (!best) return null;
+
+    return {
+        lat: lat + best.py / mPerLat,
+        lon: lon + best.px / mPerLon,
+        bearing: best.bearing,
+        offRouteM: Math.sqrt(best.d2)
+    };
+}
+
+/** Rotation is applied to the inner div so a heading change can animate. */
+function journeyArrowIcon(bearing) {
+    return L.divIcon({
+        className: 'jr-arrow-icon',
+        html: '<div class="jr-arrow" style="transform:rotate(' + Math.round(bearing) + 'deg)">'
+            + '<svg viewBox="0 0 30 30" aria-hidden="true">'
+            +   '<path class="jr-arrow-body" d="M15 3 L24 26 L15 21 L6 26 Z"/>'
+            + '</svg></div>',
+        iconSize:   [30, 30],
+        iconAnchor: [15, 15]
+    });
+}
+
+/** Called by startJourney. Silent and harmless when the setting is off. */
+function startLivePosition(dest, path) {
+    stopLivePosition();
+
+    if (!_showLivePosition) return;
+    if (!navigator.geolocation) return;
+    if (!dest || dest.lat == null || dest.lon == null) return;
+
+    _livePos = {
+        dest, path,
+        marker: null,
+        // The geofence arms only after a fix lands outside it — see the note above
+        armed: false,
+        done:  false,
+        watchId: navigator.geolocation.watchPosition(
+            onJourneyFix,
+            // A refused or failed fix is not worth interrupting a journey for:
+            // the arrow simply never appears, which is the same as the setting
+            // being off, and every other way of ending the journey still works.
+            () => {},
+            { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+        )
+    };
+}
+
+function stopLivePosition() {
+    if (!_livePos) return;
+    if (_livePos.watchId != null && navigator.geolocation)
+        navigator.geolocation.clearWatch(_livePos.watchId);
+    if (_livePos.marker) map.removeLayer(_livePos.marker);
+    _livePos = null;
+}
+
+function onJourneyFix(pos) {
+    const w = _livePos;
+    if (!w || w.done) return;
+
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const accuracy = pos.coords.accuracy;
+
+    // ── The arrow, on the line ──
+    const snapped = projectOntoRoute(lat, lon, w.path);
+    const at = snapped || { lat, lon, bearing: 0 };
+
+    if (!w.marker) {
+        w.marker = L.marker([at.lat, at.lon], {
+            icon: journeyArrowIcon(at.bearing),
+            // Above the blue dot's 1000, so the two never argue over the same pixel
+            zIndexOffset: 1200,
+            // Informational: it must never swallow a tap meant for the route
+            interactive: false
+        }).addTo(map);
+
+        // One "you" on the map. The plain dot returns when the journey ends.
+        if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
+    } else {
+        w.marker.setLatLng([at.lat, at.lon]);
+        const el = w.marker.getElement() && w.marker.getElement().querySelector('.jr-arrow');
+        if (el) el.style.transform = 'rotate(' + Math.round(at.bearing) + 'deg)';
+        else w.marker.setIcon(journeyArrowIcon(at.bearing));
+    }
+
+    // The rest of the app reads the real position, not the snapped one: leaving
+    // the journey has to put the dot back where the traveller actually is.
+    userLat = lat;
+    userLon = lon;
+
+    // ── Arrival ──
+    const toDest = map.distance([lat, lon], [w.dest.lat, w.dest.lon]);
+    if (!w.armed) {
+        if (toDest > ARRIVAL_RADIUS_M) w.armed = true;
+        return;
+    }
+    if (toDest <= ARRIVAL_RADIUS_M && accuracy <= ARRIVAL_MAX_ACCURACY_M) {
+        w.done = true;                       // before endJourney, which tears this down
+        arriveAtDestination(w.dest.name);
+    }
+}
+
+/**
+ * How a journey ends, and the one case where it does not.
+ *
+ * <p>Three things can finish a journey: End Journey, the destination being
+ * reached, and the estimate running out. The first two are facts — a tap, or a
+ * position inside the destination's radius — and both close the journey there
+ * and then. The third is not a fact about the traveller at all: it says the
+ * itinerary took longer than the planner thought, which happens on every bus
+ * that runs late, and it is the ending that matters most exactly when the live
+ * position is switched off and nothing knows where anybody is.
+ *
+ * <p>So the clock asks instead of deciding. The journey keeps running — map,
+ * arrow, delay watch, panel, all untouched — until the traveller says whether
+ * they are done.
+ *
+ * <p><b>Resuming is not restarting.</b> Nothing about the trip is recorded a
+ * second time: the fare, the CO₂, the eco points and the Last Routes entry were
+ * all written by the one POST to /journeys/select that startJourney made, and
+ * resuming never goes near it. It only puts minutes back on the counter of a
+ * journey that was never torn down. Ending and re-planning the same trip WOULD
+ * count it twice, which is the reason the teardown is deferred rather than
+ * undone.
+ */
+
+/** Which ending the popup is currently asking about, or null when it is closed. */
+let _journeyEndReason = null;
+
+/** Minutes handed back by Resume. Long enough to matter, short enough to ask again. */
+const RESUME_EXTRA_MIN = 10;
+
+/** The destination of the journey now running, so the clock can name it later. */
+let _activeJourneyDestName = null;
+
+/**
+ * The countdown on the journey card.
+ *
+ * <p>Its own function because Resume needs to start it again, and re-entering
+ * startJourney to get a fresh timer would re-record the whole journey.
+ */
+function startEtaCountdown(minutes) {
+    clearInterval(window._etaInterval);
+
+    let remaining = Math.max(1, Math.round(minutes));
+    const el0 = document.getElementById('etaCounter');
+    // The unit belongs to the label underneath ("min left"); writing it here as
+    // well read "33 min" above "MIN LEFT".
+    if (el0) el0.textContent = remaining;
+
+    window._etaInterval = setInterval(() => {
+        remaining--;
+        const el = document.getElementById('etaCounter');
+        if (el) el.textContent = Math.max(0, remaining);
+        if (remaining <= 0) {
+            clearInterval(window._etaInterval);
+            window._etaInterval = null;
+            showJourneyEndPopup('time', _activeJourneyDestName);
+        }
+    }, 60000);
+}
+
+/** Destination reached without End Journey being tapped: a fact, so it closes. */
+function arriveAtDestination(destName) {
+    showJourneyEndPopup('arrived', destName);
+    endJourney();
+}
+
+/**
+ * Same shell, two endings.
+ *
+ * <p>Arrival is something we measured, so the popup may say you are there, and
+ * by the time it is on screen the journey is already closed — one button, which
+ * only dismisses. Time running out is a question: the journey is still live
+ * behind the popup, so there are two buttons and one of them has to be answered.
+ */
+function showJourneyEndPopup(reason, destName) {
+    const arrived = reason === 'arrived';
+    _journeyEndReason = reason;
+
+    const icon = document.getElementById('arrivalIcon');
+    if (icon) icon.textContent = arrived ? '\u{1F389}' : '\u{23F1}\u{FE0F}';
+
+    const title = document.getElementById('arrivalTitle');
+    if (title) title.textContent = t(arrived ? 'arrival_title' : 'timeup_title');
+
+    const body = document.getElementById('arrivalBody');
+    if (body) body.textContent = arrived
+        ? tf('arrival_body', { dest: destName || t('your_destination') })
+        : t('timeup_body');
+
+    // Resume only makes sense while there is still a journey to resume
+    const resume = document.getElementById('journeyEndResumeBtn');
+    if (resume) {
+        resume.style.display = arrived ? 'none' : '';
+        resume.textContent = t('btn_resume');
+    }
+    const dismiss = document.getElementById('journeyEndDismissBtn');
+    if (dismiss) dismiss.textContent = t(arrived ? 'btn_ok' : 'btn_finished');
+
+    const modal = document.getElementById('arrivalModal');
+    if (modal) modal.classList.add('open');
+}
+
+/**
+ * "I have finished" on the time popup, or "OK" on the arrival one.
+ *
+ * <p>After arrival the journey is already closed and this only clears the
+ * screen. After the clock it is still running, and this is the tap that ends it.
+ */
+function dismissJourneyEndPopup() {
+    const reason = _journeyEndReason;
+    closeArrivalPopup();
+    if (reason === 'time') endJourney();
+}
+
+/**
+ * "Resume": the estimate was wrong, the journey was not.
+ *
+ * <p>Everything the journey owns is still there — nothing was torn down — so
+ * this puts minutes back on the counter and gets out of the way. No request is
+ * made and nothing is written, which is what keeps the fare, the CO₂, the eco
+ * points and Last Routes counted exactly once.
+ */
+function resumeJourney() {
+    closeArrivalPopup();
+    startEtaCountdown(RESUME_EXTRA_MIN);
+    showToast(tf('toast_journey_resumed', { min: RESUME_EXTRA_MIN }));
+}
+
+function closeArrivalPopup() {
+    _journeyEndReason = null;
+    const modal = document.getElementById('arrivalModal');
+    if (modal) modal.classList.remove('open');
+}
+
+/**
+ * The backdrop.
+ *
+ * <p>It dismisses the arrival popup, which reports something already done, and
+ * is deliberately inert on the time popup: that one is a question with two
+ * answers, and a stray tap outside the card must not be read as either.
+ */
+function onJourneyEndBackdrop(e) {
+    if (e && e.target !== document.getElementById('arrivalModal')) return;
+    if (_journeyEndReason === 'time') return;
+    closeArrivalPopup();
 }
 
 // ══════════════════════════════════════════════════════════════════

@@ -138,6 +138,20 @@ body{background:var(--bg);color:var(--text);font-family:var(--display);
 }
 #err-google { display: block; text-align: center; margin-top: 8px; }
 
+/* Centred under the button it qualifies. Toned down with opacity rather than
+   --dim: this is a condition of entry, and --dim on --panel falls under 4.5:1,
+   which is too faint to read for the one line that says who may sign in. */
+.google-hint {
+    margin-top: 10px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.45;
+    letter-spacing: .3px;
+    color: var(--text);
+    opacity: .6;
+}
+
 /* ── PASSWORD STRENGTH ── */
 /* Five segments, one per rule. Green only when every rule passes, so the colour
    answers "will this be accepted?" rather than "does this feel long enough?" */

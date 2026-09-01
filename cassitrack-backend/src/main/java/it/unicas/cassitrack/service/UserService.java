@@ -41,6 +41,18 @@ public class UserService {
                 .toList();
     }
 
+    /**
+     * The accounts themselves, for callers that need a field the DTO does not
+     * carry — the activity panel reads created_at and last_login_at.
+     *
+     * <p>Not a way around the masking in {@link UserDTO}: whatever a caller
+     * builds from these is its own to keep safe, and the panel publishes only
+     * name, e-mail, role and the two timestamps.
+     */
+    public List<User> getAllUsersRaw() {
+        return userRepository.findAll();
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // GET ACTIVE USER
     // ─────────────────────────────────────────────────────────────────

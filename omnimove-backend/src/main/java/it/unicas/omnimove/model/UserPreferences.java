@@ -27,6 +27,20 @@ public class UserPreferences {
     private Boolean notifyDelays;
 
     /**
+     * Whether a started journey draws the traveller's position on the route.
+     *
+     * <p>It is also what lets arrival be recognised without the button: the same
+     * fix that moves the arrow is the one compared against the destination. With
+     * this off, a journey ends only by End Journey or by the clock — which is
+     * what the setting says under it.
+     *
+     * <p>No position is ever stored or sent. This flag decides whether the
+     * device looks at its own at all.
+     */
+    @Column(name = "show_live_position", nullable = false)
+    private Boolean showLivePosition = true;
+
+    /**
      * When it rains, bus options are sorted first and the reason is shown.
      * It never hides walking, bike or scooter — see V22.
      */

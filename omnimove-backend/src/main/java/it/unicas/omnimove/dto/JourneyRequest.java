@@ -30,6 +30,21 @@ public class JourneyRequest {
     /** True when departure_time should be treated as the desired *arrival* time. */
     @JsonProperty("arrive_by") private Boolean arriveBy;
 
+    /**
+     * True when this is the app re-asking a question it has already asked, to
+     * keep the times on screen honest as the minutes pass.
+     *
+     * <p>It plans exactly like any other search — the itinerary has to be real.
+     * What it must not do is count: "Journey Searches" on the dashboard means
+     * how often somebody asked for a route, and a screen that re-asks itself
+     * every minute would multiply that by however long the results were left
+     * open, taking the selection rate down with it. One search the traveller
+     * made stays one search however many times it is refreshed.
+     */
+    @JsonProperty("refresh") private Boolean refresh;
+
+    public boolean isRefresh() { return Boolean.TRUE.equals(refresh); }
+
     public void addMessage(String msg) { this.messages.add(msg); }
     private List<String> modes;
 

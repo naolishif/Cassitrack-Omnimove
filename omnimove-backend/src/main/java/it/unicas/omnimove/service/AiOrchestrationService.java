@@ -1,6 +1,8 @@
 package it.unicas.omnimove.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import it.unicas.omnimove.client.CassitrackClient;
+import it.unicas.omnimove.dto.AiAction;
 import it.unicas.omnimove.dto.BikeVehicleDTO;
 import it.unicas.omnimove.dto.ChatRequest;
 import it.unicas.omnimove.dto.ChatResponse;
@@ -125,13 +127,20 @@ public class AiOrchestrationService {
         try {
             String context = buildContext(userId, req.getContext()) + onScreenContext(req.getContext());
             String system = buildSystem(lang, context);
-            String answer = callModel(system, req.getHistory(), question);
+            String raw = callModel(system, req.getHistory(), question);
+
+            // The reply may end with one instruction line. It is lifted out here
+            // so the traveller never reads it, and so a model that writes a
+            // malformed one simply gets no action rather than a broken chat.
+            AiAction action = extractAction(raw);
+            String answer = stripAction(raw);
 
             return ChatResponse.builder()
                     .answer(answer)
                     .success(true)
                     .detectedLanguage(lang)
                     .suggestions(buildSuggestions(lang, req.getContext()))
+                    .action(action)
                     .build();
 
         } catch (Exception e) {
@@ -641,7 +650,133 @@ public class AiOrchestrationService {
                   assume, unless the context section below already says.
                 - If the weather is bad, warn about bike, scooter and walking.
                 - If asked about something outside Cassino transport, steer back.
+
+                DOING THINGS, NOT JUST SAYING THEM
+                You can fill in the traveller's search fields, run the search,
+                recommend one of the results, and — only when they have agreed —
+                start the journey for them. To do any of it, end your reply with
+                one line, exactly this shape and nothing else on it:
+
+                <<OMNIMOVE {"from":"Colosseo","to":"Universita Folcara","pick":"FAST","worst":false,"mode":null,"start":false}>>
+
+                - "from" and "to": a stop name spelled as it appears in the data
+                  below, or "GPS" for the traveller's own position, or null to
+                  leave that field as it is.
+                - "pick": FAST, CHEAP, ECO or CUSTOM — the four rankings the app
+                  offers. CUSTOM is the traveller's own profile. null if they
+                  only asked you to search.
+                - "worst": true when they asked for the opposite end — the
+                  slowest, the dearest, the least green, the one their profile
+                  ranks last. It flips whichever criterion is in "pick".
+                - "mode": BUS, BIKE, SCOOTER or WALK to keep the recommendation
+                  to one of them ("the fastest by bus"), otherwise null.
+                - "start": true ONLY if they have said you may start the journey
+                  for them. Offering to is not agreeing. Note what this does: the
+                  app puts the chosen itinerary in front of them with a Start
+                  Journey button already aimed at it, and waits for one tap. So
+                  say you have it ready for them to confirm — never that you have
+                  started it, because you have not.
+
+                WHEN TO WRITE THAT LINE
+                - Only after the traveller has confirmed. "How do I get to
+                  Folcara?" is a question — answer it. "Yes, plan it" is
+                  agreement — act on it.
+                - Never on the same turn you propose something. Propose, let them
+                  answer, then act.
+                - You must know both ends. If either is missing and you cannot
+                  read it from the context below, ask instead of guessing.
+                - Say in your sentence what you are doing and, when you are
+                  recommending an option, why that one — the traveller sees the
+                  recommendation on the card and your reason in the chat.
+                - Never mention the line itself, or the word OMNIMOVE in that
+                  form. It is removed before your reply is shown, and describing
+                  it makes you sound like you are talking about your own plumbing.
                 """ + " " + lang + "\n\nLive data:\n" + context;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  ACTIONS: WHAT THE ASSISTANT DOES, NOT WHAT IT SAYS
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * The one line of machine-readable text a reply may end with.
+     *
+     * <p>A marker rather than a JSON-only response format: the traveller still
+     * gets a sentence in their own language, written by the same model in the
+     * same breath as the decision, and the app gets the decision. Asking for
+     * structured output instead would mean composing the prose ourselves, in
+     * two languages, from fields.
+     */
+    private static final java.util.regex.Pattern ACTION_LINE =
+            java.util.regex.Pattern.compile("<<OMNIMOVE\\s*(\\{.*?})\\s*>>", java.util.regex.Pattern.DOTALL);
+
+    private static final Set<String> PICKS = Set.of("FAST", "CHEAP", "ECO", "CUSTOM");
+    private static final Set<String> ACTION_MODES = Set.of("BUS", "BIKE", "SCOOTER", "WALK");
+
+    private final ObjectMapper actionMapper = new ObjectMapper();
+
+    /**
+     * Reads the action out of a reply, or returns null.
+     *
+     * <p>Everything is checked rather than believed. The model is a text
+     * generator: it can invent a criterion, a mode that does not exist, or set
+     * start on a conversation where nobody agreed to anything. A field that does
+     * not survive validation is dropped, and an action left asking for nothing
+     * is dropped whole — the traveller keeps the sentence either way.
+     */
+    private AiAction extractAction(String raw) {
+        if (raw == null) return null;
+        java.util.regex.Matcher m = ACTION_LINE.matcher(raw);
+        if (!m.find()) return null;
+
+        try {
+            AiAction a = actionMapper.readValue(m.group(1), AiAction.class);
+
+            a.setFrom(cleanEndpoint(a.getFrom()));
+            a.setTo(cleanEndpoint(a.getTo()));
+
+            // Null-checked before the lookup: Set.of() throws on contains(null),
+            // and an omitted "mode" is the ordinary case, not an error.
+            String pick = upperOrNull(a.getPick());
+            a.setPick(pick != null && PICKS.contains(pick) ? pick : null);
+
+            String mode = upperOrNull(a.getMode());
+            a.setMode(mode != null && ACTION_MODES.contains(mode) ? mode : null);
+
+            // Starting a journey without a named option is not something anyone
+            // can have agreed to — see AiAction.isStartable
+            if (a.isStart() && a.getPick() == null) a.setStart(false);
+
+            if (!a.isUseful()) return null;
+
+            log.debug("AI action: from={} to={} pick={} worst={} mode={} start={}",
+                    a.getFrom(), a.getTo(), a.getPick(), a.isWorst(), a.getMode(), a.isStart());
+            return a;
+
+        } catch (Exception e) {
+            // A malformed marker is a model slip, not an outage: the answer is
+            // still worth showing, it just does not drive anything.
+            log.warn("Unreadable AI action '{}': {}", m.group(1), e.getMessage());
+            return null;
+        }
+    }
+
+    /** The reply as the traveller reads it: the marker, and the blank it leaves, removed. */
+    private String stripAction(String raw) {
+        if (raw == null) return "";
+        return ACTION_LINE.matcher(raw).replaceAll("").replaceAll("\\n{3,}", "\n\n").trim();
+    }
+
+    private static String cleanEndpoint(String v) {
+        if (v == null) return null;
+        String s = v.trim();
+        if (s.isEmpty()) return null;
+        // Long enough to be a stop name and short enough not to be a paragraph
+        return s.length() > 80 ? null : s;
+    }
+
+    private static String upperOrNull(String v) {
+        return v == null || v.isBlank() ? null : v.trim().toUpperCase();
     }
 
     // ════════════════════════════════════════════════════════════════════

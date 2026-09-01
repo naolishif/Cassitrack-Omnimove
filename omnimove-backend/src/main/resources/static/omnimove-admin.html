@@ -593,6 +593,20 @@
                 current session ends and they must use the new address.
             </div>
 
+            <!-- What this account has taken out of the system. Outside the block
+                 below on purpose: a download is not a journey, and the accounts
+                 that actually have downloads are the operator ones — leaving it
+                 in there hid the register on the only profiles it ever fills. -->
+            <div class="collapse" id="secExports">
+                <button class="collapse-head" onclick="toggleSection('secExports')">
+                    <span class="collapse-caret">▸</span>
+                    <span class="collapse-title" id="profileExportsTitle">Data downloads</span>
+                </button>
+                <div class="collapse-body">
+                    <div id="profileExports"></div>
+                </div>
+            </div>
+
             <!-- Hidden for admins: an operator account has no travel story -->
             <div id="travelBlock">
                 <div class="collapse" id="secMessages">
@@ -602,16 +616,6 @@
                     </button>
                     <div class="collapse-body">
                         <div id="profileMessages"></div>
-                    </div>
-                </div>
-
-                <div class="collapse" id="secExports">
-                    <button class="collapse-head" onclick="toggleSection('secExports')">
-                        <span class="collapse-caret">▸</span>
-                        <span class="collapse-title" id="profileExportsTitle">Data downloads</span>
-                    </button>
-                    <div class="collapse-body">
-                        <div id="profileExports"></div>
                     </div>
                 </div>
 

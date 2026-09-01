@@ -50,4 +50,21 @@ public class User {
     @NotBlank(message = "Telephone is required")
     @Column(name = "telephone", unique = true, nullable = false)
     private String telephone;
+
+    // ── Activity, added in V28 ──────────────────────────────────────
+    // Both are set by the application, never by a form: they answer "since
+    // when" and "last seen" on the user card without it having to read the
+    // whole access history of every row it draws.
+
+    @Column(name = "created_at", updatable = false)
+    private java.time.LocalDateTime createdAt;
+
+    @Column(name = "last_login_at")
+    private java.time.LocalDateTime lastLoginAt;
+
+    /** A row created outside the app keeps the column default; this covers the rest. */
+    @PrePersist
+    void stampCreation() {
+        if (createdAt == null) createdAt = java.time.LocalDateTime.now();
+    }
 }
