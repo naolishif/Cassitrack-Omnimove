@@ -2206,8 +2206,11 @@ body {
 .map-menu-fab { display: none; }
 
 @media (max-width: 768px) {
-    /* menu floats on the map now — hide the header hamburger */
-    .hamburger { display: none !important; }
+    /* The rule that hid the header hamburger in favour of a button floating on
+       the map is gone with the button: the menu lives in the header again. It
+       was !important, which is why it then had to be fought with another one —
+       and that override was what put the hamburger back on pages that had
+       deliberately hidden it. */
 
     /* search fills the row */
     .topbar-search { width: 100%; }
@@ -3450,4 +3453,163 @@ body {
     color: var(--text-dark);
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   PHONE HEADER — one row for the app, the rest folds away
+   ══════════════════════════════════════════════════════════════════
+   The header used to stack four rows before the map even began: wordmark,
+   two search fields with four buttons, a "Modes" label and the chips. On a
+   phone that is most of the screen spent on a form you have already filled.
+
+   Now the first row carries the app — menu, wordmark, and the control that
+   folds the rest — and everything below it collapses on a tap. The menu moves
+   off the map and into that row, where a menu belongs, so the map is left with
+   nothing floating over its top-left corner.
+
+   Desktop is untouched: it has room for all of it and a sidebar that is
+   always open. */
+
+.search-toggle { display: none; }
+
+@media (max-width: 768px) {
+
+    /* The header hamburger is the menu now; the one that floated on the map
+       is gone. Plain rules, so the per-pane rules below can still win. */
+    .hamburger { display: flex; order: 1; }
+    .map-menu-fab { display: none; }
+
+    /* Row one: menu, wordmark, fold. The wordmark takes the slack between
+       them rather than a whole row of its own. */
+    .topbar-logo {
+        flex: 1 1 auto;
+        order: 2;
+        margin-bottom: 0;
+        align-self: center;
+    }
+
+    /* A labelled pill, not a bare caret: the word is what tells you it is a
+       control and what it will do. The caret alone tested as decoration. */
+    .search-toggle {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        order: 3;
+        flex: 0 0 auto;
+        height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--border-mid);
+        border-radius: 999px;
+        background: var(--bg-app);
+        color: var(--text-mid);
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1;
+        cursor: pointer;
+        transition: background .18s ease;
+    }
+    .search-toggle:active { background: var(--border-mid); }
+    .search-toggle:hover  { border-color: var(--text-soft); color: var(--text-dark); }
+
+    /* The icon box is a fixed square so the pill does not resize by a pixel
+       when the chevron is swapped for the magnifier. */
+    .st-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 15px;
+        height: 15px;
+        font-size: 12px;
+        line-height: 1;
+    }
+    .st-chevron {
+        width: 13px;
+        height: 13px;
+        display: block;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+    .st-label { white-space: nowrap; letter-spacing: .1px; }
+
+    /* Everything the fold hides sits below that row */
+    .topbar-search { order: 4; }
+    .cats-label    { order: 5; }
+    .cats          { order: 6; }
+
+    /* ── Folded ──
+       display:none rather than a height animation: the rows contain inputs
+       and chips of their own heights, and animating an unknown height either
+       jumps or has to be measured every time the chips wrap. */
+    body.search-folded .topbar-search,
+    body.search-folded .cats,
+    body.search-folded .cats-label { display: none; }
+
+    /* ── Only the map plans a journey ──
+       Last Routes, Tickets and Timetable are full-screen subpages with a back
+       arrow and a title of their own; the menu, the fold and the search fields
+       have nothing to do there. Written against the map rather than as a list
+       of the other three, so a fourth subpage added later inherits the right
+       behaviour instead of the wrong one. */
+    body:not([data-pane="map"]) .hamburger,
+    body:not([data-pane="map"]) .search-toggle,
+    body:not([data-pane="map"]) .topbar-search,
+    body:not([data-pane="map"]) .cats,
+    body:not([data-pane="map"]) .cats-label { display: none; }
+
+    body.search-folded .topbar { padding-bottom: 8px; }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   MARKER LEGEND — which of the two is you
+   ══════════════════════════════════════════════════════════════════
+   A journey draws a dot and an arrow, and they are not the same thing: the dot
+   is the traveller, the arrow is where that position falls ON the route. When
+   you are a street away from the line the two sit apart, and without a key
+   that reads as one marker being wrong.
+
+   Shown only while the live position is actually being drawn — with the
+   setting off there is neither marker and nothing to explain. */
+
+.journey-legend {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 500;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 9px 11px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .94);
+    box-shadow: 0 2px 10px rgba(15, 23, 42, .18);
+    backdrop-filter: blur(3px);
+    pointer-events: none;      /* never in the way of the map underneath */
+}
+.journey-legend[hidden] { display: none; }
+
+.jl-row  { display: flex; align-items: center; gap: 8px; }
+.jl-key  { width: 20px; display: flex; align-items: center; justify-content: center; }
+.jl-text { font-size: 11px; font-weight: 600; color: var(--text-dark); white-space: nowrap; }
+
+/* The same blue circle the map draws, at the size a key needs */
+.jl-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #2563eb;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, .5);
+}
+/* …and the same arrow, from the same path data */
+.jl-arrow { width: 18px; height: 18px; display: block; }
+
+@media (max-width: 768px) {
+    /* Clear of the bottom sheet's handle */
+    .journey-legend { bottom: auto; top: 12px; left: 12px; }
 }
