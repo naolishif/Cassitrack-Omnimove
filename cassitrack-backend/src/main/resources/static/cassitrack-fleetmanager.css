@@ -1666,3 +1666,23 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .exp-btn:hover:not(:disabled) { color: #fff; background: var(--accent); }
 .exp-btn:disabled { opacity: .45; cursor: progress; }
 
+
+/* ── Dark basemap without an API key ──
+   The tiles are OpenStreetMap's own, which are light, and this dashboard is
+   dark. Inverting them here is what CARTO's dark_all used to provide before it
+   started stamping "API KEY REQUIRED" across every tile it served.
+
+   Scoped to .leaflet-tile-pane deliberately: routes, stop dots, vehicle markers
+   and popups sit in other panes, so they keep exactly the colours the code
+   gives them. Inverting the whole map would turn every line the wrong hue. */
+.leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) brightness(.92) contrast(.9);
+}
+
+/* The attribution rides in the tile pane's corner but is not a tile; without
+   this it would be inverted twice over and become unreadable. */
+.leaflet-control-attribution {
+    background: rgba(11, 18, 32, .75) !important;
+    color: #6b7f95 !important;
+}
+.leaflet-control-attribution a { color: #8fa6bd !important; }

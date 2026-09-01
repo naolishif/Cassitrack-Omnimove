@@ -72,10 +72,22 @@ window.addEventListener('load', () => {
         zoom: 14
     });
 
+    // OpenStreetMap, darkened in CSS — not CARTO.
+    //
+    // CARTO's dark_all basemap now needs an API key, and it does not say so in
+    // a way any code can catch: the tile still comes back 200 with a valid PNG,
+    // and "API KEY REQUIRED" is drawn INSIDE the image, diagonally across the
+    // map. Nothing throws, nothing logs, and the watermark simply appears under
+    // the buses. OMNIMOVE never had it because it draws plain OSM tiles.
+    //
+    // Plain OSM is light and this dashboard is dark, so the tile pane is
+    // inverted in CSS (see .leaflet-tile-pane). The filter is scoped to the
+    // tiles alone: routes, stops and vehicle markers live in other panes and
+    // keep the colours they are given.
     L.tileLayer(
-        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
         {
-            attribution: '© OpenStreetMap © CARTO',
+            attribution: '© OpenStreetMap contributors',
             maxZoom: 19
         }
     ).addTo(map);
@@ -1080,8 +1092,9 @@ function renderRoutesAdmin(){
                                     doubleClickZoom:false, scrollWheelZoom:false});
             rtMap.on('mouseover', () => rtMap.scrollWheelZoom.enable());
             rtMap.on('mouseout',  () => rtMap.scrollWheelZoom.disable());
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                        {attribution:'(c) OpenStreetMap (c) CARTO', maxZoom:19}).addTo(rtMap);
+            // Same basemap as the main map — see the note there on why not CARTO
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        {attribution:'(c) OpenStreetMap contributors', maxZoom:19}).addTo(rtMap);
 
             // Existing stops shown faintly, as a drawing reference.
             rtAllStops.forEach(s => {
