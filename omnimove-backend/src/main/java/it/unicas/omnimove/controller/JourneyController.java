@@ -24,6 +24,7 @@ import it.unicas.omnimove.service.TrafficAwareETAService;
 import it.unicas.omnimove.service.GoogleApiSettingsService;
 import it.unicas.omnimove.dto.StopArrivalResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -60,6 +61,7 @@ import java.util.stream.Stream;
 @RestController
 @RequestMapping("/api/v1/journeys")
 @RequiredArgsConstructor
+@Slf4j
 @Tag(name="Journey Planner", description="Multimodal journey planning")
 public class JourneyController {
 
@@ -275,25 +277,56 @@ public class JourneyController {
         }
     }
 
+    /**
+     * Plans a journey, and says why when it cannot.
+     *
+     * <p>Every failure used to leave here as a bare status with no body: a
+     * missing coordinate and a planner that threw were both indistinguishable
+     * from the outside, and the browser could only report "could not load
+     * routes". Each one now carries an {@code error} code and a sentence, and a
+     * planner failure is logged with the search that caused it — which is the
+     * difference between a bug report that can be acted on and one that says
+     * only that something went wrong.
+     */
     @PostMapping("/search")
-    public ResponseEntity<JourneyResponse> search(
+    public ResponseEntity<?> search(
             @RequestBody JourneyRequest request,
             @AuthenticationPrincipal UserDetails principal) {
 
         if (request.getOriginLat() == null || request.getDestLat() == null)
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error",   "MISSING_ENDPOINT",
+                    "message", "Both an origin and a destination are needed to plan a journey."));
 
         if (principal != null && !rateLimiter.allowJourneySearch(principal.getUsername()))
-            return ResponseEntity.status(429).build();
+            return ResponseEntity.status(429).body(Map.of(
+                    "error",   "RATE_LIMITED",
+                    "message", "Too many searches in the last hour. Try again shortly."));
 
         // FR-OM-009: count raw searches — but only the ones a person asked for.
         // The results screen re-plans itself while it is open so the departure
         // times stay true, and those repeats are the same question, not new ones.
         if (!request.isRefresh())
             journeyEventService.recordJourneySearchQuery();
-        JourneyResponse response = plannerService.plan(request);
 
-        return ResponseEntity.ok(response);
+        try {
+            return ResponseEntity.ok(plannerService.plan(request));
+
+        } catch (Exception e) {
+            // The search itself, in the log line: without the ends and the modes
+            // a stack trace says a plan failed but not which one, and the first
+            // question anyone asks is "with which filters?".
+            log.error("Journey search failed: {} -> {} modes={} arriveBy={} : {}",
+                    request.getOriginName(), request.getDestName(),
+                    request.getModes(), request.isArriveBy(), e.toString(), e);
+
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "error",   "PLANNER_FAILED",
+                    "message", "The journey could not be planned. Please try again.",
+                    // Echoed back so a report from the field identifies the case
+                    // without anyone having to reproduce it first.
+                    "modes",   request.getModes() == null ? List.of() : request.getModes()));
+        }
     }
 
     @GetMapping("/stops/{stopId}/arrivals")

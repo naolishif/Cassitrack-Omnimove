@@ -1749,29 +1749,316 @@ function ttSetMsg(id, txt, ok){
     el.classList.toggle('ok',  !!txt && !!ok);
 }
 
-// ── CSV export (shared) ───────────────────────────────────────────────────
-// Built in the browser from the rows already on screen, so the file always
-// matches what you are looking at (filters included) and no new endpoint is
-// exposed. Excel-friendly on purpose: a ';' separator and a UTF-8 BOM, or
-// Excel with Italian locale puts every row in one column and mangles accents.
-function csvCell(value){
-    if(value === null || value === undefined) return '';
-    const s = String(value);
-    // Quote when the value could break the row, and double any inner quote.
-    return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+// ── Table export — CSV, XLSX, PDF ─────────────────────────────────────────
+// The rows are still gathered here, from what the table is showing, so the file
+// keeps matching the screen filters included — that was always the point of
+// building the CSV in the browser. What moved to the server is the RENDERING:
+// one report, three formats, so a CSV and a PDF of the same table cannot
+// disagree, and the PDF is a laid-out document rather than window.print() of a
+// dashboard. Same shape as the OMNIMOVE analytics export.
+
+/** Everything a table needs to become a file. rows() may be async. */
+const EXPORTS = {
+    buses: {
+        title: 'Buses',
+        subtitle: () => filterSummary([
+            ['Search',  valueOf('dmSearch')],
+            ['Route',   labelOf('dmFilterRoute')],
+            ['Status',  labelOf('dmFilterStatus')]
+        ]),
+        columns: [
+            {header:'Bus ID',      get:b=>b.busId},
+            {header:'Plate',       get:b=>b.targa},
+            {header:'Route',       get:b=>b.routeName},
+            {header:'Route live',  get:b=>b.routeLive === true ? 'yes' : b.routeLive === false ? 'scheduled' : ''},
+            {header:'Capacity',    get:b=>b.numeroPosti},
+            {header:'Wheelchair',  get:b=>b.wheelchairAccessible ? 'yes' : 'no'},
+            {header:'Status',      get:b=>b.status},
+            {header:'Antenna ID',  get:b=>b.currentVehicleId}
+        ],
+        // Already the filtered set: dmRenderTable keeps what it drew
+        rows: () => dmBuses
+    },
+    stops: {
+        title: 'Stops',
+        subtitle: () => filterSummary([
+            ['Search', valueOf('stSearch')],
+            ['Active', labelOf('stFilterActive')]
+        ]),
+        columns: [
+            {header:'Stop ID',     get:s=>s.id},
+            {header:'Name',        get:s=>s.name},
+            {header:'Latitude',    get:s=>s.lat},
+            {header:'Longitude',   get:s=>s.lon},
+            {header:'Active',      get:s=>s.active === false ? 'no' : 'yes'},
+            {header:'Description', get:s=>s.description}
+        ],
+        rows: () => stFiltered()
+    },
+    routes: {
+        title: 'Routes',
+        subtitle: () => filterSummary([
+            ['Search', valueOf('rtSearch')],
+            ['Active', labelOf('rtFilterActive')]
+        ]),
+        columns: [
+            {header:'Route ID',   get:r=>r.id},
+            {header:'Short name', get:r=>r.shortName},
+            {header:'Long name',  get:r=>r.longName},
+            {header:'Colour',     get:r=>r.color},
+            {header:'Active',     get:r=>r.active === false ? 'no' : 'yes'}
+        ],
+        rows: () => rtFiltered()
+    },
+    trips: {
+        title: 'Timetable — runs',
+        subtitle: () => filterSummary([
+            ['Search', valueOf('tripsSearch')],
+            ['Route',  labelOf('tripsRoute')],
+            ['Bus',    labelOf('tripsBus')],
+            ['Status', labelOf('tripsStatus')]
+        ]),
+        columns: [
+            {header:'Trip ID',       get:t=>t.trip_id},
+            {header:'Route',         get:t=>t.route_name},
+            {header:'Plate',         get:t=>t.plate},
+            {header:'Antenna',       get:t=>t.vehicle_id},
+            {header:'Start',         get:t=>t.start_time},
+            {header:'End (sched.)',  get:t=>t.end_time},
+            {header:'End (real)',    get:t=>t.actual_end_time},
+            {header:'Stops done',    get:t=>t.stops_done},
+            {header:'Stops total',   get:t=>t.stops_total},
+            {header:'Progress %',    get:t=>t.progress_pct},
+            {header:'Phase',         get:t=>t.phase},
+            {header:'Status',        get:t=>t.status},
+            {header:'Delay (min)',   get:t=>t.delay_minutes}
+        ],
+        rows: () => tripsLast.filter(tripsMatches)
+    },
+    stopTimes: {
+        title: 'Timetable — stop times',
+        subtitle: () => filterSummary([
+            ['Search', valueOf('tripsSearch')],
+            ['Route',  labelOf('tripsRoute')],
+            ['Bus',    labelOf('tripsBus')],
+            ['Status', labelOf('tripsStatus')]
+        ]),
+        columns: [
+            {header:'Run ID',    get:x=>x.tripId},
+            {header:'Line',      get:x=>x.routeLabel},
+            {header:'Bus',       get:x=>x.targa},
+            {header:'Stop #',    get:x=>x.sequence},
+            {header:'Stop ID',   get:x=>x.stopId},
+            {header:'Stop name', get:x=>x.stopName},
+            {header:'Arrival',   get:x=>x.arrival}
+        ],
+        // The only one not already in the browser: the table holds summaries,
+        // so the detail is fetched with the filters the panel is showing.
+        rows: async () => {
+            const params = new URLSearchParams();
+            const s  = document.getElementById('tripsSearch');
+            const fr = document.getElementById('tripsRoute');
+            const fb = document.getElementById('tripsBus');
+            if (s && s.value.trim()) params.set('search', s.value.trim());
+            if (fr && fr.value) params.set('routeId', fr.value);
+            if (fb && fb.value) params.set('busId', fb.value);
+            const r = await fetch(`${API}/trips/stop-times?${params.toString()}`,
+                {headers:{'Accept':'application/json'}});
+            if (!r.ok) throw new Error(r.status);
+            return await r.json();
+        }
+    },
+    // The statistics report: every panel of the analytics tab, not just the
+    // table at the bottom of it. Each chart is a table underneath — a line and
+    // a number — and a chart that cannot be filed is a chart nobody can quote.
+    analytics: {
+        title: 'Fleet analytics',
+        subtitle: () => filterSummary([
+            ['Period', PRESET_LABEL[activeFilters.preset] || ''],
+            ['Bus',    labelOf('filterBus')]
+        ]),
+        sections: () => analyticsSections()
+    }
+};
+
+/**
+ * The analytics tab as a filed document: the headline figures first, then one
+ * section per panel, then the vehicle table.
+ *
+ * <p>Built from the payloads the panels themselves were drawn from —
+ * lastNetwork and lastAdherenceVehicles — so the report cannot say something
+ * the screen does not. Sections with nothing in them are left out rather than
+ * printed as empty headings: a period with no measured delays is a fact the
+ * summary already states, and a bare "Delay by line" with no rows under it
+ * reads as a fault.
+ */
+function analyticsSections() {
+    const d = lastNetwork || {};
+    const sections = [];
+    const num = v => (v === null || v === undefined) ? '—' : String(v);
+    const min = v => (v === null || v === undefined) ? '—' : Number(v).toFixed(1);
+
+    // ── Summary ──
+    const byHour = d.occupancy_by_hour || [];
+    const peak = byHour.length
+        ? byHour.reduce((a, b) => (b.pct > a.pct ? b : a))
+        : null;
+
+    const byDay = d.delay_by_weekday || {};
+    const measuredDays = Object.entries(byDay).filter(([, v]) => v != null);
+    const worstDay = measuredDays.length
+        ? measuredDays.reduce((a, b) => (Math.abs(b[1]) > Math.abs(a[1]) ? b : a))
+        : null;
+
+    const summary = [
+        ['Period',                 PRESET_LABEL[activeFilters.preset] || '—'],
+        ['Active bus lines',       num(d.active_lines)],
+        ['Average delay (min)',    min(d.avg_delay_minutes)],
+        ['Change vs previous period',
+            d.delay_delta == null ? 'no comparable previous period'
+                                  : (d.delay_delta > 0 ? '+' : '') + Number(d.delay_delta).toFixed(1) + ' min'],
+        ['Busiest hour',           peak ? `${peak.slot} (${peak.pct}% full)` : '—'],
+        ['Worst weekday',          worstDay ? `${worstDay[0]} (${Number(worstDay[1]).toFixed(1)} min)` : '—'],
+        ['Buses reporting',        String((lastAdherenceVehicles || []).length)]
+    ];
+    sections.push({ title: 'Summary', headers: ['Measure', 'Value'], rows: summary });
+
+    // ── Active buses on road, per line ──
+    const onRoad = d.buses_on_road || [];
+    if (onRoad.length) sections.push({
+        title: 'Active buses on road',
+        headers: ['Line', 'Buses'],
+        rows: onRoad.map(r => [cellText(r.label), cellText(r.buses)])
+    });
+
+    // ── Average delay per line ──
+    const byLine = d.delay_by_line || [];
+    if (byLine.length) sections.push({
+        title: 'Average delay by line',
+        headers: ['Line', 'Delay (min)'],
+        rows: byLine.map(r => [cellText(r.label), min(r.delay_minutes)])
+    });
+
+    // ── Delay by weekday. Every day is listed, measured or not: the gap is
+    //    the finding when a line only runs on weekdays. ──
+    const days = Object.keys(byDay);
+    if (days.length) sections.push({
+        title: 'Average delay by weekday',
+        headers: ['Day', 'Delay (min)'],
+        rows: days.map(k => [k, min(byDay[k])])
+    });
+
+    // ── Occupancy by hour ──
+    if (byHour.length) sections.push({
+        title: 'Occupancy by hour',
+        headers: ['Hour', 'Occupancy (%)'],
+        rows: byHour.map(r => [cellText(r.slot), cellText(r.pct)])
+    });
+
+    // ── The vehicles themselves ──
+    const fleet = lastAdherenceVehicles || [];
+    if (fleet.length) sections.push({
+        title: 'Schedule adherence — by vehicle',
+        headers: ['Bus', 'Line', 'Status', 'Speed (km/h)', 'Delay (min)', 'Crowding'],
+        rows: fleet.map(v => [
+            cellText(v.vehicle_id),
+            cellText(v.route_name || ''),
+            cellText(SL[v.status] || v.status),
+            v.speed_kmh != null ? Number(v.speed_kmh).toFixed(1) : '',
+            v.delay_minutes != null ? cellText(v.delay_minutes) : '',
+            cellText(v.crowding || '')
+        ])
+    });
+
+    return sections;
+}
+
+/** The value of a text filter, or '' — so an untouched field says nothing. */
+function valueOf(id) {
+    const el = document.getElementById(id);
+    return el && el.value ? el.value.trim() : '';
+}
+
+/** What a <select> READS, not the id it carries: "Line 05" beats "LINEA-05". */
+function labelOf(id) {
+    const el = document.getElementById(id);
+    if (!el || !el.value) return '';
+    const opt = el.selectedOptions && el.selectedOptions[0];
+    return opt ? opt.textContent.trim() : el.value;
+}
+
+/** "Search: folcara · Route: Line 05". Empty when nothing is filtered. */
+function filterSummary(pairs) {
+    return pairs.filter(p => p[1]).map(p => `${p[0]}: ${p[1]}`).join('  ·  ');
+}
+
+/** Cells as strings: the renderer decides what looks like a number. */
+function cellText(value) {
+    return (value === null || value === undefined) ? '' : String(value);
 }
 
 /**
- * @param filename downloaded file name
- * @param columns  [{header, get}] — get(row) returns the cell value
- * @param rows     array of objects to export
+ * Builds the report and asks the server to render it.
+ *
+ * <p>The blob comes back with the filename in Content-Disposition, so the three
+ * formats are named by one rule rather than by three sprinkled templates.
  */
-function downloadCsv(filename, columns, rows){
-    if(!rows || !rows.length){ window.alert('Nothing to export — the table is empty.'); return; }
-    const lines = [columns.map(c => csvCell(c.header)).join(';')];
-    rows.forEach(r => lines.push(columns.map(c => csvCell(c.get(r))).join(';')));
-    const blob = new Blob(['﻿' + lines.join('\r\n')],
-        {type: 'text/csv;charset=utf-8;'});
+async function runExport(dataset, format) {
+    const spec = EXPORTS[dataset];
+    if (!spec) return;
+
+    const btns = document.querySelectorAll(`.exp-btn[data-export="${dataset}"]`);
+    btns.forEach(b => b.disabled = true);
+
+    try {
+        // Two shapes: a plain table gives columns and rows, the analytics report
+        // gives whole sections. Everything below this line sees only sections.
+        const sections = spec.sections
+            ? await spec.sections()
+            : [{
+                title: '',
+                headers: spec.columns.map(c => c.header),
+                rows: (await spec.rows() || []).map(r => spec.columns.map(c => cellText(c.get(r))))
+              }];
+
+        if (!sections.length || sections.every(sec => !sec.rows.length)) {
+            window.alert('Nothing to export — there is no data on screen yet.');
+            return;
+        }
+
+        const body = {
+            title: spec.title,
+            subtitle: spec.subtitle ? spec.subtitle() : '',
+            sections
+        };
+
+        const res = await fetch(`${API}/reports/export?format=${encodeURIComponent(format)}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error(res.status);
+
+        const blob = await res.blob();
+        const name = filenameFrom(res.headers.get('Content-Disposition'))
+                  || `${dataset}-${csvStamp()}.${format}`;
+        saveBlob(blob, name);
+
+    } catch (e) {
+        window.alert('Could not build the export. ' + (e && e.message ? '(' + e.message + ')' : ''));
+    } finally {
+        btns.forEach(b => b.disabled = false);
+    }
+}
+
+/** The name the server chose, out of the header it set. */
+function filenameFrom(disposition) {
+    if (!disposition) return null;
+    const m = /filename="?([^"]+)"?/.exec(disposition);
+    return m ? m[1] : null;
+}
+
+function saveBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1782,98 +2069,18 @@ function downloadCsv(filename, columns, rows){
     URL.revokeObjectURL(url);
 }
 
-/** Timestamp suffix so repeated exports don't overwrite each other. */
+/** Timestamp suffix, kept for the fallback name when the header is missing. */
 function csvStamp(){
     const d = new Date(), p = n => String(n).padStart(2,'0');
     return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-function exportBusesCsv(){
-    downloadCsv(`buses-${csvStamp()}.csv`, [
-        {header:'Bus ID',      get:b=>b.busId},
-        {header:'Plate',       get:b=>b.targa},
-        {header:'Route',       get:b=>b.routeName},
-        {header:'Route live',  get:b=>b.routeLive === true ? 'yes' : b.routeLive === false ? 'scheduled' : ''},
-        {header:'Capacity',    get:b=>b.numeroPosti},
-        {header:'Wheelchair',  get:b=>b.wheelchairAccessible ? 'yes' : 'no'},
-        {header:'Status',      get:b=>b.status},
-        {header:'Antenna ID',  get:b=>b.currentVehicleId},
-        {header:'On map',      get:b=>b.mapVisible ? 'yes' : 'no'}
-    ], dmBuses);
-}
-
-function exportStopsCsv(){
-    downloadCsv(`stops-${csvStamp()}.csv`, [
-        {header:'Stop ID',     get:s=>s.id},
-        {header:'Name',        get:s=>s.name},
-        {header:'Latitude',    get:s=>s.lat},
-        {header:'Longitude',   get:s=>s.lon},
-        {header:'Active',      get:s=>s.active === false ? 'no' : 'yes'},
-        {header:'Description', get:s=>s.description}
-    ], stFiltered());          // what the table currently shows
-}
-
-function exportRoutesCsv(){
-    downloadCsv(`routes-${csvStamp()}.csv`, [
-        {header:'Route ID',   get:r=>r.id},
-        {header:'Short name', get:r=>r.shortName},
-        {header:'Long name',  get:r=>r.longName},
-        {header:'Colour',     get:r=>r.color},
-        {header:'Active',     get:r=>r.active === false ? 'no' : 'yes'}
-    ], rtFiltered());
-}
-
-function exportTimetableCsv(){
-    // Exports what the Trips table currently shows, live columns included.
-    downloadCsv(`trips-${csvStamp()}.csv`, [
-        {header:'Trip ID',       get:t=>t.trip_id},
-        {header:'Route',         get:t=>t.route_name},
-        {header:'Plate',         get:t=>t.plate},
-        {header:'Antenna',       get:t=>t.vehicle_id},
-        {header:'Start',         get:t=>t.start_time},
-        {header:'End (sched.)',  get:t=>t.end_time},
-        {header:'End (real)',    get:t=>t.actual_end_time},
-        {header:'Stops done',    get:t=>t.stops_done},
-        {header:'Stops total',   get:t=>t.stops_total},
-        {header:'Progress %',    get:t=>t.progress_pct},
-        {header:'Phase',         get:t=>t.phase},
-        {header:'Status',        get:t=>t.status},
-        {header:'Delay (min)',   get:t=>t.delay_minutes}
-    ], tripsLast.filter(tripsMatches));   // stesse righe che la tabella mostra
-}
-
-/**
- * Detailed timetable export: one row per run AND stop, with arrival times.
- * The rows aren't in the browser (the table only holds summaries), so they
- * are fetched with the filters currently applied.
- */
-async function exportStopTimesCsv(){
-    // Filters come from the merged Trips panel, so the file matches the table.
-    const params = new URLSearchParams();
-    const s  = document.getElementById('tripsSearch');
-    const fr = document.getElementById('tripsRoute');
-    const fb = document.getElementById('tripsBus');
-    if(s && s.value.trim()) params.set('search', s.value.trim());
-    if(fr && fr.value) params.set('routeId', fr.value);
-    if(fb && fb.value) params.set('busId', fb.value);
-    try{
-        const r = await fetch(`${API}/trips/stop-times?${params.toString()}`,
-            {headers:{'Accept':'application/json'}});
-        if(!r.ok) throw new Error(r.status);
-        const rows = await r.json();
-        downloadCsv(`stop-times-${csvStamp()}.csv`, [
-            {header:'Run ID',    get:x=>x.tripId},
-            {header:'Line',      get:x=>x.routeLabel},
-            {header:'Bus',       get:x=>x.targa},
-            {header:'Stop #',    get:x=>x.sequence},
-            {header:'Stop ID',   get:x=>x.stopId},
-            {header:'Stop name', get:x=>x.stopName},
-            {header:'Arrival',   get:x=>x.arrival}
-        ], rows);
-    }catch(e){
-        window.alert('Could not build the detailed timetable export.');
-    }
-}
+// One handler for every export button in the page, present or future: the
+// dataset and the format are on the button.
+document.addEventListener('click', e => {
+    const btn = e.target.closest('.exp-btn');
+    if (btn) runExport(btn.dataset.export, btn.dataset.format);
+});
 
 // ── Itinerary editor (shared) ─────────────────────────────────────────────
 // Used by the Routes form to define a line's path. A run never defines its
@@ -2057,6 +2264,8 @@ const PRESET_LABEL = {
 // screen. Distinct from the map's lastVehicles: that one is /vehicles, this
 // one carries the measured delay the adherence endpoint adds on top.
 let lastAdherenceVehicles = [];
+/** Last /analytics/network payload — what the charts and the report both read. */
+let lastNetwork = null;
 
 // ── Preset logic ──────────────────────────────────────────
 
@@ -2163,6 +2372,10 @@ async function loadNetwork() {
         const r = await fetch(`${API}/analytics/network?${buildFilterParams()}`);
         if (!r.ok) throw new Error(r.status);
         const d = await r.json();
+
+        // Kept whole: the statistics report is built from the same payload the
+        // panels are drawn from, so the document and the screen cannot disagree.
+        lastNetwork = d;
 
         renderNetworkKpis(d);
         renderLinesChart(d.buses_on_road   || []);
@@ -2459,19 +2672,6 @@ function renderVehicleTable(vehicles) {
     applyDynStyles(tbody);
 }
 
-// ── CSV export — the table as shown ────────────────────────
-
-function exportAnalyticsCsv() {
-    downloadCsv(`fleet-analytics-${csvStamp()}.csv`, [
-        {header:'Bus',      get:v=>v.vehicle_id},
-        {header:'Line',     get:v=>v.route_name || ''},
-        {header:'Status',   get:v=>SL[v.status] || v.status},
-        {header:'Speed',    get:v=>v.speed_kmh != null ? v.speed_kmh.toFixed(1) : ''},
-        {header:'Delay',    get:v=>v.delay_minutes != null ? v.delay_minutes : ''},
-        {header:'Crowding', get:v=>v.crowding || ''}
-    ], lastAdherenceVehicles);
-}
-
 // ── Orchestration ──────────────────────────────────────────
 
 function applyFilters() {
@@ -2664,17 +2864,8 @@ if(rtResetBtn) rtResetBtn.addEventListener('click', () => {
     renderRoutesAdmin();
 });
 
-// CSV export — one button per panel, exporting the rows currently shown
-const dmExportBtn = document.getElementById('dmExportBtn');
-if(dmExportBtn) dmExportBtn.addEventListener('click', exportBusesCsv);
-const stExportBtn = document.getElementById('stExportBtn');
-if(stExportBtn) stExportBtn.addEventListener('click', exportStopsCsv);
-const rtExportBtn = document.getElementById('rtExportBtn');
-if(rtExportBtn) rtExportBtn.addEventListener('click', exportRoutesCsv);
-const ttExportBtn = document.getElementById('ttExportBtn');
-if(ttExportBtn) ttExportBtn.addEventListener('click', exportTimetableCsv);
-const ttExportStopsBtn = document.getElementById('ttExportStopsBtn');
-if(ttExportStopsBtn) ttExportStopsBtn.addEventListener('click', exportStopTimesCsv);
+// Export buttons need no wiring here: one delegated handler reads the dataset
+// and the format off the button that was clicked. See EXPORTS / runExport.
 
 // Routes > map editor for the road geometry
 const rtDrawToggle = document.getElementById('rtDrawToggle');
@@ -2785,8 +2976,10 @@ document.getElementById('presetBtnLastMonth').addEventListener('click', e => set
 document.getElementById('presetBtnCustom').addEventListener('click', e => setPreset(e.currentTarget, 'custom'));
 
 document.getElementById('applyFiltersBtn').addEventListener('click', applyFilters);
-document.getElementById('anExportBtn').addEventListener('click', exportAnalyticsCsv);
-document.getElementById('anPrintBtn').addEventListener('click', () => window.print());
+// The analytics panel exports through the same three buttons as every other
+// table. The old "PDF report" printed the dashboard — chrome, sidebar and all,
+// at whatever size the window happened to be — which is a screenshot, not a
+// report; it is now the same laid-out A4 document the other tables produce.
 
 const dmState = {
     search:     '',

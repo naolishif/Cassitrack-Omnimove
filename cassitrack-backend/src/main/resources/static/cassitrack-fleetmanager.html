@@ -293,10 +293,7 @@
             <div class="an-export">
                 <div class="an-export-lbl">Export statistics report: <b id="reportName">CASSITRACK Analytics</b></div>
                 <div class="an-export-btns">
-                    <button type="button" class="dm-btn dm-btn-ghost" id="anExportBtn"
-                            title="Excel-friendly CSV of the table above">↓ CSV</button>
-                    <button type="button" class="dm-btn dm-btn-primary" id="anPrintBtn"
-                            title="Print this dashboard, or save it as PDF">↓ PDF report</button>
+                    <span class="exp-group" title="Download the adherence table above"><span class="exp-lbl">Export</span><button type="button" class="exp-btn" data-export="analytics" data-format="csv">CSV</button><button type="button" class="exp-btn" data-export="analytics" data-format="xlsx">XLSX</button><button type="button" class="exp-btn" data-export="analytics" data-format="pdf">PDF</button></span>
                 </div>
             </div>
 
@@ -354,7 +351,7 @@
                     </select>
 
                     <button class="dm-btn dm-btn-ghost" id="dmResetBtn">Reset</button>
-                    <button type="button" class="dm-btn dm-btn-ghost" id="dmExportBtn" title="Download this table as CSV">Export CSV</button>
+                    <span class="exp-group" title="Download the buses shown, filters included"><span class="exp-lbl">Export</span><button type="button" class="exp-btn" data-export="buses" data-format="csv">CSV</button><button type="button" class="exp-btn" data-export="buses" data-format="xlsx">XLSX</button><button type="button" class="exp-btn" data-export="buses" data-format="pdf">PDF</button></span>
                     <button class="dm-btn dm-btn-primary" id="dmNewBtn">+ New bus</button>
                 </div>
 
@@ -401,7 +398,7 @@
                         <option value="false">Inactive</option>
                     </select>
                     <button class="dm-btn dm-btn-ghost" id="stResetBtn">Reset</button>
-                    <button type="button" class="dm-btn dm-btn-ghost" id="stExportBtn" title="Download this table as CSV">Export CSV</button>
+                    <span class="exp-group" title="Download the stops shown, filters included"><span class="exp-lbl">Export</span><button type="button" class="exp-btn" data-export="stops" data-format="csv">CSV</button><button type="button" class="exp-btn" data-export="stops" data-format="xlsx">XLSX</button><button type="button" class="exp-btn" data-export="stops" data-format="pdf">PDF</button></span>
                     <button type="button" class="dm-btn dm-btn-primary" id="stAddBtn">+ New stop</button>
                 </div>
 
@@ -473,7 +470,7 @@
                         <option value="false">Inactive</option>
                     </select>
                     <button class="dm-btn dm-btn-ghost" id="rtResetBtn">Reset</button>
-                    <button type="button" class="dm-btn dm-btn-ghost" id="rtExportBtn" title="Download this table as CSV">Export CSV</button>
+                    <span class="exp-group" title="Download the routes shown, filters included"><span class="exp-lbl">Export</span><button type="button" class="exp-btn" data-export="routes" data-format="csv">CSV</button><button type="button" class="exp-btn" data-export="routes" data-format="xlsx">XLSX</button><button type="button" class="exp-btn" data-export="routes" data-format="pdf">PDF</button></span>
                     <button type="button" class="dm-btn dm-btn-primary" id="rtAddBtn">+ New route</button>
                 </div>
 
@@ -657,10 +654,8 @@
 
                     <button class="dm-btn dm-btn-ghost" id="tripsClearBtn">Clear</button>
                     <button class="dm-btn dm-btn-ghost" id="tripsRefreshBtn">Refresh now</button>
-                    <button type="button" class="dm-btn dm-btn-ghost" id="ttExportBtn"
-                            title="One row per trip (summary)">Export trips</button>
-                    <button type="button" class="dm-btn dm-btn-ghost" id="ttExportStopsBtn"
-                            title="One row per trip and stop, with arrival times">Export stop times</button>
+                    <span class="exp-group" title="One row per run (summary)"><span class="exp-lbl">Runs</span><button type="button" class="exp-btn" data-export="trips" data-format="csv">CSV</button><button type="button" class="exp-btn" data-export="trips" data-format="xlsx">XLSX</button><button type="button" class="exp-btn" data-export="trips" data-format="pdf">PDF</button></span>
+                    <span class="exp-group" title="One row per run and stop, with arrival times"><span class="exp-lbl">Stop times</span><button type="button" class="exp-btn" data-export="stopTimes" data-format="csv">CSV</button><button type="button" class="exp-btn" data-export="stopTimes" data-format="xlsx">XLSX</button><button type="button" class="exp-btn" data-export="stopTimes" data-format="pdf">PDF</button></span>
                     <button class="dm-btn dm-btn-primary" id="tripsNewBtn">+ New trip</button>
                 </div>
 

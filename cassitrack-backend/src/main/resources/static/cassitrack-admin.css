@@ -365,3 +365,81 @@ tbody tr.selected {
 }
 
 /* ══════════════════════════════════════════════════════════
+
+
+/* ── Activity: accesses and downloaded files ──
+   Wider than the two form modals: this one is a list to read, not a form to
+   fill, and the timestamps need room to sit on one line. */
+.modal-activity {
+    width: 560px;
+    max-width: calc(100vw - 40px);
+}
+
+.activity-body {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.activity-meta {
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 14px;
+}
+
+.activity-section {
+    margin: 16px 0 8px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    color: var(--dim, #6b7f95);
+}
+
+/* One access or one download. The time is right-aligned so a column of them
+   scans as a timeline rather than as prose. */
+.activity-item {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+.activity-item:last-child { border-bottom: 0; }
+.activity-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.activity-when { flex: 0 0 auto; font-size: 11px; white-space: nowrap; color: var(--dim, #6b7f95); }
+.activity-empty { padding: 12px 0; font-size: 12px; color: var(--dim, #6b7f95); }
+
+.muted { color: var(--dim, #6b7f95); font-size: 11px; }
+td.num  { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* The format is the first thing worth seeing: a PDF of a table is a report
+   somebody read, an XLSX of the same table is data somebody took away. */
+.activity-tag {
+    flex: 0 0 auto;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--dim, #6b7f95);
+}
+.tag-csv  { color: #22C55E; border-color: rgba(34,197,94,.35); }
+.tag-xlsx { color: #06B6D4; border-color: rgba(6,182,212,.35); }
+.tag-pdf  { color: #F59E0B; border-color: rgba(245,158,11,.35); }
+
+/* A download that carried names and e-mail addresses, not vehicles. */
+.activity-personal {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+    color: #0B1220;
+    background: #F59E0B;
+}

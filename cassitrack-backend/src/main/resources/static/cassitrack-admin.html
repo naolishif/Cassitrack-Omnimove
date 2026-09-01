@@ -61,6 +61,45 @@
 
 </div>
 
+<!-- ACTIVITY MODAL — what this account has done
+     Two registers the application may read: login_events and manager_exports
+     (V28). The forensic copy stays in security_audit_events, which the app can
+     only write to; this is its visible echo. -->
+
+<div class="modal-overlay" id="activityModal">
+
+    <div class="modal modal-activity">
+
+        <div class="modal-header">
+
+            <h2 id="activityTitle">Activity</h2>
+
+            <button class="close-btn" id="activityCloseBtn">
+                ✕
+            </button>
+
+        </div>
+
+        <div class="activity-body">
+
+            <div class="activity-meta" id="activityMeta"></div>
+
+            <div class="activity-section">
+                Files downloaded <span id="activityDlCount"></span>
+            </div>
+            <div id="activityDownloads"></div>
+
+            <div class="activity-section">
+                Accesses <span id="activityLoginCount"></span>
+            </div>
+            <div id="activityLogins"></div>
+
+        </div>
+
+    </div>
+
+</div>
+
 <!-- DELETE MODAL -->
 
 <div class="modal-overlay" id="deleteModal">
@@ -146,6 +185,21 @@
 
                     <button
                             class="btn btn-secondary"
+                            id="exportUsersBtn"
+                            title="Download the accounts shown, exactly as masked on screen">
+                        ⬇ Export XLSX
+                    </button>
+
+                    <button
+                            class="btn btn-secondary"
+                            id="activityBtn"
+                            title="Accesses and downloaded files for the selected account"
+                            disabled>
+                        Activity
+                    </button>
+
+                    <button
+                            class="btn btn-secondary"
                             id="editBtn"
                             disabled>
                         Edit User
@@ -180,6 +234,9 @@
                         <th>EMAIL</th>
                         <th>TELEPHONE</th>
                         <th>ROLE</th>
+                        <th>LAST ACCESS</th>
+                        <th>ACCESSES</th>
+                        <th>FILES</th>
                     </tr>
 
                     </thead>

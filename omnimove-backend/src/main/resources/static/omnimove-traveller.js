@@ -1844,7 +1844,9 @@ function mapPointOf(el) {
 
 // ── Filter / sort state ──────────────────────────────────────────
 let activeSort  = 'eco';   // 'eco' | 'budget' | 'fast'  — always exactly one
-let activeModes = [];      // [] = all modes; otherwise subset of BUS/BIKE/SCOOTER (WALK always included)
+// [] = every mode. Otherwise the chips that are lit, which are only ever
+// BUS/BIKE/SCOOTER; doSearch adds WALK to them — see the note there.
+let activeModes = [];
 
 const SORT_VALUES = ['eco', 'budget', 'fast', 'custom'];
 
@@ -2052,9 +2054,17 @@ async function doSearch() {
             // computed at all rather than merely how they are ordered.
             sort_preset: MODE_OF_SORT[activeSort] || 'CUSTOM'
         };
-        // Only constrain modes when the traveler picked specific ones via the chips.
+        // Only constrain modes when the traveller picked specific ones via the chips.
+        //
+        // WALK travels with them. The chips are Bus, Bike and Scooter — there is
+        // no Walk chip — so picking "Bus" is a statement about which VEHICLES to
+        // consider, not a request to stop walking. Sending the bare selection
+        // dropped walking from the results through a control the traveller was
+        // never offered; whether walking appears at all is decided by the "Show
+        // walking options" preference, which the planner applies after this and
+        // still has the final say.
         if (activeModes.length > 0) {
-            payload.modes = [...activeModes];
+            payload.modes = [...activeModes, 'WALK'];
         }
         if (_pickerHour !== null) {
             const hh = String(_pickerHour).padStart(2, '0');
@@ -2063,13 +2073,40 @@ async function doSearch() {
             if (_pickerMode === 'arrive') payload.arrive_by = true;
         }
 
-        const r = await apiFetch('/journeys/search', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        });
-        if (r.status === 429) throw new Error('rate_limited');
-        if (!r.ok) throw new Error('Search failed');
-        const data = await r.json();
+        // ── The request ──
+        // Fetching and rendering are two failures, not one. They used to share a
+        // catch, so a bug in drawing a card reported itself as "could not load
+        // routes" — an error about the network, for a request that had already
+        // succeeded. Whoever read that message went looking in the wrong place.
+        let data;
+        try {
+            const r = await apiFetch('/journeys/search', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+
+            if (!r.ok) {
+                // The body carries the server's own reason now; read it before
+                // deciding what to say, and log it whatever we decide.
+                const detail = await readError(r);
+                console.error('[SEARCH] HTTP', r.status, detail, 'payload:', payload);
+
+                if (r.status === 429) throw new SearchError(t('err_rate_limited'));
+                if (r.status >= 500)  throw new SearchError(tf('err_server',   { status: r.status }));
+                throw new SearchError(tf('err_rejected', { status: r.status }));
+            }
+            data = await r.json();
+
+        } catch (e) {
+            // A SearchError already carries the sentence for this status. Anything
+            // else reaching here is the fetch itself failing — no connection, DNS,
+            // a dropped request — which is a different problem with a different fix.
+            if (!(e instanceof SearchError)) console.error('[SEARCH] network failure:', e);
+            showSearchError(e instanceof SearchError ? e.message : t('err_offline'));
+            return;
+        }
+
+        // ── The results ──
         window._currentOrigin = origin;
         window._currentDest   = dest;
         window._lastSearchData = data;
@@ -2077,18 +2114,47 @@ async function doSearch() {
         // than re-reading the fields, which may have been edited since without
         // anybody pressing Search.
         window._lastSearchPayload = payload;
-        renderRoutes(data);
-        startRoutesRefresh();
+
+        try {
+            renderRoutes(data);
+            startRoutesRefresh();
+        } catch (e) {
+            // The plan is sound and the traveller cannot see it: say that, and
+            // put the option that broke in the console for whoever looks next.
+            console.error('[SEARCH] could not render the results:', e, 'data:', data);
+            showSearchError(t('err_render'));
+        }
     } catch (e) {
-        const msg = e.message === 'rate_limited'
-            ? t('err_rate_limited')
-            : t('err_load_routes');
-        document.querySelector('.routes-list').innerHTML =
-            '<div style="text-align:center;padding:40px 20px;color:var(--red)">'
-            + '<div style="font-size:28px;margin-bottom:10px">⚠️</div>'
-            + `<div style="font-size:13px;font-weight:600">${msg}</div>`
-            + '</div>';
+        console.error('[SEARCH] unexpected failure:', e);
+        showSearchError(t('err_load_routes'));
     }
+}
+
+/** An HTTP failure that already knows what to tell the traveller. */
+class SearchError extends Error {}
+
+/** The server's own explanation, or the raw body, or nothing. Never throws. */
+async function readError(response) {
+    try {
+        const text = await response.text();
+        if (!text) return '(empty body)';
+        try {
+            const j = JSON.parse(text);
+            return j.error ? `${j.error}: ${j.message || ''}` : text.slice(0, 300);
+        } catch (_) {
+            return text.slice(0, 300);
+        }
+    } catch (_) {
+        return '(body unreadable)';
+    }
+}
+
+function showSearchError(message) {
+    document.querySelector('.routes-list').innerHTML =
+        '<div style="text-align:center;padding:40px 20px;color:var(--red)">'
+        + '<div style="font-size:28px;margin-bottom:10px">⚠️</div>'
+        + `<div style="font-size:13px;font-weight:600">${escHtml(message)}</div>`
+        + '</div>';
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2415,7 +2481,9 @@ async function refreshRoutes() {
         // Where they were reading, not the top of the list
         if (list) list.scrollTop = scrollTop;
     } catch (e) {
-        console.warn('[ROUTES] refresh failed:', e.message);
+        // The whole error, not just its message: a refresh can fail at the
+        // request or at the redraw, and only the stack says which.
+        console.warn('[ROUTES] refresh failed:', e);
     } finally {
         _routesRefreshing = false;
         markRoutesFreshness();

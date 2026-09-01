@@ -57,6 +57,9 @@ public class AuthController {
     private LoginAttemptService loginAttemptService;
 
     @Autowired
+    private it.unicas.cassitrack.service.ManagerActivityService managerActivityService;
+
+    @Autowired
     private TokenBlacklistService tokenBlacklistService;
 
     @Autowired
@@ -114,6 +117,11 @@ public class AuthController {
             String token = jwtUtil.generateToken(authentication);
             User user = userService.getUserByEmail(email);
             securityAuditService.loginSuccess(email, getClientIp(request));
+            // The same fact in a table the application may read back, so the user
+            // card can show when this manager was last in. The audit row above
+            // stays the proof; this is its visible echo.
+            managerActivityService.recordLogin(user, getClientIp(request),
+                    request.getHeader("User-Agent"));
 
             // V-04 FIX: Set token in httpOnly cookie — JS cannot read it
             // cookieSecure=false allows the cookie to be sent over plain HTTP (dev + server without TLS).
