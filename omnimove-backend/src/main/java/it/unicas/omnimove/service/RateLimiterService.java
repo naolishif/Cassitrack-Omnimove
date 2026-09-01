@@ -122,4 +122,18 @@ public class RateLimiterService {
     public boolean allowStopArrivalsLookup(String email) {
         return isAllowed("rl:stop-arrivals:" + email, stopArrivalsPerHour, Duration.ofHours(1));
     }
+
+    /**
+     * One message to the administrators every ten minutes.
+     *
+     * <p>Not an abuse counter so much as a pause. Every message is stored
+     * against the account and answered by an automatic e-mail, so a jammed
+     * button — or a frustrated traveller sending the same complaint five times —
+     * fills the operator's inbox with the same report and buries the ones that
+     * are different. Ten minutes is long enough to be a deliberate second
+     * message and short enough that nobody with something to add is stopped.
+     */
+    public boolean allowUserMessage(String email) {
+        return isAllowed("rl:user-message:" + email, 1, Duration.ofMinutes(10));
+    }
 }

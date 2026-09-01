@@ -18,7 +18,11 @@
     <script src="omnimove-consent.js"></script>
     <script src="vendor/leaflet/leaflet.js"></script>
 </head>
-<body>
+<!-- The pane the app opens on. Declared here rather than left to the first
+     call of setMobilePane: the stylesheet keys the search header off it, and an
+     unset attribute would hide the header for the instant before the script
+     runs. -->
+<body data-pane="map">
 
 <!-- ─── SIDEBAR ─── -->
 <div class="sidebar" id="menuDrawer">
@@ -109,7 +113,16 @@
         <!-- Wordmark above the search on the phone, where the sidebar that
              normally carries it is a drawer and stays shut. -->
         <div class="topbar-logo">OMNI<span>MOVE</span></div>
-        <div class="topbar-search">
+        <!-- Phone only: folds the search away so the map gets the whole screen.
+             Its label is the state it will move TO, which is why the caret
+             flips rather than the word changing. -->
+        <button class="search-toggle" id="searchToggle" type="button"
+                onclick="toggleSearchPanel()" aria-expanded="true"
+                aria-controls="topbarSearch" title="Hide the search">
+            <span class="st-icon" id="searchToggleIcon" aria-hidden="true"><svg viewBox="0 0 24 24" class="st-chevron"><path d="M5 15l7-7 7 7"/></svg></span>
+            <span class="st-label" id="searchToggleLabel" data-i18n="toggle_search_hide">Hide</span>
+        </button>
+        <div class="topbar-search" id="topbarSearch">
             <div class="search-seg">
                 <span>📍</span>
                 <input id="originSelect" type="text" autocomplete="off" data-i18n="ph_origin" placeholder="Origin" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
@@ -152,6 +165,20 @@
                         data-i18n-title="btn_cancel" title="Cancel" aria-label="Cancel">✕</button>
             </div>
             <button class="map-menu-fab" onclick="openMenu()" aria-label="Open menu">☰</button>
+            <!-- Two markers appear once a journey starts and they mean different
+                 things, which nothing on the map said. Shown only while the
+                 live position is actually being drawn. -->
+            <div class="journey-legend" id="journeyLegend" hidden>
+                <div class="jl-row">
+                    <span class="jl-key">
+                        <svg viewBox="0 0 30 30" aria-hidden="true" class="jl-arrow">
+                            <path class="jr-arrow-body" d="M15 3 L24 26 L15 21 L6 26 Z"/>
+                        </svg>
+                    </span>
+                    <span class="jl-text" data-i18n="legend_you">You are here</span>
+                </div>
+            </div>
+
             <div class="ai-fab" onclick="openAI()" title="Ask OmniAI">✦</div>
             <!-- Nudge towards the assistant. Hidden until the timer raises it,
                  and never while the assistant itself is open. -->

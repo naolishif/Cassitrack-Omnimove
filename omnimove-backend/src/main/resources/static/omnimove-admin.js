@@ -393,7 +393,17 @@ function renderProfile(data) {
         noticeBadge('Cookie notice',  ack.COOKIE_NOTICE);
 
     renderUserMessages(data.messages || []);
-    renderUserExports(data.exports || {});
+
+    // Downloads are an operator's register. A traveller has no way to export
+    // anything, so their card carried a section that could only ever say "this
+    // user has never downloaded anything" — an answer to a question nobody
+    // asked about them. Shown for ADMIN accounts only.
+    // The role comes off the payload this function was handed — `user` belongs
+    // to openProfile, which ended long before this line.
+    const isAdmin = String((data.account && data.account.role) || '').toUpperCase() === 'ADMIN';
+    const exportsSection = document.getElementById('secExports');
+    if (exportsSection) exportsSection.style.display = isAdmin ? '' : 'none';
+    if (isAdmin) renderUserExports(data.exports || {});
 
     // Admin accounts carry no travel story — the server does not even compute it
     const travelBlock = document.getElementById('travelBlock');

@@ -83,6 +83,13 @@ public class TravellerController {
         User user = userRepo.findByEmail(principal.getUsername()).orElse(null);
         if (user == null) return ResponseEntity.status(401).build();
 
+        // Checked after the message has been found valid, so a rejected one is
+        // never the reason somebody has to wait ten minutes to try again.
+        if (!rateLimiter.allowUserMessage(user.getEmail()))
+            return ResponseEntity.status(429).body(java.util.Map.of(
+                    "error",   "TOO_SOON",
+                    "message", "You have just sent a message. You can send another in a few minutes."));
+
         UserMessage saved = messageRepository.save(UserMessage.builder()
                 .userId(user.getId())
                 .body(text.trim())

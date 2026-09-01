@@ -1,0 +1,45 @@
+-- =================================================================
+-- V36: away with every account but the two that are meant to be there
+--
+-- V4 seeded thirty demo travellers on the @sim.omnimove.it domain to
+-- give the dashboard something to draw, and a handful of accounts have
+-- been created by hand while building the thing. They have all served
+-- their turn: what should remain is the operator and the one traveller
+-- the demo signs in as.
+--
+-- WHAT SURVIVES
+-- -------------
+--   admin@omnimove.it       Omnimove Admin  (ADMIN)
+--   traveller@omnimove.it   John Traveller  (TRAVELLER)
+--
+-- Everything else goes, by name rather than by pattern: the point is
+-- not "delete the simulated ones" but "leave exactly these two", and
+-- a whitelist is the only form that says so and stays true whatever
+-- happens to be in the table.
+--
+-- READ THIS BEFORE RE-USING IT
+-- ----------------------------
+-- This is a one-off cleanup of a development database, run once by
+-- Flyway and never again. It is NOT a template: the same statement on
+-- a database with real users would delete all of them. Anything of
+-- the kind in future should name what it removes, not what it keeps.
+--
+-- WHAT GOES WITH THEM
+-- -------------------
+-- Every table that references users is ON DELETE CASCADE — journeys,
+-- preferences, favourites, consents, messages, login history, export
+-- records. The thirty seeded profiles carry none of it, but the
+-- hand-made accounts do. Counted on the database this was written for,
+-- the cascade removes with them:
+--
+--     2 journeys, 1 preferences row, 5 consents,
+--     1 message, 3 login events
+--
+-- Stated because it is not obvious from the statement below, and
+-- because those are real rows about a real person rather than demo
+-- filler. Deleting the account is the decision; this is what the
+-- decision costs.
+-- =================================================================
+
+DELETE FROM users
+ WHERE lower(email) NOT IN ('admin@omnimove.it', 'traveller@omnimove.it');

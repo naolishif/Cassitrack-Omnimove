@@ -3517,6 +3517,11 @@ async function startJourney() {
         // something they are waiting for.
         startDelayWatch((window._routeOptions || {})[selectedJourney.key || selectedJourney.mode]);
 
+        // The search has done its job: the itinerary is chosen and drawn, and
+        // what the traveller wants now is the map. On a phone this hands back
+        // the header; on a desktop the class means nothing and nothing moves.
+        setSearchFolded(true);
+
         // And from here the map can say where along the route the traveller has
         // got, and notice by itself when they reach the end of it.
         startLivePosition(
@@ -4192,6 +4197,17 @@ async function sendMessage() {
             body: JSON.stringify({ body: text })
         });
         const data = await r.json().catch(() => ({}));
+
+        // The pause between messages has its own sentence. Told only "failed",
+        // the traveller retries at once and is refused at once, which reads as
+        // the app being broken rather than as being asked to wait.
+        if (r.status === 429) {
+            note.classList.add('err');
+            note.textContent = t('msg_too_soon');
+            btn.disabled = false;
+            btn.textContent = label;
+            return;
+        }
         if (!r.ok) throw new Error(data.message || ('messages ' + r.status));
 
         box.value = '';
@@ -5546,6 +5562,53 @@ async function checkDelay() {
     }
 }
 
+/**
+ * Folds the search away so the map gets the whole phone screen.
+ *
+ * <p>A class on <body> rather than a style on the panel: the rows that go with
+ * it — the chips and their label — are siblings, not children, and one flag
+ * they can all read is simpler than three elements kept in step.
+ *
+ * <p>Phone only. On a desktop the header is one row of a wide window and the
+ * map is beside it, not under it, so there is nothing to reclaim; the CSS
+ * carries the media query and this only sets the flag.
+ */
+function toggleSearchPanel() {
+    setSearchFolded(!document.body.classList.contains('search-folded'));
+}
+
+/**
+ * Folds the search away, or brings it back.
+ *
+ * <p>The button says what it will DO, not what it is: "Cerca" when the fields
+ * are hidden, "Nascondi" when they are showing. A bare caret was the first
+ * version and nobody could tell what it was for — the word is what makes it a
+ * control rather than a decoration.
+ */
+function setSearchFolded(folded) {
+    document.body.classList.toggle('search-folded', folded);
+
+    const btn   = document.getElementById('searchToggle');
+    const icon  = document.getElementById('searchToggleIcon');
+    const label = document.getElementById('searchToggleLabel');
+
+    if (btn) {
+        btn.setAttribute('aria-expanded', String(!folded));
+        btn.title = t(folded ? 'toggle_search_show' : 'toggle_search');
+    }
+    // A drawn chevron rather than the ⌃ character: that glyph renders small,
+    // sits high above the baseline and reads as a typo next to the word. This
+    // one inherits the button's colour and lines up with the text.
+    if (icon) icon.innerHTML = folded
+        ? '🔍'
+        : '<svg viewBox="0 0 24 24" class="st-chevron"><path d="M5 15l7-7 7 7"/></svg>';
+    if (label) label.textContent = t(folded ? 'toggle_search_open' : 'toggle_search_hide');
+
+    // Leaflet sizes itself once and has to be told the viewport changed, or the
+    // reclaimed strip stays grey until something else nudges it.
+    setTimeout(() => { if (typeof map !== 'undefined' && map) map.invalidateSize(); }, 240);
+}
+
 // ══════════════════════════════════════════════════════════════════
 // WHERE YOU ARE ALONG THE ROUTE
 // ══════════════════════════════════════════════════════════════════
@@ -5692,7 +5755,14 @@ function startLivePosition(dest, path) {
     };
 }
 
+/** The key is only meaningful while both markers are on the map. */
+function showJourneyLegend(visible) {
+    const el = document.getElementById('journeyLegend');
+    if (el) el.hidden = !visible;
+}
+
 function stopLivePosition() {
+    showJourneyLegend(false);
     if (!_livePos) return;
     if (_livePos.watchId != null && navigator.geolocation)
         navigator.geolocation.clearWatch(_livePos.watchId);
@@ -5708,21 +5778,31 @@ function onJourneyFix(pos) {
     const lon = pos.coords.longitude;
     const accuracy = pos.coords.accuracy;
 
-    // ── The arrow, on the line ──
+    // ── The arrow, where the traveller actually is ──
+    //
+    // It used to sit on the route, at the projection of the fix, with the blue
+    // dot marking the real position beside it. On a phone the two ended up a
+    // field apart — the dot down a lane, the arrow up on the line — and no
+    // caption makes that read as one person. One marker, at the coordinate the
+    // device reports.
+    //
+    // The route is still consulted, but only for the heading: the direction the
+    // line runs at your nearest point is a better answer to "which way am I
+    // going" than a GPS course, which is noise below walking pace.
     const snapped = projectOntoRoute(lat, lon, w.path);
-    const at = snapped || { lat, lon, bearing: 0 };
+    const at = { lat, lon, bearing: snapped ? snapped.bearing : 0 };
 
     if (!w.marker) {
+        // Two markers are about to be on screen; say which is which
+        showJourneyLegend(true);
+
         w.marker = L.marker([at.lat, at.lon], {
             icon: journeyArrowIcon(at.bearing),
-            // Above the blue dot's 1000, so the two never argue over the same pixel
+            // Above the blue dot, so the two never argue over the same pixel
             zIndexOffset: 1200,
             // Informational: it must never swallow a tap meant for the route
             interactive: false
         }).addTo(map);
-
-        // One "you" on the map. The plain dot returns when the journey ends.
-        if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
     } else {
         w.marker.setLatLng([at.lat, at.lon]);
         const el = w.marker.getElement() && w.marker.getElement().querySelector('.jr-arrow');
@@ -5730,10 +5810,12 @@ function onJourneyFix(pos) {
         else w.marker.setIcon(journeyArrowIcon(at.bearing));
     }
 
-    // The rest of the app reads the real position, not the snapped one: leaving
-    // the journey has to put the dot back where the traveller actually is.
+    // The rest of the app reads this, and endJourney puts the plain dot back on
+    // it once the arrow goes. While the journey runs the arrow IS the dot's
+    // position, so drawing both would stack two markers on one pixel.
     userLat = lat;
     userLon = lon;
+    if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
 
     // ── Arrival ──
     const toDest = map.distance([lat, lon], [w.dest.lat, w.dest.lon]);
