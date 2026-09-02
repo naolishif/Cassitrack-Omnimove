@@ -68,6 +68,10 @@ influx:
 # ── MQTT Broker ───────────────────────────────────────────────────
 mqtt:
   broker:
+    # CassiTrack's own Mosquitto — a local-development convenience, not part of
+    # the deployment. The server runs an independent broker it does not own, so
+    # it sets MQTT_BROKER_ENABLED=false and ingests only through mqtt.obu.*.
+    enabled: ${MQTT_BROKER_ENABLED:true}
     url: ${MQTT_BROKER_URL:tcp://localhost:1883}
     client-id: cassitrack-backend
     username: ${MQTT_USERNAME:}

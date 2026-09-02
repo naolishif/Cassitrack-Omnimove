@@ -7,12 +7,15 @@
 #    postgres   → relational DB (routes, stops, users, schedules)
 #    influxdb   → time-series DB (GPS telemetry from buses)
 #    redis      → cache + session store
-#    mosquitto  → MQTT broker (receives data from buses / ESP32)
+#    mosquitto  → MQTT broker for LOCAL TESTING ONLY (profile: local-broker).
+#                 The deployment server has its own, independently operated
+#                 broker: never start this one there.
 #    cassitrack → Spring Boot backend API
 #
 #  Usage:
-#    Start everything:        docker compose up -d
+#    Start everything:        docker compose --profile local-broker up -d
 #    Start infra only:        docker compose up -d postgres influxdb redis mosquitto
+#    Server (no own broker):  docker compose --profile full up -d
 #    View logs:               docker compose logs -f cassitrack
 #    Stop everything:         docker compose down
 #    Wipe all data (careful): docker compose down -v
@@ -85,7 +88,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Eclipse Mosquitto (MQTT broker) ──────────────────────────
+  # ── Eclipse Mosquitto (MQTT broker — LOCAL TESTING ONLY) ─────
+  # Gated behind the 'local-broker' profile so it can never start by accident
+  # on the deployment server, where the MQTT broker is a separate container
+  # that CassiTrack does not install, configure or own. Starts either with
+  # --profile local-broker or by naming the service explicitly on the CLI.
   mosquitto:
     # A08 FIX: pinned by digest (not mutable tag) — tag kept in comment for readability
     image: eclipse-mosquitto@sha256:212f89e1eaeb2c322d6441b64396e3346026674db8fa9c27beac293405c32b3c  # 2.0
@@ -104,6 +111,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    profiles:
+      - local-broker
 
   # ── CASSITRACK Spring Boot Backend ───────────────────────────
   cassitrack:
@@ -119,8 +128,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      mosquitto:
-        condition: service_healthy
+      # NOT mosquitto: the broker is optional (and absent on the server), so a
+      # hard dependency here would make the API unstartable without it.
     environment:
       # Database
       SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
@@ -135,7 +144,9 @@ services:
       SPRING_REDIS_HOST: redis
       SPRING_REDIS_PORT: 6379
       SPRING_REDIS_PASSWORD: ${SPRING_REDIS_PASSWORD}
-      # MQTT
+      # MQTT — the bundled broker. Off on the server (MQTT_BROKER_ENABLED=false
+      # in .env): there the OBU connection below is the only ingestion path.
+      MQTT_BROKER_ENABLED: ${MQTT_BROKER_ENABLED:-true}
       MQTT_BROKER_URL: tcp://mosquitto:1883
       MQTT_USERNAME: ${MQTT_USERNAME}
       MQTT_PASSWORD: ${MQTT_PASSWORD}

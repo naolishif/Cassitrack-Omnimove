@@ -67,10 +67,24 @@ public class MqttConfig {
     private String obuTopic;
 
     /**
-     * Factory that creates MQTT client connections.
-     * Sets connection options: timeout, keep-alive, clean session.
+     * Factory that creates MQTT client connections to CassiTrack's OWN broker.
+     *
+     * WHY THIS CAN BE SWITCHED OFF
+     * ----------------------------
+     * The bundled Mosquitto exists for local development: it lets a simulator
+     * publish without the external TLS broker. On the deployment server the
+     * MQTT broker is NOT ours — it is an independent container, installed and
+     * operated alongside CassiTrack, and the OBU units publish only there.
+     * Running a second broker there would be dead weight listening to nothing,
+     * so the server sets mqtt.broker.enabled=false and the whole native path
+     * (factory + inbound + outbound) is simply not created; ingestion then runs
+     * exclusively through the OBU connection below.
+     *
+     * Defaults to enabled, so a developer cloning the repo gets the local
+     * broker wired up with no extra configuration.
      */
     @Bean
+    @ConditionalOnProperty(name = "mqtt.broker.enabled", havingValue = "true", matchIfMissing = true)
     public MqttPahoClientFactory mqttClientFactory() {
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
         MqttConnectOptions options = new MqttConnectOptions();
@@ -110,8 +124,11 @@ public class MqttConfig {
      * ingestion path without needing the real TLS broker. MqttMessageHandler
      * decides how to parse a message from its topic, not from which connection
      * delivered it, so the translation works identically either way.
+     *
+     * Absent when mqtt.broker.enabled=false — see mqttClientFactory().
      */
     @Bean
+    @ConditionalOnProperty(name = "mqtt.broker.enabled", havingValue = "true", matchIfMissing = true)
     public MqttPahoMessageDrivenChannelAdapter mqttInbound() {
         MqttPahoMessageDrivenChannelAdapter adapter =
             new MqttPahoMessageDrivenChannelAdapter(
@@ -143,6 +160,7 @@ public class MqttConfig {
      */
     @Bean
     @ServiceActivator(inputChannel = "mqttOutboundChannel")
+    @ConditionalOnProperty(name = "mqtt.broker.enabled", havingValue = "true", matchIfMissing = true)
     public MessageHandler mqttOutbound() {
         MqttPahoMessageHandler messageHandler =
                 new MqttPahoMessageHandler(clientId + "-outbound-publisher", mqttClientFactory());
