@@ -107,6 +107,15 @@ public class ScheduleAdherenceService {
 
             int nowSeconds = secondsOfDay(pos.getTimestamp());
 
+            // La corsa e' assegnata ma non e' ancora partita: il mezzo sta
+            // aspettando al capolinea. Non c'e' nulla da misurare, e misurare
+            // qui darebbe un anticipo fittizio pari all'attesa — un bus fermo
+            // in orario risulterebbe "in anticipo di dodici minuti".
+            if (pos.getTripStartSeconds() != null && nowSeconds < pos.getTripStartSeconds()) {
+                if (pos.getScheduleStatus() == null) pos.setScheduleStatus(ScheduleStatus.UNKNOWN);
+                return;
+            }
+
             // ── Aggancio iniziale ────────────────────────────────
             if (pos.getLastStopSequence() == null) {
                 Integer seq = routeMatchingService.bootstrapSequence(pos.getTripId(), nowSeconds);

@@ -49,6 +49,16 @@ public class StopArrivalDTO {
     @JsonProperty("scheduled_arrival")
     private Instant scheduledArrival;
 
+    /**
+     * Partenza della corsa dal capolinea.
+     *
+     * Serve a chi mostra l'arrivo: finche' il mezzo non e' partito, dire
+     * "in partenza alle 17:46" e' piu' onesto che lasciare intendere che il
+     * bus sia gia' per strada.
+     */
+    @JsonProperty("scheduled_departure")
+    private Instant scheduledDeparture;
+
     /** The arrival time predicted from real-time position */
     @JsonProperty("estimated_arrival")
     private Instant estimatedArrival;
@@ -63,4 +73,16 @@ public class StopArrivalDTO {
     /** Stop where the delay was measured, for OmniMove's retrospective notice. */
     @JsonProperty("delay_stop_name")
     private String delayStopName;
+
+    /**
+     * Il mezzo ha gia' iniziato la corsa.
+     *
+     * Falso quando la corsa gli e' stata assegnata in anticipo e sta ancora
+     * aspettando al capolinea: il veicolo e' noto, ma l'orario di arrivo qui
+     * sotto viene dalla tabella, non dal GPS. Chi consuma questo DTO deve
+     * saperlo — ricalcolare l'arrivo dalla posizione attuale di un mezzo fermo
+     * darebbe una previsione anticipata di tutta l'attesa al capolinea.
+     */
+    @JsonProperty("in_transit")
+    private boolean inTransit;
 }

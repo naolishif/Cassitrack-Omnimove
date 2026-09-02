@@ -62,9 +62,29 @@ public class TripResolutionService {
             Double terminusLon
     ) {
         boolean covers(int nowSeconds) {
-            return nowSeconds >= startSeconds && nowSeconds <= endSeconds;
+            return nowSeconds >= startSeconds - PRE_TRIP_LEAD_SECONDS
+                    && nowSeconds <= endSeconds;
         }
     }
+
+    /**
+     * Quanto prima della partenza un mezzo viene gia' associato alla sua corsa.
+     *
+     * PERCHE' ESISTE
+     * --------------
+     * Fra una corsa e l'altra il bus sta fermo al capolinea, e senza corsa e'
+     * invisibile: ETAService non produce previsioni per lui, la mappa dei mezzi
+     * in linea non lo mostra (la linea si deduce dalla corsa) e il pianificatore
+     * annuncia "nessun bus in tempo reale per questa linea". Il passeggero alla
+     * fermata vede solo l'orario di tabella fino all'istante della partenza,
+     * proprio quando l'informazione piu' utile e' "il tuo autobus e' quello, ed
+     * e' al capolinea".
+     *
+     * Un quarto d'ora copre l'intervallo fra due corse sulle linee brevi senza
+     * arrivare a impegnare un mezzo su una corsa cosi' lontana da non essere
+     * ancora credibile.
+     */
+    private static final int PRE_TRIP_LEAD_SECONDS = 15 * 60;
 
     /**
      * A trip is not released when its scheduled end passes — only when the bus
@@ -131,7 +151,8 @@ public class TripResolutionService {
             cached = null;
         }
 
-        List<Object[]> rows = scheduledStopRepo.findActiveTripsForBus(busId, now);
+        List<Object[]> rows = scheduledStopRepo.findActiveTripsForBus(
+                busId, now, now + PRE_TRIP_LEAD_SECONDS);
         if (rows.isEmpty()) {
             if (cached != null) {
                 log.info("Vehicle {} finished trip {} — no trip in service at {}s",

@@ -18,4 +18,16 @@ public class StopArrivalDTO {
 
     /** Stop where CassiTrack measured the retrospective delay (for the C1 notice). */
     @JsonProperty("delay_stop_name")   private String  delayStopName;
+
+    /**
+     * Il mezzo ha gia' iniziato la corsa.
+     *
+     * Falso quando CassiTrack gli ha assegnato la corsa in anticipo e sta
+     * ancora aspettando al capolinea: il veicolo e' noto, ma l'orario di
+     * arrivo viene dalla tabella e non dalla sua posizione.
+     */
+    @JsonProperty("in_transit")        private boolean inTransit;
+
+    /** Partenza della corsa dal capolinea, per il caso "non ancora partito". */
+    @JsonProperty("scheduled_departure") private Instant scheduledDeparture;
 }

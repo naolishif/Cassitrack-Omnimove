@@ -93,6 +93,17 @@ public class TrafficAwareETAService {
 
         VehicleDTO bus = live.get(a.getVehicleId());
 
+        // Rule 1b: il mezzo e' noto ma non e' ancora partito. L'orario di arrivo
+        // resta quello che CassiTrack ha calcolato dalla tabella: chiedere a
+        // Google quanto ci mette DA DOVE SI TROVA ADESSO anticiperebbe l'arrivo
+        // di tutta l'attesa al capolinea, e sarebbe per giunta una chiamata
+        // sprecata. L'arrivo resta pero' associato a un veicolo reale, che e'
+        // cio' che distingue "il tuo autobus e' quello, parte fra poco" da una
+        // riga di orario e basta.
+        if (!a.isInTransit()) {
+            return new LiveEta(a, true, a.getDelayMinutes(), a.getEstimatedArrival());
+        }
+
         // Rule 2: this bus's own position -> the stop, with live traffic.
         Optional<GoogleMapsService.TrafficResult> g = googleMapsService.getTravelTime(
                 bus.getLat(), bus.getLon(),

@@ -105,6 +105,7 @@ public class MqttMessageHandler implements MessageHandler {
                 entity.setTripId(t.tripId());
                 entity.setRouteId(t.routeId());
                 entity.setRouteName(t.routeName());
+                entity.setTripStartSeconds(t.startSeconds());
             });
 
             // ── Step 5: trip + GPS → stop arrival, delay, adherence ──

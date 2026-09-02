@@ -1187,6 +1187,16 @@ body {
 .tmb-rt.live  { color: #1d4ed8; }
 .tmb-rt.sched { color: var(--text-soft); }
 
+/* "in partenza alle 17:46": il mezzo e' assegnato ma e' ancora al capolinea. */
+.tmb-dep {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-soft);
+}
+
 .tmb-crowd {
     font-size: 9px;
     font-weight: 800;

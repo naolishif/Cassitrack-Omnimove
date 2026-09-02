@@ -39,6 +39,18 @@ public class StopArrivalResponse {
     /** True if delay_minutes was recomputed from live traffic. */
     @JsonProperty("real_time")         private boolean realTime;
 
+    /**
+     * Il mezzo e' gia' per strada.
+     *
+     * Falso quando la corsa gli e' stata assegnata ma attende al capolinea:
+     * l'interfaccia lo dice apertamente ("in partenza alle 17:46") invece di
+     * lasciar credere che l'autobus sia gia' in avvicinamento.
+     */
+    @JsonProperty("in_transit")        private boolean inTransit;
+
+    /** Partenza della corsa, mostrata quando in_transit e' falso. */
+    @JsonProperty("scheduled_departure") private Instant scheduledDeparture;
+
     /** Positive = late, negative = early, 0 = on time. Null = unknown / not departed. */
     @JsonProperty("delay_minutes")     private Integer delayMinutes;
 

@@ -12,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -74,11 +76,18 @@ public class ETAService {
     private StopArrivalDTO computeArrival(VehiclePosition bus, String targetStopId,
                                           Map<String, Route> routeMap) {
         try {
-            Long seqEta = computeSequenceEta(bus, targetStopId);
+            SeqEta seqEta = computeSequenceEta(bus, targetStopId);
             if (seqEta == null) return null;
-            if (seqEta > 1800) return null;
+            if (seqEta.etaSeconds() > 1800) return null;
 
-            Instant estimatedArrival = Instant.now().plusSeconds(seqEta);
+            Instant estimatedArrival = Instant.now().plusSeconds(seqEta.etaSeconds());
+            // L'orario di tabella a QUESTA fermata: senza, chi legge non ha un
+            // termine di paragone e non puo' calcolare alcun ritardo.
+            Instant scheduledArrival = LocalDate.now(ITALY_TZ).atStartOfDay(ITALY_TZ)
+                    .plusSeconds(seqEta.scheduledSecondsAtStop()).toInstant();
+            Instant scheduledDeparture = bus.getTripStartSeconds() == null ? null
+                    : LocalDate.now(ITALY_TZ).atStartOfDay(ITALY_TZ)
+                            .plusSeconds(bus.getTripStartSeconds()).toInstant();
 
             String routeId = bus.getRouteId() != null
                     ? bus.getRouteId() : bus.getMatchedRouteId();
@@ -108,6 +117,9 @@ public class ETAService {
                                     bus.getPassengers(), bus.getBleDeviceCount()),
                             bus.getCapacity()))
                     .estimatedArrival(estimatedArrival)
+                    .scheduledArrival(scheduledArrival)
+                    .scheduledDeparture(scheduledDeparture)
+                    .inTransit(seqEta.inTransit())
                     .delayMinutes(delayMinutes)
                     .scheduleStatus(scheduleStatus)
                     .delayStopName(bus.getDelayStopName())
@@ -120,8 +132,14 @@ public class ETAService {
         }
     }
 
+    /**
+     * Esito del calcolo: quanto manca, l'orario di tabella a quella fermata e
+     * se il mezzo e' gia' in viaggio o attende ancora al capolinea.
+     */
+    private record SeqEta(long etaSeconds, int scheduledSecondsAtStop, boolean inTransit) {}
+
     /** ETA in secondi sommando i tratti dal DB, o null se non calcolabile. */
-    private Long computeSequenceEta(VehiclePosition bus, String targetStopId) {
+    private SeqEta computeSequenceEta(VehiclePosition bus, String targetStopId) {
         // NOTA: non usiamo bus.getMatchedRouteId() per recuperare la sequenza.
         // Quel campo dovrebbe contenere la linea DEDOTTA dal GPS (route matching),
         // ma al momento non e' implementato: nessuno lo valorizza davvero e finisce
@@ -146,6 +164,21 @@ public class ETAService {
         }
         if (seq.isEmpty() || routeId == null) return null;
 
+        // Corsa assegnata ma non ancora iniziata: il mezzo attende al capolinea
+        // e non ha agganciato nessuna fermata, quindi un'ancora nella sequenza
+        // non esiste. L'attesa e' allora quella di tabella — quanto manca al
+        // passaggio previsto qui — e il veicolo resta associato all'arrivo, che
+        // e' l'informazione utile: "il tuo autobus e' quello, parte fra poco".
+        Integer tripStart = bus.getTripStartSeconds();
+        int nowSeconds = LocalTime.now(ITALY_TZ).toSecondOfDay();
+        if (tripStart != null && nowSeconds < tripStart) {
+            int idx = indexOfStop(seq, routeId, targetStopId, 0);
+            if (idx < 0) return null;
+            int scheduled = seq.get(idx).getArrivalSeconds();
+            long eta = scheduled - nowSeconds;
+            return eta > 0 ? new SeqEta(eta, scheduled, false) : null;
+        }
+
         // L'ancora è la posizione nella sequenza, non l'ID della fermata.
         // ScheduleAdherenceService la mantiene: è la stessa che produce il ritardo.
         Integer anchorSeq = bus.getLastStopSequence();
@@ -159,7 +192,7 @@ public class ETAService {
 
         if (targetStopId.equals(
                 routePatternService.stopIdAt(routeId, seq.get(anchorIdx).getStopSequence()))) {
-            return 0L;
+            return new SeqEta(0L, seq.get(anchorIdx).getArrivalSeconds(), true);
         }
 
         // Find the next occurrence of targetStopId after the anchor.
@@ -168,7 +201,9 @@ public class ETAService {
 
         long eta = (long) seq.get(targetIdx).getArrivalSeconds()
                 - seq.get(anchorIdx).getArrivalSeconds();
-        return eta > 0 ? eta : null;
+        return eta > 0
+                ? new SeqEta(eta, seq.get(targetIdx).getArrivalSeconds(), true)
+                : null;
     }
 
 

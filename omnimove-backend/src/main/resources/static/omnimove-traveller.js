@@ -1670,6 +1670,14 @@ function renderArrivals(list, arrivals) {
                 </svg> ${t('lbl_real_time')}</span>`
             : `<span class="tmb-rt sched">🕐 ${t('lbl_scheduled')}</span>`;
 
+        // Il mezzo e' noto ma non e' ancora uscito dal capolinea: l'orario qui
+        // sopra viene dalla tabella, non dal GPS. Dirlo apertamente evita che il
+        // badge "Tempo reale" — che segnala di sapere QUALE autobus arriva —
+        // venga letto come "il bus e' gia' per strada".
+        const depHtml = (isLive && first.in_transit === false && first.scheduled_departure)
+            ? `<span class="tmb-dep">🚏 ${t('lbl_departing_at')} ${_fmtHHMM(new Date(first.scheduled_departure))}</span>`
+            : '';
+
         const direction = first.route_name ? escHtml(first.route_name) : '';
 
         // Punctuality of the first arrival. This used to render only "N min late",
@@ -1700,7 +1708,7 @@ function renderArrivals(list, arrivals) {
             <div class="tmb-badge" style="background:${color};color:${routeTextColor(shortName, color)}">${escHtml(shortName)}</div>
             <div class="tmb-info">
                 <div class="tmb-times">${timesHtml}</div>
-                <div class="tmb-meta">${rtHtml}${delayHtml}${crowdHtml}</div>
+                <div class="tmb-meta">${rtHtml}${depHtml}${delayHtml}${crowdHtml}</div>
                 ${direction ? `<div class="tmb-dir">→ ${direction}</div>` : ''}
             </div>
             ${routeId ? `<div class="tmb-map-btn" title="Show on map">

@@ -80,6 +80,16 @@ public class VehiclePosition {
     /** The stop it is heading to — derived server-side from the trip sequence */
     private String  nextStopId;
     private String  tripId;
+
+    /**
+     * Partenza della corsa assegnata, in secondi dalla mezzanotte.
+     *
+     * Da quando la corsa viene assegnata gia' prima della partenza (vedi
+     * TripResolutionService.PRE_TRIP_LEAD_SECONDS) non basta piu' sapere QUALE
+     * corsa fa il mezzo: serve sapere se l'ha gia' iniziata. Chi legge questo
+     * campo evita una query per scoprirlo.
+     */
+    private Integer tripStartSeconds;
     private String  routeId;
     private String  routeName;        // resolved from routes.short_name
     private String  nextStop;         // display name, computed server-side

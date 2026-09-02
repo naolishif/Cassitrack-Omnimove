@@ -101,6 +101,14 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
      * Columns: [0] tripId, [1] routeId, [2] routeShortName, [3] routeLongName,
      *          [4] startSeconds, [5] endSeconds
      * Ordered by latest departure first (the trip that started most recently).
+     *
+     * departureCutoff anticipa la finestra: una corsa risulta assegnabile gia' prima
+     * della partenza, mentre il mezzo attende al capolinea. Serve perche' un bus
+     * senza corsa e' invisibile a tutto cio' che sta a valle — previsioni di
+     * arrivo, mappa dei mezzi in linea, avvisi del pianificatore — e alla fermata
+     * il passeggero vedrebbe solo l'orario di tabella fino all'istante in cui il
+     * bus parte. Passare departureCutoff = now riproduce il comportamento
+     * precedente.
      */
     @Query("""
         SELECT ss.trip.id, ss.trip.route.id, ss.trip.route.shortName, ss.trip.route.longName,
@@ -108,10 +116,12 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
         FROM ScheduledStop ss
         WHERE ss.trip.bus.busId = :busId
         GROUP BY ss.trip.id, ss.trip.route.id, ss.trip.route.shortName, ss.trip.route.longName
-        HAVING MIN(ss.arrivalSeconds) <= :now AND MAX(ss.arrivalSeconds) >= :now
+        HAVING MIN(ss.arrivalSeconds) <= :departureCutoff AND MAX(ss.arrivalSeconds) >= :now
         ORDER BY MIN(ss.arrivalSeconds) DESC
         """)
-    List<Object[]> findActiveTripsForBus(@Param("busId") Integer busId, @Param("now") int now);
+    List<Object[]> findActiveTripsForBus(@Param("busId") Integer busId,
+                                         @Param("now") int now,
+                                         @Param("departureCutoff") int departureCutoff);
 
     /**
      * Every trip in service right now, across the whole fleet — the same window
