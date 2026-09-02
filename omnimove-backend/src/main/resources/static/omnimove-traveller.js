@@ -1281,6 +1281,19 @@ function getCrowdingLabel(level) {
 }
 
 let _sheetCurrentStopId = null;   // stop whose arrivals are currently showing
+let _sheetRefreshTimer  = null;   // ricarico periodico finche' la scheda e' aperta
+
+/**
+ * Ogni quanto si riaggiornano gli arrivi della fermata aperta.
+ *
+ * I minuti mostrati invecchiano da soli: senza ricarico la scheda resta ferma
+ * all'istante in cui e' stata aperta e dopo qualche minuto annuncia autobus
+ * gia' passati, con i chip — "Tempo reale", il ritardo, "in partenza alle" —
+ * congelati su una situazione che non esiste piu'. Mezzo minuto tiene i numeri
+ * credibili senza moltiplicare le chiamate a Google, che il backend fa solo
+ * per i mezzi gia' in viaggio.
+ */
+const STOP_SHEET_REFRESH_MS = 30000;
 
 async function showStopArrivals(stopId, stopName) {
     _sheetCurrentStopId = stopId;
@@ -1294,17 +1307,35 @@ async function showStopArrivals(stopId, stopName) {
     list.innerHTML       = '';
     overlay.classList.add('open');
 
+    await loadStopArrivals(stopId, subtitle, list, true);
+
+    clearInterval(_sheetRefreshTimer);
+    _sheetRefreshTimer = setInterval(() => {
+        if (_sheetCurrentStopId !== stopId) return;   // scheda chiusa o cambiata
+        loadStopArrivals(stopId, subtitle, list, false);
+    }, STOP_SHEET_REFRESH_MS);
+}
+
+/**
+ * Carica e disegna gli arrivi. Con first = false il ricarico e' silenzioso:
+ * niente "caricamento", e un errore di rete lascia in piedi quello che c'e'
+ * gia' invece di sostituirlo con un messaggio di servizio non disponibile —
+ * dati di mezzo minuto fa sono comunque meglio di una scheda vuota.
+ */
+async function loadStopArrivals(stopId, subtitle, list, first) {
     try {
         const r = await apiFetch(
             '/journeys/stops/' + encodeURIComponent(stopId) + '/arrivals?limit=10');
         if (!r.ok) throw new Error(r.status);
         const arrivals = await r.json();
+        if (_sheetCurrentStopId !== stopId) return;   // risposta arrivata tardi
         const routeCount = new Set(arrivals.map(a => a.route_short_name || a.route_name)).size;
         subtitle.textContent = arrivals.length
             ? `${routeCount} ${routeCount !== 1 ? t('lbl_lines') : t('lbl_line')} · ${t('lbl_next_departures')}`
             : t('no_buses');
         renderArrivals(list, arrivals);
     } catch(e) {
+        if (!first) return;
         subtitle.textContent = t('err_arrivals');
         list.innerHTML = `<p style="color:var(--text-soft);text-align:center;padding:24px 0">${t('err_service')}</p>`;
     }
@@ -1313,6 +1344,8 @@ async function showStopArrivals(stopId, stopName) {
 function closeStopSheet() {
     document.getElementById('stopSheetOverlay').classList.remove('open');
     _sheetCurrentStopId = null;
+    clearInterval(_sheetRefreshTimer);
+    _sheetRefreshTimer = null;
 }
 
 function handleSheetBackdrop(e) {
