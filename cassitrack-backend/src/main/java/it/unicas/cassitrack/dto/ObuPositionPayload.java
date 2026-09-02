@@ -48,7 +48,13 @@ public class ObuPositionPayload {
     @JsonProperty("hdg")
     private Double hdg;
 
-    /** Occupancy = number of passengers on board. */
+    /**
+     * Number of DISCOVERABLE BLE DEVICES seen on board — not a passenger count.
+     * Devices and people do not map one to one: a passenger may carry several
+     * discoverable devices, or none, and the antenna also sees devices outside
+     * the vehicle. CrowdingService applies the calibration factor; do not map
+     * this straight onto passengers.
+     */
     @JsonProperty("occ")
     private Integer occ;
 
@@ -74,6 +80,10 @@ public class ObuPositionPayload {
      *
      * Fields not carried by the OBU feed (trip_id, route, capacity, next stop…)
      * are left null on purpose — cassitrack enriches them from its own DB.
+     *
+     * passengers is left null as well: the OBU has no verified count, only the
+     * BLE device count, which goes to bleDeviceCount so that
+     * CrowdingService.effectivePassengers applies the calibration to it.
      */
     public MqttPositionPayload toMqttPositionPayload() {
         MqttPositionPayload out = new MqttPositionPayload();
@@ -83,7 +93,7 @@ public class ObuPositionPayload {
         out.setLon(lon);
         out.setSpeedKmh(spd);
         out.setHeadingDeg(hdg);
-        out.setPassengers(occ);
+        out.setBleDeviceCount(occ);
         out.setBatteryVoltage(bat);
         return out;
     }

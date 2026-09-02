@@ -32,7 +32,12 @@ public class SiriMapper {
             }
 
             // ── Occupancy (calcolato da passeggeri/capacità) ──────────────────
-            String occupancy = computeOccupancy(v.getPassengers(), v.getCapacity());
+            // effectivePassengers, non getPassengers: sul feed OBU il conteggio
+            // verificato non esiste e l'unica fonte è la stima calibrata da BLE.
+            String occupancy = computeOccupancy(
+                    CrowdingService.effectivePassengers(
+                            v.getPassengers(), v.getBleDeviceCount()),
+                    v.getCapacity());
 
             // ── Delay in formato ISO 8601 ─────────────────────────────────────
             String delay = null;

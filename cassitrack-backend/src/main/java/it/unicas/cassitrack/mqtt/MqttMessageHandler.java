@@ -9,6 +9,7 @@ import it.unicas.cassitrack.dto.ObuPositionPayload;
 import it.unicas.cassitrack.model.Bus;
 import it.unicas.cassitrack.model.VehiclePosition;
 import it.unicas.cassitrack.repository.BusRepository;
+import it.unicas.cassitrack.service.CrowdingService;
 import it.unicas.cassitrack.service.RouteMatchingService;
 import it.unicas.cassitrack.service.ScheduleAdherenceService;
 import it.unicas.cassitrack.service.SecurityAuditService;
@@ -195,7 +196,13 @@ public class MqttMessageHandler implements MessageHandler {
 
         if (v.getBleDeviceCount() != null) point.addField("ble_device_count", v.getBleDeviceCount());
         if (v.getBatteryVoltage() != null) point.addField("battery_voltage",  v.getBatteryVoltage());
-        if (v.getPassengers()     != null) point.addField("passengers",       v.getPassengers());
+
+        // passengers is the figure the analytics read (CO2, passenger-km, load by
+        // hour). It has to be the calibrated estimate, not the raw BLE count: the
+        // OBU feed carries no verified count, so without effectivePassengers the
+        // field would simply stop being written for the real vehicles.
+        Integer pax = CrowdingService.effectivePassengers(v.getPassengers(), v.getBleDeviceCount());
+        if (pax != null) point.addField("passengers", pax);
         if (v.getCapacity()       != null) point.addField("capacity",         v.getCapacity());
         if (v.getDelayMinutes()   != null) point.addField("delay",            v.getDelayMinutes());
         if (v.getLastStopRegistered() != null) point.addField("last_stop_registered", v.getLastStopRegistered());
