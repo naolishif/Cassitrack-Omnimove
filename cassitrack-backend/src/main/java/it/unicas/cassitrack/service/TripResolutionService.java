@@ -80,11 +80,17 @@ public class TripResolutionService {
      * proprio quando l'informazione piu' utile e' "il tuo autobus e' quello, ed
      * e' al capolinea".
      *
-     * Un quarto d'ora copre l'intervallo fra due corse sulle linee brevi senza
-     * arrivare a impegnare un mezzo su una corsa cosi' lontana da non essere
-     * ancora credibile.
+     * Mezz'ora e' l'intervallo fra due partenze della stessa linea: con un
+     * anticipo piu' corto restava una finestra in cui la corsa successiva non
+     * era ancora di nessuno, e alla fermata ricompariva il solo orario di
+     * tabella. Coprendo l'intero intervallo, ogni corsa ha sempre un mezzo
+     * associato — a patto che la linea ne abbia uno che trasmette.
+     *
+     * Il valore e' pubblico perche' ETAService vi commisura il proprio
+     * orizzonte di previsione: assegnare un veicolo con mezz'ora di anticipo e
+     * poi scartarne l'arrivo perche' lontano sarebbe lavoro sprecato.
      */
-    private static final int PRE_TRIP_LEAD_SECONDS = 15 * 60;
+    public static final int PRE_TRIP_LEAD_SECONDS = 30 * 60;
 
     /**
      * A trip is not released when its scheduled end passes — only when the bus
@@ -141,12 +147,20 @@ public class TripResolutionService {
         if (cached != null && now > cached.endSeconds()) {
             boolean arrived  = atTerminus(cached, lat, lon);
             boolean gaveUp   = now > cached.endSeconds() + MAX_OVERRUN_SECONDS;
-            if (!arrived && !gaveUp) {
+            // Il mezzo ha gia' cominciato la corsa successiva: tenere quella
+            // scaduta lo lascerebbe sulla linea sbagliata fino allo scadere della
+            // tolleranza. Succede ogni volta che l'arrivo al capolinea non viene
+            // rilevato — GPS impreciso, tracciato che non passa sul punto, o un
+            // riallineamento dell'orario come quello del 2 settembre — e per
+            // tre quarti d'ora il veicolo mostra una corsa che non sta facendo.
+            boolean superseded = !arrived && !gaveUp && hasStartedLaterTrip(busId, now, cached);
+            if (!arrived && !gaveUp && !superseded) {
                 return Optional.of(cached);          // late, still out there
             }
             log.info("Vehicle {} released trip {} — {}", vehicleId, cached.tripId(),
-                    arrived ? "arrived at terminus"
-                            : "no arrival " + (MAX_OVERRUN_SECONDS / 60) + " min past its end");
+                    arrived    ? "arrived at terminus"
+                    : superseded ? "a later trip is already in service"
+                    : "no arrival " + (MAX_OVERRUN_SECONDS / 60) + " min past its end");
             cache.remove(vehicleId);
             cached = null;
         }
@@ -188,6 +202,22 @@ public class TripResolutionService {
                 vehicleId, busId, trip.tripId(), trip.routeId(),
                 trip.startSeconds(), trip.endSeconds());
         return Optional.of(trip);
+    }
+
+    /**
+     * Esiste, per questo mezzo, una corsa iniziata dopo quella in cache e gia'
+     * in servizio adesso?
+     *
+     * Solo le corse gia' PARTITE contano: quelle assegnate in anticipo (vedi
+     * PRE_TRIP_LEAD_SECONDS) non devono strappare via una corsa ancora in corso
+     * a un mezzo semplicemente in ritardo.
+     */
+    private boolean hasStartedLaterTrip(Integer busId, int now, ActiveTrip cached) {
+        for (Object[] row : scheduledStopRepo.findActiveTripsForBus(busId, now, now)) {
+            int start = ((Number) row[4]).intValue();
+            if (start > cached.startSeconds() && start <= now) return true;
+        }
+        return false;
     }
 
     /** Forget a vehicle's assignment — e.g. when it goes offline. */

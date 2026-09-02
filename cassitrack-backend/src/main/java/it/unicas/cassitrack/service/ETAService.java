@@ -49,6 +49,16 @@ public class ETAService {
     private static final ZoneId ITALY_TZ =
             ZoneId.of("Europe/Rome");
 
+    /**
+     * Quanto in la' guardiamo. Deve coprire l'anticipo con cui una corsa viene
+     * assegnata a un mezzo, piu' il tempo di percorrenza fino alla fermata
+     * chiesta: altrimenti il veicolo risulta assegnato ma il suo arrivo viene
+     * scartato proprio perche' distante, e alla fermata resta l'orario di
+     * tabella senza che si capisca il perche'.
+     */
+    private static final long MAX_ETA_SECONDS =
+            TripResolutionService.PRE_TRIP_LEAD_SECONDS + 30 * 60;
+
 
     /**
      * Get predicted arrivals at a specific stop.
@@ -78,7 +88,7 @@ public class ETAService {
         try {
             SeqEta seqEta = computeSequenceEta(bus, targetStopId);
             if (seqEta == null) return null;
-            if (seqEta.etaSeconds() > 1800) return null;
+            if (seqEta.etaSeconds() > MAX_ETA_SECONDS) return null;
 
             Instant estimatedArrival = Instant.now().plusSeconds(seqEta.etaSeconds());
             // L'orario di tabella a QUESTA fermata: senza, chi legge non ha un
