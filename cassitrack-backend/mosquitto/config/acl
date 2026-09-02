@@ -25,3 +25,8 @@ topic write health
 user cassitrack-bus
 topic write cassitrack/+/position
 topic write cassitrack/+/ble
+# Schema compatto degli OBU: e' la rotta che usano le unita' ESP32 e il
+# simulatore del percorso. Senza questa riga un publisher locale viene
+# rifiutato ("not authorised") e la simulazione non arriva mai al backend,
+# che invece e' sottoscritto a cassitrack/obu/+/pos anche sul broker locale.
+topic write cassitrack/obu/+/pos
