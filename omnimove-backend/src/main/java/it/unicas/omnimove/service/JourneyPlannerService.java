@@ -141,6 +141,34 @@ public class JourneyPlannerService {
     }
 
     /**
+     * Removes the wait that opens a bus itinerary and returns its minutes.
+     *
+     * Under "depart at" that wait is the traveller's: they are at the stop from
+     * the hour they picked and the bus comes when it comes. Under "arrive by"
+     * the fixed point is the arrival, so the wait is only the distance between
+     * the base this option happened to be planned from and the run it catches —
+     * shown, it reads as a quarter of an hour of standing about that nobody has
+     * to do. The waits at an interchange are real and stay.
+     */
+    private static int dropLeadingWait(JourneyOption o) {
+        List<JourneyLeg> legs = o.getLegs();
+        if (legs == null || legs.isEmpty()) return 0;
+        // The walk to the stop, when the journey does not start at one, comes first
+        int i = "WALK".equals(legs.get(0).getMode()) ? 1 : 0;
+        if (i >= legs.size()) return 0;
+        JourneyLeg wait = legs.get(i);
+        if (!"WAIT".equals(wait.getMode()) || Boolean.TRUE.equals(wait.getTransfer())) return 0;
+
+        int min = wait.getDurationMinutes() == null ? 0 : wait.getDurationMinutes();
+        List<JourneyLeg> rest = new ArrayList<>(legs);
+        rest.remove(i);
+        o.setLegs(rest);
+        if (o.getDurationMinutes() != null) o.setDurationMinutes(o.getDurationMinutes() - min);
+        if (o.getEtaMinutes()      != null) o.setEtaMinutes(o.getEtaMinutes() - min);
+        return min;
+    }
+
+    /**
      * Stamps each option with its own departure and removes the ones that miss
      * the deadline.
      *
@@ -162,7 +190,12 @@ public class JourneyPlannerService {
             if (hasBusLeg(o.getMode())) {
                 java.time.Instant arrival = base.plus(dur, java.time.temporal.ChronoUnit.MINUTES);
                 if (arrival.isAfter(deadline)) { droppedAny = true; continue; }
-                o.setDepartsAt(base.toEpochMilli());
+                // The base is a working figure, not an hour the traveller picked,
+                // so the minutes this option spends standing at the first stop are
+                // nobody's wait: leaving that much later boards the same run and
+                // lands at the same time. Drop them and start the option there.
+                int idle = dropLeadingWait(o);
+                o.setDepartsAt(base.plusSeconds(60L * idle).toEpochMilli());
             } else {
                 // Leave as late as the deadline allows
                 o.setDepartsAt(deadline.minus(dur, java.time.temporal.ChronoUnit.MINUTES).toEpochMilli());
