@@ -4,7 +4,6 @@ import it.unicas.omnimove.dto.BikeVehicleDTO;
 import it.unicas.omnimove.dto.BikeZoneDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -13,15 +12,16 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Simulated Elerent fleet for Cassino, active while no RideAtom
- * App-Public-Key is available (elerent.api.mock=true, the default).
+ * Simulated Elerent fleet for Cassino. It is the whole provider while
+ * elerent.api.mock=true, and it stays available afterwards as the vehicle
+ * fallback of {@link RideAtomClient}, whose /get-vehicles call the
+ * App-Public-Key alone cannot open.
  *
  * Positions are spread around real Cassino landmarks with a fixed
  * random seed, so the fleet is stable across calls and restarts —
  * demos look consistent and screenshots are reproducible.
  */
 @Component
-@ConditionalOnProperty(name = "elerent.api.mock", havingValue = "true", matchIfMissing = true)
 public class MockElerentClient implements BikeSharingClient {
 
     private static final Logger log = LoggerFactory.getLogger(MockElerentClient.class);
@@ -41,9 +41,9 @@ public class MockElerentClient implements BikeSharingClient {
     public MockElerentClient() {
         this.fleet = buildFleet();
         this.zones = buildZones();
-        log.info("MockElerentClient active — {} simulated vehicles in Cassino "
-                + "(set elerent.api.mock=false + ELERENT_PUBLIC_KEY for the real API)",
-                fleet.size());
+        log.info("MockElerentClient ready — {} simulated vehicles in Cassino "
+                + "(used as the provider when elerent.api.mock=true, and as the "
+                + "vehicle fallback of RideAtomClient otherwise)", fleet.size());
     }
 
     @Override

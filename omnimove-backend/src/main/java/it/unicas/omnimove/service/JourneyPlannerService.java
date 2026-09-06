@@ -841,11 +841,12 @@ public class JourneyPlannerService {
                         + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."
                     : "ℹ️ Destination outside the Elerent operating area: the ride ends at the boundary, "
                         + "last " + fmtDist(lastWalk.metres()) + " on foot.";
+            // Covers both zones the provider forbids: no-parking and no-go
             case NO_PARKING -> req.isItalian()
-                    ? "ℹ️ Destinazione in zona divieto di sosta Elerent: si lascia il mezzo ai margini della zona, "
+                    ? "ℹ️ Destinazione in zona Elerent vietata al parcheggio: si lascia il mezzo ai margini della zona, "
                         + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."
-                    : "ℹ️ Destination inside an Elerent no-parking zone: leave the vehicle at the zone edge, "
-                        + "last " + fmtDist(lastWalk.metres()) + " on foot.";
+                    : "ℹ️ Destination inside an Elerent zone where parking is not allowed: leave the vehicle at the "
+                        + "zone edge, last " + fmtDist(lastWalk.metres()) + " on foot.";
         }).orElse(null);
 
         int lastWalkMin = lastWalk != null ? lastWalk.minutes() : 0;

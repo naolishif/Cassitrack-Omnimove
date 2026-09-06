@@ -11,9 +11,11 @@ traveller map, **read-only**: no unlocking, no payments, no writes towards
 Elerent. The integration lives entirely in `omnimove-backend` — CASSITRACK is
 not involved (bikes are not a monitored fleet, they are availability data).
 
-Since we currently **do not have an App-Public-Key**, the system ships with a
-**simulated** (mock) provider that generates a realistic fleet over Cassino.
-Switching to the real service requires no code changes: configuration only.
+Elerent's **App-Public-Key** is now configured, and the integration runs against
+the real platform: the **zones drawn on the map are Elerent's own**. Vehicle
+positions are the one thing the key does not open — `/get-vehicles` also demands
+a per-user bearer token — so the fleet still comes from the **simulated**
+provider until Elerent issues one (§1.1).
 
 ## Who is who: Elerent, ATOM Mobility, RideAtom
 
@@ -42,17 +44,19 @@ deployments offer one out of the box (§4.1).
 
 ---
 
-## 1. How to enable the real integration
+## 1. Enabling the real integration
 
-### Step 1 — Obtain the key
+### Step 1 — The key
 
-Request the installation's **App-Public-Key** from Elerent (or ATOM Mobility).
-Every *Sharing* endpoint requires it in the `App-Public-Key` header. For the two
-endpoints we use, the public key alone is enough: **no user token needed**.
+Elerent's **App-Public-Key** goes in the `App-Public-Key` header of every
+*Sharing* endpoint; it is what selects Elerent's installation out of the shared
+ATOM platform. The key is in `omnimove-backend/.env` (gitignored), not in the
+repository.
 
-> Tip: also ask whether the installation exposes a **GBFS feed** (an open
-> standard many ATOM deployments support). If it does, the right move is a third
-> `GbfsClient` implementation of the same interface — see §4.
+The key is genuinely Elerent's and not a demo account: calling `/get-zones`
+**without** any key returns ATOM's own showcase zones (Riga, Bordeaux), with an
+invalid key returns `{"message": "No access"}`, and with ours returns 671 zones
+across every Elerent city — 29 of them in Cassino.
 
 ### Step 2 — Set the environment variables
 
@@ -60,33 +64,93 @@ endpoints we use, the public key alone is enough: **no user token needed**.
 ELERENT_API_MOCK=false
 ELERENT_PUBLIC_KEY=<key provided by Elerent>
 # optional:
+ELERENT_USER_TOKEN=                                             # see §1.1
+ELERENT_VEHICLES_FALLBACK_MOCK=true                             # default
 ELERENT_API_URL=https://app.rideatom.com/openapi/v1.0/sharing   # default
 ```
 
 The matching configuration lives in
 `omnimove-backend/src/main/resources/application.yml`, block `elerent.api`
-(base-url, public-key, mock, radius-km).
+(base-url, public-key, user-token, mock, vehicles-fallback-mock, centre-lat,
+centre-lon, radius-km).
 
 ### Step 3 — Restart omnimove-backend
 
 At startup the log tells you which provider is active:
 
-- `MockElerentClient active — N simulated vehicles in Cassino …` → mock
-- `RideAtomClient → https://… (key configured)` → real API
+- `MockElerentClient ready — N simulated vehicles in Cassino …` → the mock is
+  loaded (as the provider when `mock=true`, as the vehicle fallback otherwise)
+- `RideAtomClient → https://… (key configured, user token absent, vehicle
+  fallback on)` → real API
 
 Nothing else is needed: frontend, REST endpoints and service are identical in
 both cases.
 
-### RideAtom endpoints used (read-only)
+### 1.1 What the public key actually opens
 
-| Endpoint | Auth | Purpose |
+The documentation page presents the whole *Sharing* tag as one family, but the
+spec declares a different security requirement per operation, and the server
+enforces it:
+
+| Endpoint | Declared auth | Reality with our key |
 |---|---|---|
-| `POST /get-vehicles` — body `{user_latitude, user_longitude, radius_in_km}` | Public key only | Vehicle positions: id, plate (`nr`), battery, type, coordinates |
-| `POST /get-zones` | Public key only | Operating / no-parking zones: polygon or circle, colour, title |
+| `POST /get-zones` | `App-Public-Key` | **200** — real Elerent zones |
+| `POST /get-vehicles` — body `{user_latitude, user_longitude, radius_in_km}` | `App-Public-Key` **+** `Authorization` | **401 `Unauthorized Access`** |
 
-We deliberately **exclude** `start-ride`, `end-ride`, `pause`,
-`send-vehicle-commands`, `purchase`: those are write operations, require a user
-token, and belong to a future phase (deep-link handoff to the Elerent app).
+`/get-vehicles` returns positions, plate (`nr`), battery and type, but only for
+a signed-in rider: the bearer token is issued by the ATOM account system
+(phone-number verification), and the alternative documented route — the
+`user_id` parameter — "works with secret key only", which is a credential an
+operator does not hand to a third-party planner.
+
+So there are two ways to get real vehicle positions, and both are a question for
+Elerent, not a code change:
+
+1. a **service token** for OMNIMOVE, set in `ELERENT_USER_TOKEN`; the client
+   already sends it as `Authorization: Bearer …` when present;
+2. a **GBFS feed**, which needs no credentials at all — see §4.1.
+
+Until then `RideAtomClient` catches the 401, warns once, and delegates
+`getVehicles()` to `MockElerentClient` (`elerent.api.vehicles-fallback-mock`,
+default `true`). The map therefore shows a simulated fleet inside real Elerent
+zones; set the flag to `false` to show no vehicles at all instead.
+
+### 1.2 What comes back for Cassino
+
+`/get-zones` answers with a **bare JSON array** of every zone of every Elerent
+city (~670, 660 KB). The client keeps the ones within `radius-km` of
+`centre-lat/centre-lon` — 29 for Cassino — so the browser is not handed a
+nationwide polygon set on every load:
+
+| Type | Count | What it is |
+|---|---|---|
+| `PARKING_ZONE` | 17 | 16 parking bays 10–200 m across, plus one 2.2 km polygon covering the town centre, the station and the hospital |
+| `NO_PARKING_ZONE` | 7 | 100–590 m, all in the centre |
+| `NO_GO_ZONE` | 2 | one 1.1 km, one 13.7 km polygon that includes the Folcara campus |
+| `SPEED_LIMIT_ZONE` | 3 | "6 km/h", around the pedestrian core |
+
+Two details of the payload the earlier code did not survive: `zone_area` is a
+**GeoJSON polygon**, so its coordinates are `[longitude, latitude]` nested one
+level per ring — the opposite order and shape of the `[lat, lon]` pairs
+`GeoUtils` and Leaflet expect — and `zone_color` is bare hex (`21C378`) with no
+`#`. Circular zones (`park_place_zone`, none in Cassino) leave `zone_area` null
+and carry `zone_point` + `zone_radius` instead.
+
+`BikeSharingService` treats `NO_PARKING_ZONE` and `NO_GO_ZONE` as forbidden, so
+a ride ending in one is flagged and relocated to the nearest legal drop-off. It
+does **not** treat `PARKING_ZONE` as an operating area, which is the open
+question to put to Elerent: the geometry (tiny bays plus one town-centre
+polygon) is what a *mandatory parking* system looks like, and if that is the
+rule, then every ride must end inside a parking zone and the campus is out of
+the service area entirely. Asserting that without confirmation would send
+travellers walking the last kilometre to the university, so the check stays off
+until Elerent says so.
+
+### Endpoints deliberately not used
+
+`start-ride`, `end-ride`, `pause`, `send-vehicle-commands`, `purchase`: write
+operations, they require a user token, and they belong to a future phase
+(deep-link handoff to the Elerent app — §4.3).
 
 ---
 
@@ -120,7 +184,7 @@ Components (all in `omnimove-backend`):
 | Component | File | Role |
 |---|---|---|
 | Client (interface) | `client/BikeSharingClient.java` | Read-only contract: `getVehicles()`, `getZones()` |
-| Real client | `client/RideAtomClient.java` | Calls RideAtom; lenient parsing; on error → empty list |
+| Real client | `client/RideAtomClient.java` | Calls RideAtom; lenient parsing, GeoJSON → `[lat, lon]`, zones filtered to the service area; on error → empty list |
 | Mock client | `client/MockElerentClient.java` | Deterministic simulated fleet (fixed seed) on real Cassino landmarks |
 | Service | `service/BikeSharingService.java` | TTL cache: 60 s vehicles, 10 min zones |
 | REST | `controller/JourneyController.java` | `GET /api/v1/journeys/bikes`, `GET /api/v1/journeys/bikes/zones` |
@@ -194,11 +258,18 @@ GeoJSON). Feeds are public by design: **no API key, no authentication**, and the
 spec even declares the polling frequency via a `ttl` field.
 
 **Why it matters here.** Many ATOM Mobility installations expose a GBFS feed in
-addition to the proprietary RideAtom API. If Elerent's does, GBFS becomes the
-preferable source for our read-only use case: it is exactly the data we need,
-with no key to obtain and no dependency on RideAtom's undocumented response
-shapes (our `RideAtomClient` has to parse defensively precisely because field
-names vary across deployments).
+addition to the proprietary RideAtom API, and GBFS carries vehicle positions
+without any credential — exactly the data `/get-vehicles` refuses us (§1.1).
+
+**Where it would live.** ATOM publishes each operator's feed on the operator's
+own subdomain, in the form
+`https://<operator>.rideatom.com/gbfs/<system-id>/v3.0/gbfs` (the pattern used
+by Yoio, Yaldi, 3electra and others registered in MobilityData's `systems.csv`).
+`elerent.rideatom.com` exists and answers on `/gbfs`, but with `Incorrect data.`
+for every system id from 1 to 1000, and Elerent is not in the MobilityData
+catalogue — so either the feed is not enabled for this account, or it is
+published under an id we cannot guess. **This is worth one email to Elerent or
+ATOM**: it would remove both the missing-token problem and the API key.
 
 **How to implement it.** This is the scenario the current design was built for:
 

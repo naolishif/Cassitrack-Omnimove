@@ -20,11 +20,10 @@ public class BikeSharingService {
 
     private static final long CACHE_TTL_MS = 60_000;   // 60 s
 
-    // Cassino city centre — search centre for the whole service area
-    private static final double CASSINO_LAT = 41.4901;
-    private static final double CASSINO_LON = 13.8303;
-
     private final BikeSharingClient client;
+    // Cassino city centre — search centre for the whole service area
+    private final double centreLat;
+    private final double centreLon;
     private final int radiusKm;
 
     private List<BikeVehicleDTO> cachedVehicles;
@@ -34,15 +33,19 @@ public class BikeSharingService {
     private long zonesTimestamp = 0;
 
     public BikeSharingService(BikeSharingClient client,
+                              @Value("${elerent.api.centre-lat:41.4901}") double centreLat,
+                              @Value("${elerent.api.centre-lon:13.8303}") double centreLon,
                               @Value("${elerent.api.radius-km:5}") int radiusKm) {
         this.client = client;
+        this.centreLat = centreLat;
+        this.centreLon = centreLon;
         this.radiusKm = radiusKm;
     }
 
     public synchronized List<BikeVehicleDTO> getAvailableBikes() {
         long now = System.currentTimeMillis();
         if (cachedVehicles == null || now - vehiclesTimestamp > CACHE_TTL_MS) {
-            cachedVehicles = client.getVehicles(CASSINO_LAT, CASSINO_LON, radiusKm);
+            cachedVehicles = client.getVehicles(centreLat, centreLon, radiusKm);
             vehiclesTimestamp = now;
         }
         return cachedVehicles;

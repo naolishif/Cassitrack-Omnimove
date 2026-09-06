@@ -122,7 +122,7 @@ ESP32 / OBU units                    gps_simulator3.py  ·  tools/simulate_bus*.
 | Preference profile | Four onboarding answers become weights (time / cost / eco / reliability) — derived, never stored as numbers |
 | Green Index | 0–100 per option, from EEA-style CO₂ factors (bus 68 g/pax·km against a 170 g/km car baseline) |
 | Weather awareness | Rain and wind demote bike and scooter; "bus only when raining" is a per-account setting |
-| Elerent integration | Live bike/scooter availability and operating zones from the RideAtom API, read-only; realistic mock when no key is configured |
+| Elerent integration | Real Elerent zones from the RideAtom API, read-only; vehicle positions need a user token Elerent has not issued yet, so the fleet stays simulated (see `elerent_en.md` §1.1) |
 | Live bus positions | Shown on the traveller map and during an active journey |
 | Timetable browser | Departures by line and terminus |
 | Favourites | Favourite stops and favourite journeys, both re-runnable in one tap |
@@ -550,7 +550,7 @@ docker compose -f cassitrack-backend/docker-compose.yml down -v
 ## What Is Next
 
 - Real OBU hardware on more vehicles (`BUS4` still needs reflashing from `BUS2L`)
-- Elerent production API key, replacing the mock availability provider
+- An Elerent service token (or a GBFS feed) for real vehicle positions: the App-Public-Key opens the zones only
 - A service calendar: trips currently run every day, with no weekday/Saturday distinction
 - Official timetable data from the network operator, replacing the interpolated intermediate times
 - DPIA completion and DPO sign-off before the research pipeline is enabled anywhere real

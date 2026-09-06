@@ -124,12 +124,23 @@ elerent:
     # perche' viene restituita a fine corsa. E' dichiarata nel listino.
     deposit: 5.00
   # ── Elerent live availability (ATOM Mobility / RideAtom API) ──
-  # All Sharing endpoints are POST + App-Public-Key header.
-  # No key yet → mock=true serves simulated bikes around Cassino.
+  # All Sharing endpoints are POST + App-Public-Key header, which selects
+  # Elerent's installation on the shared platform. mock=true replaces the
+  # provider with a simulated fleet around Cassino.
   api:
     base-url: ${ELERENT_API_URL:https://app.rideatom.com/openapi/v1.0/sharing}
     public-key: ${ELERENT_PUBLIC_KEY:}
+    # /get-vehicles also requires a per-user bearer token; the public key alone
+    # opens /get-zones only. Empty until Elerent issues a service account.
+    user-token: ${ELERENT_USER_TOKEN:}
     mock: ${ELERENT_API_MOCK:true}
+    # While /get-vehicles answers 401, serve the simulated fleet rather than an
+    # empty map (the real zones are drawn around it either way).
+    vehicles-fallback-mock: ${ELERENT_VEHICLES_FALLBACK_MOCK:true}
+    # Cassino centre: the account covers every Elerent city, so vehicles are
+    # requested and zones filtered around here.
+    centre-lat: 41.4901
+    centre-lon: 13.8303
     radius-km: 5
 # ── OpenAPI ───────────────────────────────────────────────────
 springdoc:
