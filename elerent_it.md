@@ -128,6 +128,13 @@ disegnare i poligoni di mezza Italia a ogni caricamento:
 | `NO_GO_ZONE` | 2 | una da 1,1 km e una da 13,7 km che include il campus di Folcara |
 | `SPEED_LIMIT_ZONE` | 3 | "6 km/h", attorno all'isola pedonale |
 
+Ogni zona porta anche `zone_vehicle_types`, i tipi di veicolo a cui si applica
+(`BIKE`, `E_BIKE`, `SCOOTER`…). Arriva al browser come `vehicle_types`, compare
+nel popup della zona e filtra il controllo sul drop-off: una zona di divieto
+valida solo per i monopattini non sposta più la fine di una corsa in bici. A
+Cassino 26 zone valgono per bici e monopattini indifferentemente, e le 3 zone
+"6 km/h" si applicano solo a `SCOOTER` ed `E_BIKE`.
+
 Due dettagli del payload su cui il codice precedente si sarebbe rotto:
 `zone_area` è un **poligono GeoJSON**, quindi le coordinate sono
 `[longitudine, latitudine]` annidate di un livello per anello — ordine e forma
@@ -136,15 +143,42 @@ opposti alle coppie `[lat, lon]` che `GeoUtils` e Leaflet si aspettano — e
 (`park_place_zone`, nessuna a Cassino) hanno `zone_area` null e portano invece
 `zone_point` + `zone_radius`.
 
-`BikeSharingService` considera vietate `NO_PARKING_ZONE` e `NO_GO_ZONE`, quindi
-una corsa che finisce lì viene segnalata e ricollocata al drop-off legale più
-vicino. **Non** considera `PARKING_ZONE` come area operativa, ed è la domanda
-aperta da girare a Elerent: la geometria (stalli minuscoli più un poligono sul
-centro) è quella tipica di un sistema a **sosta obbligata**, e se la regola è
-quella allora ogni corsa deve finire dentro una parking zone e il campus è fuori
-area. Darlo per assodato senza conferma manderebbe i viaggiatori a piedi per
-l'ultimo chilometro fino all'università, quindi il controllo resta spento finché
-Elerent non conferma.
+### 1.3 Sosta obbligata, e cosa comporta per un itinerario
+
+Elerent ha confermato la regola che la geometria suggeriva: **la corsa può
+terminare solo dentro una parking zone**. `BikeSharingService` tratta quindi
+`PARKING_ZONE`, `PAID_PARKING_ZONE` e `PARK_PLACE_ZONE` come area operativa — la
+piattaforma non ha un tipo "area di servizio" a sé — e `NO_PARKING_ZONE` /
+`NO_GO_ZONE` come vietate. Il test sulle zone vietate viene prima, così una
+`NO_PARKING_ZONE` non può combaciare sulla sottostringa "PARK" ed essere scambiata
+per un posto dove parcheggiare.
+
+Accendere la regola ha fatto emergere un buco nella ricerca del drop-off. La
+`no_go_zone` 4411 è il poligono "tutto ciò che sta fuori dal servizio": copre il
+**73% dell'area entro 2 km dal centro**, con un buco sulla città. Uscire appena
+dal suo bordo, che è ciò che il codice faceva per una zona vietata, porta sul
+confine dell'area di servizio: legale da attraversare, ma non un posto dove si
+possa lasciare il mezzo. I due vincoli vanno risolti insieme, quindi
+`findLegalDropOff()` cerca ora il punto più vicino che sia dentro una parking zone
+**e** fuori da ogni zona vietata a quel mezzo, verificando ogni candidato con
+`checkDestinationZones()` prima di accettarlo. Ogni zona offre due candidati —
+appena dentro il bordo più vicino, e il suo centro — perché gli stalli sono larghi
+10–200 m e un punto sul bordo può essere inutilizzabile mentre il centro va bene.
+
+Misurato su 1249 destinazioni distribuite entro 2 km dal centro, ogni drop-off
+prodotto è ora legale (prima erano 971 su 1132 non validi). Quanto spesso il
+viaggiatore vede l'avviso dipende da dove sta andando:
+
+| Distanza dal centro | Destinazioni dove la corsa può terminare così com'è |
+|---|---|
+| entro 500 m | 71% |
+| entro 1 km | 38% |
+| entro 2 km | 10% |
+
+Nel centro quindi la maggior parte delle corse non cambia, mentre una destinazione
+periferica termina in uno stallo con l'ultimo tratto a piedi (in media 540 m
+sull'intero disco di 2 km). Il caso più vistoso è il campus di Folcara: cade
+dentro la no-go zone 4411, quindi una corsa in bici finisce a ~440 m.
 
 ### Endpoint volutamente non usati
 
@@ -188,7 +222,7 @@ Componenti (tutti in `omnimove-backend`):
 | Client mock | `client/MockElerentClient.java` | Flotta simulata deterministica (seed fisso) su punti reali di Cassino |
 | Service | `service/BikeSharingService.java` | Cache TTL: 60 s mezzi, 10 min zone |
 | REST | `controller/JourneyController.java` | `GET /api/v1/journeys/bikes`, `GET /api/v1/journeys/bikes/zones` |
-| DTO | `dto/BikeVehicleDTO.java`, `dto/BikeZoneDTO.java` | Formato snake_case verso il browser |
+| DTO | `dto/BikeVehicleDTO.java`, `dto/BikeZoneDTO.java` | Formato snake_case verso il browser; le zone portano i tipi di veicolo a cui si applicano |
 | Frontend | `static/omnimove-traveller.js` | Marker, zone, polling 60 s, filtro con i chip modalità |
 
 Gli endpoint sono protetti come tutti i `/api/v1/journeys/**`: serve un utente

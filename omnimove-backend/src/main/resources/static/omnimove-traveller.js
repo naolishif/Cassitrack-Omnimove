@@ -1242,7 +1242,10 @@ async function loadBikeZones() {
                 layer = L.circle(z.center, { ...opts, radius: z.radius_m, fillOpacity: 0.12 });
             }
             if (layer) {
-                if (z.title) layer.bindPopup(escHtml(z.title));
+                // Elerent tags each zone with the vehicle types it binds
+                const types = Array.isArray(z.vehicle_types) && z.vehicle_types.length
+                    ? `<br><small>${escHtml(z.vehicle_types.join(', '))}</small>` : '';
+                if (z.title) layer.bindPopup(escHtml(z.title) + types);
                 layer.addTo(map);
                 window._bikeZoneLayers.push(layer);
             }

@@ -236,6 +236,10 @@ public class RideAtomClient implements BikeSharingClient {
         }
         if (!polygon.isEmpty()) b.polygon(polygon);
 
+        List<String> vehicleTypes = new ArrayList<>();
+        for (JsonNode t : z.path("zone_vehicle_types")) vehicleTypes.add(t.asText());
+        if (!vehicleTypes.isEmpty()) b.vehicleTypes(vehicleTypes);
+
         JsonNode point = z.path("zone_point");
         Double cLat = firstDouble(point, "latitude", "lat");
         Double cLon = firstDouble(point, "longitude", "lng", "lon");

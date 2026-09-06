@@ -129,6 +129,13 @@ nationwide polygon set on every load:
 | `NO_GO_ZONE` | 2 | one 1.1 km, one 13.7 km polygon that includes the Folcara campus |
 | `SPEED_LIMIT_ZONE` | 3 | "6 km/h", around the pedestrian core |
 
+Every zone also carries `zone_vehicle_types`, the vehicle types it binds
+(`BIKE`, `E_BIKE`, `SCOOTER`…). It travels to the browser as `vehicle_types`,
+appears in the zone popup, and filters the drop-off check: a scooters-only
+no-parking zone no longer relocates the end of a bike ride. In Cassino 26 zones
+cover bikes and scooters alike, and the 3 "6 km/h" zones apply to `SCOOTER` and
+`E_BIKE` only.
+
 Two details of the payload the earlier code did not survive: `zone_area` is a
 **GeoJSON polygon**, so its coordinates are `[longitude, latitude]` nested one
 level per ring — the opposite order and shape of the `[lat, lon]` pairs
@@ -136,15 +143,41 @@ level per ring — the opposite order and shape of the `[lat, lon]` pairs
 `#`. Circular zones (`park_place_zone`, none in Cassino) leave `zone_area` null
 and carry `zone_point` + `zone_radius` instead.
 
-`BikeSharingService` treats `NO_PARKING_ZONE` and `NO_GO_ZONE` as forbidden, so
-a ride ending in one is flagged and relocated to the nearest legal drop-off. It
-does **not** treat `PARKING_ZONE` as an operating area, which is the open
-question to put to Elerent: the geometry (tiny bays plus one town-centre
-polygon) is what a *mandatory parking* system looks like, and if that is the
-rule, then every ride must end inside a parking zone and the campus is out of
-the service area entirely. Asserting that without confirmation would send
-travellers walking the last kilometre to the university, so the check stays off
-until Elerent says so.
+### 1.3 Mandatory parking, and what it does to a plan
+
+Elerent confirmed the rule the geometry suggested: **a ride may only end inside
+a parking zone**. `BikeSharingService` therefore treats `PARKING_ZONE`,
+`PAID_PARKING_ZONE` and `PARK_PLACE_ZONE` as the operating area — the platform
+has no separate "service area" type — and `NO_PARKING_ZONE` / `NO_GO_ZONE` as
+forbidden. The forbidden test runs first, so a `NO_PARKING_ZONE` cannot match on
+the substring "PARK" and be mistaken for somewhere to park.
+
+Turning the rule on exposed a gap in the drop-off search. `no_go_zone` 4411 is
+the "everything outside the service area" polygon — it covers **73% of the area
+within 2 km of the centre**, with a hole over the town. Stepping just outside it,
+which is what the code did for a forbidden zone, lands on the boundary of the
+service area: legal to ride through, not somewhere the vehicle may be left. Both
+constraints have to be solved together, so `findLegalDropOff()` now looks for the
+nearest point that is inside a parking zone **and** outside every zone forbidden
+to that vehicle, verifying each candidate through `checkDestinationZones()`
+before accepting it. Each zone offers two candidates — just inside its nearest
+edge, and its middle — because the bays are 10–200 m across and an edge point can
+be unusable while the middle is fine.
+
+Measured over 1249 destinations spread within 2 km of the centre, every drop-off
+produced is now legal (it was 971 out of 1132 illegal before the fix). How often
+a traveller sees the notice depends on where they are going:
+
+| Distance from the centre | Destinations where the ride can end as-is |
+|---|---|
+| within 500 m | 71% |
+| within 1 km | 38% |
+| within 2 km | 10% |
+
+So in the core most rides are unaffected, while a peripheral destination ends at
+a parking bay with the last stretch on foot (average 540 m over the whole 2 km
+disc). The Folcara campus is the notable case: it sits inside no-go zone 4411,
+so a bike ride there ends ~440 m away.
 
 ### Endpoints deliberately not used
 
@@ -188,7 +221,7 @@ Components (all in `omnimove-backend`):
 | Mock client | `client/MockElerentClient.java` | Deterministic simulated fleet (fixed seed) on real Cassino landmarks |
 | Service | `service/BikeSharingService.java` | TTL cache: 60 s vehicles, 10 min zones |
 | REST | `controller/JourneyController.java` | `GET /api/v1/journeys/bikes`, `GET /api/v1/journeys/bikes/zones` |
-| DTOs | `dto/BikeVehicleDTO.java`, `dto/BikeZoneDTO.java` | snake_case format towards the browser |
+| DTOs | `dto/BikeVehicleDTO.java`, `dto/BikeZoneDTO.java` | snake_case format towards the browser; zones carry the vehicle types they bind |
 | Frontend | `static/omnimove-traveller.js` | Markers, zones, 60 s polling, filtering via the mode chips |
 
 The endpoints are protected like every `/api/v1/journeys/**` route: an

@@ -90,6 +90,7 @@ public class MockElerentClient implements BikeSharingClient {
                 .title("Elerent Cassino — operating area")
                 .zoneType("OPERATING")
                 .color("#3b82f6")
+                .vehicleTypes(List.of("BIKE", "SCOOTER"))
                 .polygon(List.of(
                         new double[]{41.4990, 13.8180},
                         new double[]{41.4975, 13.8420},
@@ -104,6 +105,7 @@ public class MockElerentClient implements BikeSharingClient {
                 .title("Centro storico — no parking")
                 .zoneType("NO_PARKING")
                 .color("#ef4444")
+                .vehicleTypes(List.of("BIKE", "SCOOTER"))
                 .center(new double[]{41.4903, 13.8308})
                 .radiusM(120)
                 .build());

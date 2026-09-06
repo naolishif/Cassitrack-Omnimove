@@ -783,11 +783,11 @@ public class JourneyPlannerService {
         // ride there anyway and then attach a warning saying it was impossible,
         // which is a plan nobody can follow. Instead the ride stops at the nearest
         // legal point and the last stretch is walked, the way anyone would do it.
-        var dropOff = bikeSharingService.findLegalDropOff(req.getDestLat(), req.getDestLon());
+        var dropOff = bikeSharingService.findLegalDropOff(req.getDestLat(), req.getDestLon(), mode);
         final double rideLat = dropOff.map(BikeSharingService.DropOff::lat).orElse(req.getDestLat());
         final double rideLon = dropOff.map(BikeSharingService.DropOff::lon).orElse(req.getDestLon());
         String rideEndName = dropOff.isPresent()
-                ? (req.isItalian() ? "Limite area Elerent" : "Elerent area edge")
+                ? (req.isItalian() ? "Parcheggio Elerent" : "Elerent parking zone")
                 : req.getDestName();
 
         // Google has no scooter profile: bicycling is the closest road network,
@@ -836,17 +836,18 @@ public class JourneyPlannerService {
         }
 
         String zoneWarning = dropOff.map(d -> switch (d.reason()) {
+            // Elerent requires the vehicle to be left inside a parking zone
             case OUT_OF_OPERATING_AREA -> req.isItalian()
-                    ? "ℹ️ Destinazione fuori dalla zona operativa Elerent: la corsa termina al limite dell'area, "
+                    ? "ℹ️ Alla destinazione non c'è un parcheggio Elerent: la corsa termina in quello più vicino, "
                         + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."
-                    : "ℹ️ Destination outside the Elerent operating area: the ride ends at the boundary, "
+                    : "ℹ️ No Elerent parking zone at the destination: the ride ends at the nearest one, "
                         + "last " + fmtDist(lastWalk.metres()) + " on foot.";
             // Covers both zones the provider forbids: no-parking and no-go
             case NO_PARKING -> req.isItalian()
-                    ? "ℹ️ Destinazione in zona Elerent vietata al parcheggio: si lascia il mezzo ai margini della zona, "
+                    ? "ℹ️ Destinazione in zona Elerent vietata: la corsa termina nel parcheggio valido più vicino, "
                         + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."
-                    : "ℹ️ Destination inside an Elerent zone where parking is not allowed: leave the vehicle at the "
-                        + "zone edge, last " + fmtDist(lastWalk.metres()) + " on foot.";
+                    : "ℹ️ Destination inside a zone Elerent forbids: the ride ends at the nearest valid parking "
+                        + "zone, last " + fmtDist(lastWalk.metres()) + " on foot.";
         }).orElse(null);
 
         int lastWalkMin = lastWalk != null ? lastWalk.minutes() : 0;

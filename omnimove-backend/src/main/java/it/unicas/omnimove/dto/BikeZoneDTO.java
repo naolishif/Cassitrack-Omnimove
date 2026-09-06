@@ -12,6 +12,9 @@ import java.util.List;
  * An operating/parking zone of the bike-sharing service.
  * Either a polygon (list of [lat, lon] points) or a circle
  * (center + radius_m) — the frontend renders whichever is present.
+ *
+ * A zone applies only to the vehicle types it lists: a no-parking zone
+ * for scooters does not constrain a bike ride. Empty means "all types".
  */
 @Data
 @Builder
@@ -25,4 +28,5 @@ public class BikeZoneDTO {
     private List<double[]> polygon;
     private double[] center;
     @JsonProperty("radius_m")  private Integer radiusM;
+    @JsonProperty("vehicle_types") private List<String> vehicleTypes;
 }

@@ -7,6 +7,7 @@ import it.unicas.omnimove.util.GeoUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -90,14 +91,15 @@ public class BikeSharingService {
     }
 
     /**
-     * Checks the ride destination against the provider zones:
+     * Checks the ride destination against the provider zones, for the type of
+     * vehicle the ride is on:
      *  - outside every operating zone (when at least one is defined) → OUT_OF_OPERATING_AREA
      *  - inside a no-parking zone → NO_PARKING
      * Zone types come from the provider unnormalised, so matching is lenient.
      */
-    public Optional<ZoneIssue> checkDestinationZones(double lat, double lon) {
-        List<BikeZoneDTO> zones = getZones();
-        if (zones == null || zones.isEmpty()) return Optional.empty();
+    public Optional<ZoneIssue> checkDestinationZones(double lat, double lon, String vehicleType) {
+        List<BikeZoneDTO> zones = zonesFor(vehicleType);
+        if (zones.isEmpty()) return Optional.empty();
 
         boolean hasOperating = false, inOperating = false;
         for (BikeZoneDTO z : zones) {
@@ -133,16 +135,74 @@ public class BikeSharingService {
      * anyway; the planner used to compute the whole ride to a destination it
      * then declared unreachable, which is a plan nobody can follow.
      */
-    public Optional<DropOff> findLegalDropOff(double destLat, double destLon) {
-        Optional<ZoneIssue> issue = checkDestinationZones(destLat, destLon);
+    public Optional<DropOff> findLegalDropOff(double destLat, double destLon, String vehicleType) {
+        Optional<ZoneIssue> issue = checkDestinationZones(destLat, destLon, vehicleType);
         if (issue.isEmpty()) return Optional.empty();
 
-        List<BikeZoneDTO> zones = getZones();
-        if (zones == null || zones.isEmpty()) return Optional.empty();
+        List<BikeZoneDTO> zones = zonesFor(vehicleType);
+        if (zones.isEmpty()) return Optional.empty();
 
+        // Elerent requires the ride to end inside a parking zone, so the same
+        // answer serves both problems: the nearest parking zone that is not
+        // itself forbidden. Stepping just outside a no-go zone used to be
+        // enough, but its boundary is the edge of the service area, not a place
+        // the vehicle may be left.
+        Optional<DropOff> parked = nearestLegalParking(zones, destLat, destLon,
+                vehicleType, issue.get());
+        if (parked.isPresent()) return parked;
+
+        // No parking zone to aim for: the best that remains is leaving the
+        // forbidden zone the destination fell into.
         return issue.get() == ZoneIssue.NO_PARKING
                 ? stepOutOfForbidden(zones, destLat, destLon)
-                : stepInsideOperating(zones, destLat, destLon);
+                : Optional.empty();
+    }
+
+    /**
+     * The closest point to the destination that is legal on every count:
+     * inside a parking zone and outside every zone forbidden to this vehicle.
+     * Each zone offers two candidates — just inside its nearest edge, and its
+     * middle — because the parking bays are 10–200 m across and the edge point
+     * of a bay overlapping a no-parking zone can be unusable while its middle
+     * is fine.
+     */
+    private Optional<DropOff> nearestLegalParking(List<BikeZoneDTO> zones,
+                                                  double lat, double lon,
+                                                  String vehicleType, ZoneIssue reason) {
+        double[] best = null;
+        double bestDist = Double.MAX_VALUE;
+
+        for (BikeZoneDTO z : zones) {
+            if (!isOperating(z)) continue;
+            for (double[] candidate : insidePoints(z, lat, lon)) {
+                if (candidate == null) continue;
+                // Legal only if the drop-off would raise no issue of its own
+                if (checkDestinationZones(candidate[0], candidate[1], vehicleType).isPresent()) continue;
+                double d = GeoUtils.haversineMetres(lat, lon, candidate[0], candidate[1]);
+                if (d < bestDist) { bestDist = d; best = candidate; }
+            }
+        }
+        return best == null ? Optional.empty()
+                : Optional.of(new DropOff(best[0], best[1], reason));
+    }
+
+    /** Points well inside a zone: near its closest edge, and its middle. */
+    private static List<double[]> insidePoints(BikeZoneDTO z, double lat, double lon) {
+        if (z.getPolygon() != null && z.getPolygon().size() >= 3) {
+            double[] edge = GeoUtils.closestPointOnOutline(lat, lon, z.getPolygon());
+            double[] mid  = GeoUtils.centroid(z.getPolygon());
+            if (edge == null || mid == null) return List.of();
+            // nudgeToward never overshoots its target, so on a bay a few metres
+            // across this lands on the middle rather than out the far side
+            return Arrays.asList(GeoUtils.nudgeToward(edge[0], edge[1], mid[0], mid[1], EDGE_MARGIN_M), mid);
+        }
+        if (z.getRadiusM() != null && z.getCenter() != null) {
+            return Arrays.asList(
+                    GeoUtils.pointOnCircle(z.getCenter(), lat, lon,
+                            Math.max(0, z.getRadiusM() - EDGE_MARGIN_M)),
+                    z.getCenter());
+        }
+        return List.of();
     }
 
     /** Just outside the forbidden zone the destination fell into. */
@@ -167,35 +227,34 @@ public class BikeSharingService {
         return Optional.empty();
     }
 
-    /** The closest point just inside an operating zone. */
-    private Optional<DropOff> stepInsideOperating(List<BikeZoneDTO> zones, double lat, double lon) {
-        double[] best = null;
-        double bestDist = Double.MAX_VALUE;
+    // ── Zone predicates ─────────────────────────────────────────────────────
 
-        for (BikeZoneDTO z : zones) {
-            if (!isOperating(z)) continue;
-            double[] candidate = null;
-
-            if (z.getPolygon() != null && z.getPolygon().size() >= 3) {
-                double[] edge = GeoUtils.closestPointOnOutline(lat, lon, z.getPolygon());
-                double[] mid  = GeoUtils.centroid(z.getPolygon());
-                if (edge != null && mid != null) {
-                    candidate = GeoUtils.nudgeToward(edge[0], edge[1], mid[0], mid[1], EDGE_MARGIN_M);
-                }
-            } else if (z.getRadiusM() != null && z.getCenter() != null) {
-                candidate = GeoUtils.pointOnCircle(z.getCenter(), lat, lon,
-                        Math.max(0, z.getRadiusM() - EDGE_MARGIN_M));
-            }
-            if (candidate == null) continue;
-
-            double d = GeoUtils.haversineMetres(lat, lon, candidate[0], candidate[1]);
-            if (d < bestDist) { bestDist = d; best = candidate; }
-        }
-        return best == null ? Optional.empty()
-                : Optional.of(new DropOff(best[0], best[1], ZoneIssue.OUT_OF_OPERATING_AREA));
+    /**
+     * The zones that bind a ride on this kind of vehicle. Elerent tags every
+     * zone with the types it covers ("BIKE", "E_BIKE", "SCOOTER"…): a scooter
+     * no-parking zone must not push a bike ride to a different drop-off.
+     * A zone with no types listed applies to everything.
+     */
+    private List<BikeZoneDTO> zonesFor(String vehicleType) {
+        List<BikeZoneDTO> zones = getZones();
+        if (zones == null || zones.isEmpty()) return List.of();
+        if (vehicleType == null) return zones;
+        return zones.stream().filter(z -> appliesTo(z, vehicleType)).toList();
     }
 
-    // ── Zone predicates ─────────────────────────────────────────────────────
+    private static boolean appliesTo(BikeZoneDTO z, String vehicleType) {
+        List<String> types = z.getVehicleTypes();
+        if (types == null || types.isEmpty()) return true;
+        boolean scooter = "SCOOTER".equalsIgnoreCase(vehicleType);
+        for (String t : types) {
+            String upper = t.toUpperCase();
+            // E_BIKE and CARGO_BIKE are bikes; MOPED rides like a scooter
+            boolean zoneIsScooter = upper.contains("SCOOT") || upper.contains("MOPED");
+            if (zoneIsScooter == scooter) return true;
+        }
+        return false;
+    }
+
 
     private static boolean zoneContains(BikeZoneDTO z, double lat, double lon) {
         return GeoUtils.pointInPolygon(lat, lon, z.getPolygon())
@@ -207,8 +266,17 @@ public class BikeSharingService {
         return type.contains("NO_PARK") || type.contains("NO_GO") || type.contains("FORBIDDEN");
     }
 
+    /**
+     * A zone a ride may end in. Elerent runs mandatory parking: the vehicle has
+     * to be left inside a parking zone, so those are the operating area — the
+     * platform has no separate "service area" zone type. The forbidden check
+     * comes first, otherwise NO_PARKING_ZONE would match on "PARK" and the
+     * planner would send riders to park exactly where they may not.
+     */
     private static boolean isOperating(BikeZoneDTO z) {
+        if (isForbidden(z)) return false;
         String type = z.getZoneType() != null ? z.getZoneType().toUpperCase() : "";
-        return type.contains("OPERAT") || type.contains("SERVICE") || type.contains("ALLOWED");
+        return type.contains("PARK")        // PARKING_ZONE, PAID_PARKING_ZONE, PARK_PLACE_ZONE
+                || type.contains("OPERAT") || type.contains("SERVICE") || type.contains("ALLOWED");
     }
 }
