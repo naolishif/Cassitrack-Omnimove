@@ -180,6 +180,12 @@ services:
       # deployment had configured.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       CSP_CONNECT_EXTRA: ${CSP_CONNECT_EXTRA:-http://localhost:8180}
+    # Reachable only from the host, i.e. only through Nginx. That proxy must
+    # send the visitor's address on — either
+    #   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    # or  proxy_set_header X-Real-IP     $remote_addr;
+    # otherwise the app sees the docker bridge for everyone and the security
+    # audit trail loses its subject (see util/ClientIp).
     ports:
       - "127.0.0.1:8280:8280"
     # NOTE: comment out the 'build' block and use 'image' below

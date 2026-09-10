@@ -7,6 +7,7 @@ import it.unicas.omnimove.model.UserConsent;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.security.JwtUtil;
 import it.unicas.omnimove.security.PasswordPolicy;
+import it.unicas.omnimove.util.ClientIp;
 import it.unicas.omnimove.util.RequestLang;
 import it.unicas.omnimove.service.ActiveSessionService;
 import it.unicas.omnimove.service.ConsentService;
@@ -216,8 +217,7 @@ public class AuthController {
 
         user.setFailedLoginAttempts(0);
         // Persists the counter reset together with the new last-login stamp
-        loginHistoryService.recordLogin(user, getClientIp(httpReq),
-                                        httpReq.getHeader("User-Agent"));
+        loginHistoryService.recordLogin(user, httpReq.getHeader("User-Agent"));
 
         String token = jwtUtil.generateToken(user.getEmail());
         long expiresInMs = jwtUtil.getExpirationMs();
@@ -329,7 +329,7 @@ public class AuthController {
         }
 
         if (user.getFailedLoginAttempts() != 0) user.setFailedLoginAttempts(0);
-        loginHistoryService.recordLogin(user, ip, httpReq.getHeader("User-Agent"));
+        loginHistoryService.recordLogin(user, httpReq.getHeader("User-Agent"));
 
         String token = jwtUtil.generateToken(user.getEmail());
         long expiresInMs = jwtUtil.getExpirationMs();
@@ -622,15 +622,8 @@ public class AuthController {
 
     // ── HELPERS ──────────────────────────────────────────────────────
 
-    /**
-     * Extracts the real client IP, respecting X-Forwarded-For set by a reverse proxy.
-     */
-    /**
-     * Password must have ≥8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char.
-     */
-
     private String getClientIp(HttpServletRequest request) {
-        return request.getRemoteAddr();
+        return ClientIp.of(request);
     }
 
     private ResponseEntity<AuthResponse> tooManyRequests(String message) {

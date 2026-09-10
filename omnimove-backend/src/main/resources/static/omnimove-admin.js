@@ -644,7 +644,7 @@ function renderHistory(data) {
     body.innerHTML = `
     <table class="history-table">
       <thead>
-        <tr><th>#</th><th>Date &amp; time</th><th>When</th><th>IP</th><th>Device</th></tr>
+        <tr><th>#</th><th>Date &amp; time</th><th>When</th><th>Device</th></tr>
       </thead>
       <tbody>
         ${data.events.map((e, i) => `
@@ -652,7 +652,6 @@ function renderHistory(data) {
           <td>${data.events.length - i}</td>
           <td class="when">${escHtml(fmtDateTime(e.loggedInAt))}</td>
           <td>${escHtml(relativeTime(e.loggedInAt))}</td>
-          <td>${escHtml(e.ipAddress || '—')}</td>
           <td class="agent" title="${escHtml(e.userAgent || '')}">${escHtml(shortAgent(e.userAgent))}</td>
         </tr>`).join('')}
       </tbody>

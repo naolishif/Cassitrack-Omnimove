@@ -44,7 +44,7 @@ public class LoginHistoryService {
      * because history is a reporting feature and the login itself is valid
      * without it. Each repository call commits on its own.
      */
-    public void recordLogin(User user, String ip, String userAgent) {
+    public void recordLogin(User user, String userAgent) {
         LocalDateTime now = LocalDateTime.now();
 
         user.setLastLoginAt(now);
@@ -54,7 +54,6 @@ public class LoginHistoryService {
             loginEventRepo.save(LoginEvent.builder()
                     .userId(user.getId())
                     .loggedInAt(now)
-                    .ipAddress(ip)
                     .userAgent(truncate(userAgent))
                     .build());
         } catch (Exception ex) {

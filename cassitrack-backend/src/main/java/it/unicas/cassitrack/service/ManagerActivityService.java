@@ -46,13 +46,12 @@ public class ManagerActivityService {
      * the list view can show "last seen" without reading the history of every
      * row it draws.
      */
-    public void recordLogin(User user, String ip, String userAgent) {
+    public void recordLogin(User user, String userAgent) {
         if (user == null || user.getId() == null) return;
         try {
             loginEvents.save(LoginEvent.builder()
                     .userId(user.getId())
                     .loggedInAt(LocalDateTime.now())
-                    .ipAddress(trim(ip, 50))
                     .userAgent(trim(userAgent, 255))
                     .build());
 

@@ -641,8 +641,7 @@ async function openActivityModal() {
             ? lg.map(e => `
                 <div class="activity-item">
                   <span class="activity-main">
-                    <b>${escHtml(e.ip || 'unknown address')}</b>
-                    <span class="muted">${escHtml(fmtAgent(e.userAgent))}</span>
+                    <b>${escHtml(fmtAgent(e.userAgent))}</b>
                   </span>
                   <span class="activity-when">${fmtWhen(e.at)}</span>
                 </div>`).join('')

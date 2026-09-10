@@ -224,7 +224,6 @@ public class AdminController {
                     .map(e -> LoginEventDTO.builder()
                             .id(e.getId())
                             .loggedInAt(e.getLoggedInAt())
-                            .ipAddress(e.getIpAddress())
                             .userAgent(e.getUserAgent())
                             .build())
                     .collect(Collectors.toList());

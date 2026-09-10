@@ -9,6 +9,5 @@ import java.time.LocalDateTime;
 public class LoginEventDTO {
     private Long          id;
     private LocalDateTime loggedInAt;
-    private String        ipAddress;
     private String        userAgent;
 }

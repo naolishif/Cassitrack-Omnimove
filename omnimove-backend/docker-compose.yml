@@ -112,6 +112,13 @@ services:
       # Was set in .env but not forwarded, so the container fell back to the
       # application.yml default (false) regardless of the deployment setting.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    # Reachable only from the host, i.e. only through Nginx. That proxy must
+    # send the visitor's address on — either
+    #   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    # or  proxy_set_header X-Real-IP     $remote_addr;
+    # otherwise the app sees the docker bridge for everyone and the audit
+    # trail, the consent ledger and the per-IP rate limits all lose their
+    # subject (see util/ClientIp).
     ports:
       - "127.0.0.1:8180:8180"
     profiles:

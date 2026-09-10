@@ -14,6 +14,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import it.unicas.cassitrack.security.JwtUtil;
+import it.unicas.cassitrack.util.ClientIp;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -120,8 +121,7 @@ public class AuthController {
             // The same fact in a table the application may read back, so the user
             // card can show when this manager was last in. The audit row above
             // stays the proof; this is its visible echo.
-            managerActivityService.recordLogin(user, getClientIp(request),
-                    request.getHeader("User-Agent"));
+            managerActivityService.recordLogin(user, request.getHeader("User-Agent"));
 
             // V-04 FIX: Set token in httpOnly cookie — JS cannot read it
             // cookieSecure=false allows the cookie to be sent over plain HTTP (dev + server without TLS).
@@ -184,12 +184,6 @@ public class AuthController {
     }
 
     private String getClientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        String realIp = request.getHeader("X-Real-IP");
-        if (realIp != null && !realIp.isBlank()) return realIp.trim();
-        return request.getRemoteAddr();
+        return ClientIp.of(request);
     }
 }

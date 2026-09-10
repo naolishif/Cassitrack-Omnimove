@@ -91,7 +91,6 @@ public class UserController {
         body.put("logins", activityService.logins(id).stream().map(e -> {
             Map<String, Object> r = new java.util.LinkedHashMap<>();
             r.put("at",        e.getLoggedInAt());
-            r.put("ip",        e.getIpAddress());
             r.put("userAgent", e.getUserAgent());
             return r;
         }).toList());

@@ -26,9 +26,6 @@ public class LoginEvent {
     @Column(name = "logged_in_at", nullable = false)
     private LocalDateTime loggedInAt;
 
-    @Column(name = "ip_address", length = 50)
-    private String ipAddress;
-
     /** Raw User-Agent header, truncated to the column width. */
     @Column(name = "user_agent", length = 255)
     private String userAgent;

@@ -2,6 +2,7 @@ package it.unicas.omnimove.service;
 
 import it.unicas.omnimove.model.UserConsent;
 import it.unicas.omnimove.repository.UserConsentRepository;
+import it.unicas.omnimove.util.ClientIp;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,7 +79,7 @@ public class ConsentService {
                 .granted(granted)
                 .policyVersion(policyVersion)
                 .source(source)
-                .ipAddress(request == null ? null : request.getRemoteAddr())
+                .ipAddress(ClientIp.of(request))
                 .userAgent(truncate(request == null ? null : request.getHeader("User-Agent"), 255))
                 .recordedAt(ZonedDateTime.now())
                 .build();

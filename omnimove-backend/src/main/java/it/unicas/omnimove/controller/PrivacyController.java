@@ -13,6 +13,7 @@ import it.unicas.omnimove.service.ConsentService;
 import it.unicas.omnimove.service.RateLimiterService;
 import it.unicas.omnimove.service.ResearchPipelineService;
 import it.unicas.omnimove.service.SecurityAuditService;
+import it.unicas.omnimove.util.ClientIp;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -77,7 +78,7 @@ public class PrivacyController {
 
         // The banner is reachable without authentication — throttle it so the
         // ledger cannot be flooded from a single address.
-        if (!rateLimiter.isAllowed("consent:" + request.getRemoteAddr(), 30, Duration.ofMinutes(10)))
+        if (!rateLimiter.isAllowed("consent:" + ClientIp.of(request), 30, Duration.ofMinutes(10)))
             return ResponseEntity.status(429).body(Map.of("message", "Too many consent updates"));
 
         Long userId = null;
@@ -218,7 +219,7 @@ public class PrivacyController {
                         "recordedAt",    String.valueOf(c.getRecordedAt())))
                 .collect(Collectors.toList()));
 
-        securityAuditService.dataExported(user.getEmail(), request.getRemoteAddr());
+        securityAuditService.dataExported(user.getEmail(), ClientIp.of(request));
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
