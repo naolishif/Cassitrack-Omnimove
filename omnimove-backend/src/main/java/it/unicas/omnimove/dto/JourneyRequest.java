@@ -25,6 +25,24 @@ public class JourneyRequest {
      */
     @JsonProperty("departure_time") private String departureTime;
 
+    /**
+     * A quale giorno si riferisce departure_time: "today", "tomorrow", o null.
+     *
+     * Esiste perche' "le 8:30" e' ambiguo quando sono le 14:00, e finora
+     * l'ambiguita' veniva risolta d'ufficio spostando a domani. E' la scelta
+     * giusta quasi sempre — chi cerca un orario passato di solito sta
+     * programmando il giorno dopo — ma non sempre: si puo' voler vedere la
+     * corsa di stamattina, per capire com'e' andata o a che ora passava.
+     *
+     * Null significa "decidi tu" e mantiene esattamente il comportamento
+     * precedente. I client che non conoscono questo campo — e chiunque usi
+     * l'API direttamente — non cambiano di una virgola.
+     */
+    @JsonProperty("departure_day") private String departureDay;
+
+    /** True quando il viaggiatore ha chiesto esplicitamente l'orario di oggi. */
+    public boolean wantsToday() { return "today".equalsIgnoreCase(departureDay); }
+
     @JsonProperty("messages") private List<String> messages = new ArrayList<>();
     @JsonProperty("lang") private String lang;
     /** True when departure_time should be treated as the desired *arrival* time. */

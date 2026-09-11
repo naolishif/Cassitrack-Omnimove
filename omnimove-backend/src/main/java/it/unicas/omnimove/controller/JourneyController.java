@@ -15,6 +15,7 @@ import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.dto.BikeVehicleDTO;
 import it.unicas.omnimove.dto.BikeZoneDTO;
 import it.unicas.omnimove.service.BikeSharingService;
+import it.unicas.omnimove.service.CrowdingLevels;
 import it.unicas.omnimove.service.GreenIndexService;
 import it.unicas.omnimove.service.JourneyEventService;
 import it.unicas.omnimove.service.JourneyPlannerService;
@@ -221,8 +222,6 @@ public class JourneyController {
                     .max(Comparator.comparingInt(List::size)).orElse(trips.get(0));
             List<String> stopOrder = longest.stream()
                     .map(ScheduledStopRepository.RouteCall::getStopId).toList();
-            Map<String, Integer> rowOf = new HashMap<>();
-            for (int i = 0; i < stopOrder.size(); i++) rowOf.putIfAbsent(stopOrder.get(i), i);
 
             // Columns read left to right in departure order, like a printed table
             trips.sort(Comparator.comparingInt(t -> t.get(0).getSeconds()));
@@ -230,9 +229,26 @@ public class JourneyController {
             List<Map<String, Object>> runs = new ArrayList<>();
             for (var trip : trips) {
                 Integer[] times = new Integer[stopOrder.size()];
+
+                // Scansione IN AVANTI da dove si era rimasti, non ricerca per id.
+                //
+                // Su un anello la stessa fermata e' chiamata due volte: indicizzare
+                // per stop_id collassava i due passaggi in una riga sola, e siccome
+                // il secondo sovrascriveva il primo, la riga in cima portava l'ora
+                // dell'ULTIMO passaggio. Da qui una "fermata precedente" con un
+                // orario successivo alla partenza — la fermata era giusta, l'ora era
+                // quella del giro dopo.
+                //
+                // stopOrder conserva gia' i doppioni: bastava smettere di fonderli.
+                int cursor = 0;
                 for (var c : trip) {
-                    Integer row = rowOf.get(c.getStopId());
-                    if (row != null) times[row] = c.getSeconds();
+                    for (int i = cursor; i < stopOrder.size(); i++) {
+                        if (stopOrder.get(i).equals(c.getStopId())) {
+                            times[i] = c.getSeconds();
+                            cursor   = i + 1;
+                            break;
+                        }
+                    }
                 }
                 Map<String, Object> run = new LinkedHashMap<>();
                 run.put("tripId", trip.get(0).getTripId());
@@ -605,9 +621,136 @@ public class JourneyController {
                 .destLat(serviceAreaCoord(body.get("dest_lat"), true))
                 .destLon(serviceAreaCoord(body.get("dest_lon"), false))
                 .createdAt(java.time.ZonedDateTime.now())
+                // completed resta null: il viaggio comincia adesso, ed e' in
+                // corso. Lo chiudera' /journeys/complete, con TRUE o FALSE a
+                // seconda di quanto tempo sara' passato.
                 .build());
 
         return ResponseEntity.ok(Map.of("message", "Journey recorded"));
+    }
+
+    /**
+     * Quanto del viaggio previsto deve essere trascorso perche' valga come fatto.
+     *
+     * Non e' il 100% perche' un itinerario e' una previsione: si scende una
+     * fermata prima, il bus recupera, si taglia a piedi l'ultimo tratto. Punire
+     * chi arriva in anticipo sul previsto sarebbe punire il caso normale.
+     */
+    private static final double COMPLETION_FRACTION = 0.80;
+
+    /**
+     * POST /api/v1/journeys/complete
+     *
+     * Chiude il viaggio in corso e dice se e' valso eco points.
+     *
+     * LA DECISIONE E' QUI, NON NEL CLIENT. Il server ha gia' tutto: l'istante in
+     * cui la corsa e' cominciata e i minuti che doveva durare stanno sulla riga.
+     * Chiedere al browser quanto tempo e' passato significherebbe chiedere a chi
+     * viene controllato di dichiarare l'esito del controllo.
+     *
+     * Non serve nessun identificativo: si chiude la corsa piu' recente ancora
+     * aperta di chi chiama. Una corsa dimenticata aperta ieri non si trascina
+     * dietro il viaggio di oggi, perche' e' la piu' recente a essere presa.
+     *
+     * Durata sconosciuta -> vale come conclusa. Sono le righe precedenti alla
+     * V34 e quelle in cui il client non ha saputo dire quanto sarebbe durata:
+     * senza un termine di paragone non c'e' niente da verificare, e nel dubbio
+     * non si toglie.
+     */
+    /**
+     * GET /api/v1/journeys/running
+     *
+     * La corsa in corso e cosa succederebbe chiudendola adesso. NON SCRIVE NULLA.
+     *
+     * Esiste perche' l'avviso va dato PRIMA: chiedere "sicuro di voler
+     * terminare?" dopo aver gia' terminato non e' una domanda, e la risposta
+     * dell'utente non potrebbe cambiare niente. Il verdetto lo calcola sempre il
+     * server, con la stessa regola di /complete — se la soglia vivesse in due
+     * posti, prima o poi direbbero due cose diverse.
+     */
+    @GetMapping("/running")
+    @Operation(summary = "The running journey and whether closing it now would earn eco points")
+    public ResponseEntity<Map<String, Object>> runningJourney(
+            @AuthenticationPrincipal UserDetails principal) {
+
+        if (principal == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        User user = userRepo.findByEmail(principal.getUsername()).orElse(null);
+        if (user == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+
+        JourneyLog log = journeyLogRepository
+                .findFirstByUserIdAndCompletedIsNullOrderByCreatedAtDesc(user.getId())
+                .orElse(null);
+
+        return ResponseEntity.ok(Map.of(
+                "running",      log != null,
+                // Niente da chiudere -> nessun avviso da dare: true evita che il
+                // client faccia una domanda su un viaggio che non esiste.
+                "earns_points", log == null || earnsPoints(log)));
+    }
+
+    /**
+     * Il viaggio e' durato abbastanza da valere eco points?
+     *
+     * Sta in un metodo suo perche' la risposta serve in due momenti — prima di
+     * chiedere conferma e al momento di chiudere — e devono essere la stessa.
+     *
+     * Durata sconosciuta -> si', vale. Sono le righe precedenti alla V34 e
+     * quelle in cui il client non ha saputo dire quanto sarebbe durata: senza un
+     * termine di paragone non c'e' niente da verificare, e nel dubbio non si
+     * toglie.
+     */
+    private boolean earnsPoints(JourneyLog log) {
+        Integer planned = log.getDurationMinutes();
+        if (planned == null || planned <= 0 || log.getCreatedAt() == null) return true;
+        long elapsedSeconds = java.time.Duration
+                .between(log.getCreatedAt(), java.time.ZonedDateTime.now()).getSeconds();
+        return elapsedSeconds >= planned * 60L * COMPLETION_FRACTION;
+    }
+
+    @PostMapping("/complete")
+    @Operation(summary = "Close the running journey and report whether it earned eco points")
+    public ResponseEntity<Map<String, Object>> completeJourney(
+            @RequestBody(required = false) Map<String, Object> body,
+            @AuthenticationPrincipal UserDetails principal) {
+
+        if (principal == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        User user = userRepo.findByEmail(principal.getUsername()).orElse(null);
+        if (user == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+
+        JourneyLog log = journeyLogRepository
+                .findFirstByUserIdAndCompletedIsNullOrderByCreatedAtDesc(user.getId())
+                .orElse(null);
+
+        // Niente da chiudere: la corsa non e' mai stata registrata, oppure e'
+        // gia' stata chiusa. In entrambi i casi non c'e' un esito da dare, e
+        // dire "non completo" sarebbe un rimprovero per qualcosa che non e'
+        // successo.
+        if (log == null) return ResponseEntity.ok(Map.of("completed", true));
+
+        // Arrivo rilevato: il puntino GPS e' sulla destinazione, e questo e' un
+        // fatto misurato, non una dichiarazione di intenti. Chi arriva prima del
+        // previsto — il bus ha recuperato, l'ultimo tratto e' stato fatto a
+        // piedi — ha compiuto il viaggio, e passarlo per il conteggio dei minuti
+        // toglierebbe i punti proprio a chi e' andato meglio della previsione.
+        //
+        // Si', il client potrebbe mentire su questo campo. Il controllo e' un
+        // deterrente contro la chiusura immediata, non una barriera di
+        // sicurezza: chi vuole falsificarlo ha comunque bisogno di parlare
+        // direttamente con l'API, e a quel punto il punto debole non e' questo
+        // campo ma tutta la registrazione del viaggio, che si fida del client
+        // gia' per la modalita' e i chilometri.
+        boolean arrived = body != null && Boolean.TRUE.equals(body.get("arrived"));
+
+        boolean completed = arrived || earnsPoints(log);
+
+        // Si scrive comunque, anche quando l'esito e' FALSE: FALSE significa
+        // "chiusa senza punti", ed e' diverso da null, che significa "ancora in
+        // corso". Lasciarla a null la farebbe ripescare dalla chiusura
+        // successiva, che le attribuirebbe l'esito di un altro viaggio.
+        log.setCompleted(completed);
+        journeyLogRepository.save(log);
+
+        return ResponseEntity.ok(Map.of("completed", completed));
     }
 
     /**
@@ -684,10 +827,21 @@ public class JourneyController {
                 dto.setLat(t.getLatitude() != 0 ? (double) t.getLatitude() : null);
                 dto.setLon(t.getLongitude() != 0 ? (double) t.getLongitude() : null);
                 dto.setSpeedKmh((double) t.getSpeed());
+                dto.setTripId(t.getTripId());
                 dto.setRouteId(routeId);
                 dto.setRouteName(routeName);
                 dto.setDelayMinutes(t.getDelay());
                 dto.setNextStopName(t.getNextStop());
+
+                // L'affollamento viaggiava gia' fin qui dentro bus:latest:* e
+                // veniva buttato via all'ultimo passo. Il conteggio arriva dalle
+                // Extensions SIRI, la capienza dai posti dichiarati a registro.
+                Integer pax = t.getPassengers();
+                Integer cap = t.getCapacity() != null ? t.getCapacity() : t.getNumeroPosti();
+                dto.setEstimatedPassengers(pax);
+                dto.setCrowdingLevel(CrowdingLevels.level(pax, cap));
+                dto.setOccupancyPct(CrowdingLevels.pct(pax, cap));
+
                 dto.setIsActive(true);
                 dto.setLastSeen(t.getTimestamp());
                 vehicles.add(dto);

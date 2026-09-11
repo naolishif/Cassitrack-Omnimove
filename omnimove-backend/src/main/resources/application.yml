@@ -157,9 +157,38 @@ logging:
 # No Docker needed — H2 is embedded in the JAR
 
 # ── JWT ───────────────────────────────────────────────────────
+# ── Sessione ──────────────────────────────────────────────────────
+#
+# DUE DURATE, NON UNA.
+#
+# expiration-ms e' la vita del singolo token; session-max-ms e' quanto puo'
+# durare in tutto una sessione, per quanto la si usi. Fra un rinnovo e
+# l'altro il filtro rimette in circolo un token nuovo, quindi la prima si
+# comporta come una soglia di INATTIVITA': chi lavora non viene mai
+# interrotto, chi lascia la scheda aperta e va via viene disconnesso.
+#
+# Con un valore solo, come prima, si otteneva l'opposto: l'utente veniva
+# buttato fuori dopo un'ora mentre lavorava, e non veniva buttato fuori mai
+# per inattivita'.
+#
+# Tetto piu' largo che in CassiTrack: qui l'utente e' un passeggero sul
+# telefono, che apre l'applicazione a intervalli lungo la giornata, non un
+# operatore davanti a una dashboard per un turno.
 jwt:
   secret: ${JWT_SECRET}
-  expiration-ms: 3600000    # 1 hour
+  # LA PROMESSA: quanta inattivita' si tollera prima di chiedere di nuovo
+  # l'accesso. E' questa la soglia che l'utente percepisce.
+  idle-ms:         ${JWT_IDLE_MS:1800000}           # 30 min fermi -> fuori
+  # LA VITA DEL TOKEN, che deve essere MAGGIORE della soglia qui sopra.
+  #
+  # Il rinnovo avviene quando al token resta meno di idle-ms, quindi con
+  # expiration-ms == idle-ms la promessa non sarebbe mantenuta: una richiesta
+  # fatta poco dopo l'emissione non rinnoverebbe niente, e da li' l'utente
+  # avrebbe molto meno di mezz'ora prima di essere buttato fuori. Con
+  # quarantacinque minuti la tolleranza reale sta fra 30 e 45: mai meno di
+  # quanto promesso, e un rinnovo ogni quarto d'ora scarso di lavoro.
+  expiration-ms:   ${JWT_EXPIRATION_MS:2700000}     # 45 min
+  session-max-ms:  ${JWT_SESSION_MAX_MS:43200000}   # tetto: 12 h in tutto
 
 # ── InfluxDB Omnimove ─────────────────────────────────────────────
 influx:

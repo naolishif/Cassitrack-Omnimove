@@ -96,6 +96,12 @@
                         <input type="range" class="fm-filter-range" id="delayFilter" min="0" max="20" step="1" value="0">
                         <span class="fm-filter-val" id="delayFilterVal">off</span>
                     </div>
+                    <div class="fm-filter-row">
+                        <label class="fm-filter-lbl" for="busSearch">Bus</label>
+                        <input type="search" class="filter-select fm-filter-select" id="busSearch"
+                               autocomplete="off" spellcheck="false" placeholder="name or #"
+                               title="The name on the card (BUS16, BUSAGR) or the registry number (16)">
+                    </div>
                 </div>
                 <div class="section">
                     <div class="analytics-box">
@@ -166,6 +172,9 @@
              palette/fonts, and with no style="" anywhere — style-src drops
              'unsafe-inline', so per-bar colour and width travel on
              data-fg / data-bg / data-width-pct for applyDynStyles(). -->
+        <!-- Palcoscenico: da un riferimento posizionale alla velatura, che
+             altrimenti non avrebbe nulla a cui ancorarsi. -->
+        <div class="an-stage" id="anStage">
         <div class="analytics-dashboard">
 
             <!-- KPI BAND — the two headline figures. Both come from
@@ -195,23 +204,26 @@
                 <div class="chart-card">
                     <div class="chart-header">
                         <div>
-                            <div class="chart-title">Active buses on road</div>
-                            <div class="chart-subtitle">Vehicles transmitting, per line</div>
+                            <div class="chart-title">Trip adherence</div>
+                            <div class="chart-subtitle" id="tripStatusSub">how today's trips ended</div>
                         </div>
-                        <span class="chip chip-green">NOW</span>
+                        <!-- La spunta segue il periodo scelto: questo pannello tiene
+                             anche le corse concluse, quindi una finestra passata ha
+                             un senso — a differenza dei pannelli dal vivo qui sotto. -->
+                        <span class="chip chip-cyan" id="tripStatusChip">Today</span>
                     </div>
-                    <div id="lines-chart-wrap" class="chart-wrap an-h-chart">
-                        <canvas id="linesChart" class="chart-canvas"></canvas>
+                    <div id="trip-status-wrap" class="chart-wrap an-h-chart">
+                        <canvas id="tripStatusChart" class="chart-canvas"></canvas>
                     </div>
-                    <div id="linesChartEmpty" class="chart-empty">
-                        No bus is currently transmitting a position.
+                    <div id="tripStatusEmpty" class="chart-empty">
+                        No trip has run yet today.
                     </div>
                 </div>
 
                 <div class="chart-card">
                     <div class="chart-header">
                         <div>
-                            <div class="chart-title">Avg delay by day of week</div>
+                            <div class="chart-title" id="weekdayChartTitle">Avg delay by day of week</div>
                             <div class="chart-subtitle" id="weekdayChartSub">Minutes · Today</div>
                         </div>
                         <span class="chip chip-blue" id="worstDayLbl">Worst day: —</span>
@@ -261,8 +273,16 @@
 
             <!-- ACTIVE VEHICLES — kept below the mockup's panels because it is
                  what the CSV export writes: the export and the table on screen
-                 must be the same rows. -->
-            <div class="chart-card">
+                 must be the same rows.
+
+                 Da qui in giu' NIENTE risponde al filtro del periodo: sono dati
+                 dell'istante. Lo stacco e la riga di intestazione servono a dirlo
+                 prima che qualcuno legga questa tabella come il risultato della
+                 finestra che ha appena selezionato. -->
+            <div class="an-live-sep">
+                <span class="an-live-sep-lbl">LIVE · not affected by the period filter</span>
+            </div>
+            <div class="chart-card an-live-card">
                 <div class="chart-header">
                     <div>
                         <div class="chart-title">Active vehicles</div>
@@ -297,6 +317,20 @@
                 </div>
             </div>
 
+        </div>
+
+            <!-- Velatura di attesa. Sta QUI, fuori da .analytics-dashboard,
+                 perche' quella scorre (overflow-y:auto) e un figlio in
+                 posizione assoluta scorrerebbe con il contenuto invece di
+                 restare fermo sopra. -->
+            <div class="an-busy" id="anBusy" hidden>
+                <div class="an-spin" aria-hidden="true"></div>
+                <div class="an-busy-txt">LOADING ANALYTICS</div>
+                <div class="an-busy-bar">
+                    <div class="an-busy-fill" id="anBusyFill" data-width-pct="0"></div>
+                </div>
+                <div class="an-busy-sub"><span id="anBusyPct">0%</span> · querying the time series</div>
+            </div>
         </div>
     </div>
 

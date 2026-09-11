@@ -15,6 +15,16 @@ public interface JourneyLogRepository extends JpaRepository<JourneyLog, Long> {
     List<JourneyLog> findByUserId(Long userId);
     List<JourneyLog> findByUserIdAndCreatedAtAfter(Long userId, ZonedDateTime since);
 
+    /**
+     * La corsa ancora aperta di questo utente, la piu' recente.
+     *
+     * completed IS NULL significa "in corso": TRUE e FALSE sono due modi di
+     * essere chiusa. Si prende la piu' recente perche' una corsa dimenticata
+     * aperta ieri non deve intercettare la chiusura del viaggio di oggi.
+     */
+    java.util.Optional<JourneyLog>
+        findFirstByUserIdAndCompletedIsNullOrderByCreatedAtDesc(Long userId);
+
     /** Returns [originName, destName, count, avgGreenIndex] for the top N routes. */
     @Query("""
         SELECT j.originName, j.destName,

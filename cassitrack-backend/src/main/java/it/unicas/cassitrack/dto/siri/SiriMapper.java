@@ -68,7 +68,14 @@ public class SiriMapper {
             Siri.Extensions extensions = new Siri.Extensions();
             extensions.setVelocity(v.getSpeedKmh());
             extensions.setNumberOfSeats(v.getNumeroPosti());
-            extensions.setPassengers(v.getPassengers());
+            // effectivePassengers come sopra, non getPassengers: qui viaggiava
+            // il conteggio grezzo mentre Occupancy, due righe piu' su, usava la
+            // stima calibrata. Sul feed OBU, che un conteggio verificato non ce
+            // l'ha, il campo restava vuoto — e chi legge le Extensions invece
+            // dell'OccupancyStatus (OmniMove, per riempire l'icona sulla mappa)
+            // si ritrovava senza dato proprio sui mezzi reali.
+            extensions.setPassengers(CrowdingService.effectivePassengers(
+                    v.getPassengers(), v.getBleDeviceCount()));
             extensions.setWheelchairAccess(v.getWheelchairAccessible());
 
             // ── MonitoredVehicleJourney ───────────────────────────────────────

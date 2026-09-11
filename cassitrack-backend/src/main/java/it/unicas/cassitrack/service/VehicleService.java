@@ -9,6 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +34,58 @@ public class VehicleService {
 
     private final VehicleStateCache vehicleStateCache;
     private final BusRepository busRepository;
+
+    private static final ZoneId ITALY_TZ = ZoneId.of("Europe/Rome");
+
+    /**
+     * Oltre due ore non e' una previsione, e' un dato incoerente.
+     *
+     * Serve a scartare i casi in cui l'orario conservato appartiene a una corsa
+     * che il mezzo non sta piu' facendo: meglio un trattino che un "ETA 4h 20m"
+     * che nessuno saprebbe come interpretare.
+     */
+    private static final int MAX_ETA_SECONDS = 2 * 60 * 60;
+
+    /**
+     * Fra quanto il mezzo dovrebbe toccare la prossima fermata.
+     *
+     * COME
+     *   orario di tabella a quella fermata
+     * + ritardo misurato all'ultima fermata superata
+     * - ora corrente
+     *
+     * E' una stima di tabella corretta dal ritardo, non una previsione basata
+     * sulla posizione: assume che il mezzo continui ad accumulare lo stesso
+     * scarto che ha adesso. Su un servizio urbano e' l'ipotesi piu' onesta che
+     * si possa fare senza modellare il traffico, ed e' la stessa logica con cui
+     * ETAService risponde alle fermate.
+     *
+     * PERCHE' QUI E NON ALL'ARRIVO DEL FIX
+     * Il tempo che manca cambia di continuo, il fix no. Calcolarlo alla lettura
+     * costa due sottrazioni e nessuna query, e restituisce sempre un valore
+     * coerente con l'orologio di chi guarda.
+     *
+     * Null quando la corsa non e' nota o l'orario risulta assurdo; zero quando
+     * il mezzo e' in ritardo oltre l'orario previsto — allora la fermata non e'
+     * "fra -3 minuti", e' imminente.
+     */
+    private Integer etaToNextStop(VehiclePosition pos) {
+        Integer scheduled = pos.getNextStopArrivalSeconds();
+        if (scheduled == null) return null;
+
+        int delaySeconds = pos.getDelayMinutes() != null ? pos.getDelayMinutes() * 60 : 0;
+        int now = LocalTime.now(ITALY_TZ).toSecondOfDay();
+
+        long eta = (long) scheduled + delaySeconds - now;
+
+        // Corse a cavallo della mezzanotte: l'orario di tabella puo' superare
+        // le 24 ore, oppure appartenere al giorno seguente. Uno scarto negativo
+        // enorme e' quello, non un ritardo.
+        if (eta < -12 * 3600) eta += 24 * 3600;
+
+        if (eta > MAX_ETA_SECONDS) return null;
+        return (int) Math.max(0, eta);
+    }
 
     /**
      * Returns current status of ALL active vehicles.
@@ -125,7 +179,7 @@ public class VehicleService {
                 .lastStopName(pos.getLastStopRegistered())
                 .nextStopId(pos.getNextStopId())
                 .nextStopName(pos.getNextStop())
-                .etaSeconds(null)
+                .etaSeconds(etaToNextStop(pos))
                 .estimatedPassengers(estimatedPassengers)
                 .crowdingLevel(crowdingLevel)
                 .timestamp(pos.getTimestamp())

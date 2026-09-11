@@ -125,11 +125,11 @@
         <div class="topbar-search" id="topbarSearch">
             <div class="search-seg">
                 <span>📍</span>
-                <input id="originSelect" type="text" autocomplete="off" data-i18n="ph_origin" placeholder="Origin" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
+                <input id="originSelect" type="text" name="omnimove-origin" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="acList" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" data-i18n="ph_origin" placeholder="Origin" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
             </div>
             <div class="search-seg">
                 <span>🏁</span>
-                <input id="destSelect" type="text" autocomplete="off" data-i18n="ph_dest" placeholder="Destination" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
+                <input id="destSelect" type="text" name="omnimove-dest" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="acList" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" data-i18n="ph_dest" placeholder="Destination" style="background:transparent;border:none;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;color:var(--text-dark);outline:none;width:100%;padding:10px 0;"/>
             </div>
 
             <button class="search-btn search-ghost" onclick="swapStops()" title="Swap">⇄</button>
@@ -224,19 +224,36 @@
                 <div id="routeDetailSheet" class="rd-overlay">
                     <div class="rd-sheet">
                         <div class="rd-handle"></div>
+                        <!-- DUE RIGHE, non una.
+                             Durata, ricalcolo e chiusura stanno su una barra loro, in
+                             alto: hanno larghezza fissa e prima la sottraevano alla
+                             colonna del titolo, che e' l'unica a contenere testo di
+                             lunghezza imprevedibile. Il risultato era "01 → S…", cioe'
+                             una destinazione troncata alla prima lettera per far posto
+                             a tre elementi che non ne avevano bisogno.
+                             Ora il titolo prende tutta la larghezza del pannello. -->
                         <div class="rd-header">
-                            <div class="rd-icon-wrap">
-                                <span id="rdEmoji" style="font-size:24px"></span>
+                            <div class="rd-toolbar">
+                                <div class="rd-dur-badge">
+                                    <div id="rdDur" style="font-size:18px;font-weight:900;color:#059669;line-height:1"></div>
+                                    <div style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase">min</div>
+                                </div>
+                                <button class="rd-refresh-btn" id="rdRefreshBtn" onclick="refreshRouteDetail()"></button>
+                                <button class="rd-close-btn" onclick="closeRouteDetail()" aria-label="Close">✕</button>
                             </div>
-                            <div class="rd-title-col">
-                                <div id="rdLabel" style="font-size:15px;font-weight:700;color:#0f172a"></div>
-                                <div id="rdTimes" style="font-size:12px;color:#64748b;margin-top:2px;font-weight:600"></div>
+                            <div class="rd-titlerow">
+                                <div class="rd-icon-wrap">
+                                    <span id="rdEmoji" style="font-size:24px"></span>
+                                </div>
+                                <div class="rd-title-col">
+                                    <div id="rdLabel" style="font-size:15px;font-weight:700;color:#0f172a"></div>
+                                    <div id="rdTimes" style="font-size:12px;color:#64748b;margin-top:2px;font-weight:600"></div>
+                                    <!-- Dice a che ora e' stato calcolato quello che si sta
+                                         leggendo. Senza, la durata sembra aggiornarsi da sola
+                                         mentre e' ferma al momento della ricerca. -->
+                                    <div id="rdFresh" class="rd-fresh"></div>
+                                </div>
                             </div>
-                            <div class="rd-dur-badge">
-                                <div id="rdDur" style="font-size:18px;font-weight:900;color:#059669;line-height:1"></div>
-                                <div style="font-size:9px;font-weight:700;color:#6ee7b7;text-transform:uppercase">min</div>
-                            </div>
-                            <button class="rd-close-btn" onclick="closeRouteDetail()" aria-label="Close">✕</button>
                         </div>
                         <div class="rd-pills">
                             <div class="rd-pill">🌱 <span id="rdGreen"></span></div>
@@ -645,6 +662,7 @@
                         <div class="pwd-form">
                             <div class="pref-desc" id="pwdIntro">—</div>
 
+                            <form id="pwdForm" onsubmit="return false" autocomplete="off" style="display:contents">
                             <div class="pwd-field" id="pwdCurrentRow">
                                 <label class="pwd-label" for="pwdCurrent" data-i18n="pwd_current">Current password</label>
                                 <input class="pwd-input" type="password" id="pwdCurrent" autocomplete="current-password">
@@ -657,6 +675,7 @@
                                 <label class="pwd-label" for="pwdConfirm" data-i18n="pwd_confirm">Confirm new password</label>
                                 <input class="pwd-input" type="password" id="pwdConfirm" autocomplete="new-password">
                             </div>
+                            </form>
 
                             <!-- Bar and rules sit under both fields, so the
                                  requirements are visible while typing either -->
@@ -1172,7 +1191,7 @@
     <div class="slp-body" id="stopListBody"></div>
 </div>
 
-<div class="ac-list" id="acList"></div>
+<div class="ac-list" id="acList" role="listbox" aria-label="Fermate suggerite"></div>
 
 <!-- ── TIME PICKER OVERLAY ── -->
 <div id="timePickerOverlay" class="tp-overlay" onclick="closeTimePicker(event)">
@@ -1196,6 +1215,39 @@
                 <div class="tp-colon">:</div>
                 <div class="tp-drum" id="drumMins"></div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── SCELTA DEL GIORNO ──
+     Compare solo quando l'ora scelta e' gia' passata. Prima l'ambiguita' la
+     risolveva il server spostando sempre a domani, e non c'era modo di
+     guardare la corsa di stamattina. -->
+<div id="dayChoiceOverlay" class="tp-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="dcTitle" onclick="closeDayChoice(event)">
+    <div class="tp-sheet dc-sheet" onclick="event.stopPropagation()">
+        <div class="dc-title" id="dcTitle"></div>
+        <div class="dc-sub"   id="dcSub"></div>
+        <div class="dc-actions">
+            <button class="dc-btn" id="dcToday" onclick="answerDayChoice('today')"></button>
+            <button class="dc-btn dc-btn--primary" id="dcTomorrow" onclick="answerDayChoice('tomorrow')"></button>
+        </div>
+    </div>
+</div>
+
+<!-- ── CONFERMA DI CHIUSURA ──
+     Compare solo quando terminare adesso costerebbe gli eco points. Nessun
+     onclick sullo sfondo, a differenza degli altri fogli: questa e' una domanda
+     con due risposte, e un tocco distratto fuori dalla scheda non deve valere
+     ne' come l'una ne' come l'altra. -->
+<div id="endConfirmOverlay" class="tp-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="ecTitle">
+    <div class="tp-sheet dc-sheet">
+        <div class="dc-title" id="ecTitle"></div>
+        <div class="dc-sub"   id="ecSub"></div>
+        <div class="dc-actions">
+            <button class="dc-btn dc-btn--primary" id="ecKeep" onclick="answerEndConfirm(false)"></button>
+            <button class="dc-btn" id="ecEnd" onclick="answerEndConfirm(true)"></button>
         </div>
     </div>
 </div>

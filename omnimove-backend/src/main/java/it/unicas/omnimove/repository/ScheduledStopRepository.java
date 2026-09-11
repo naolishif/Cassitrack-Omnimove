@@ -100,9 +100,32 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
         String getRouteId();
     }
 
-    // ── Soluzione con un cambio: origine → X → dest ────────────────
+    // ── Soluzioni con un cambio: origine → X → dest ────────────────
+    //
+    // Restituisce CANDIDATI, non una risposta. Prima chiudeva con LIMIT 1
+    // ordinando per solo tempo a bordo: il margine alla coincidenza non entrava
+    // nel criterio e veniva calcolato dopo, a scelta gia' fatta. Un corridoio
+    // con dieci minuti di margine non veniva scartato, non veniva generato.
+    //
+    // DISTINCT ON e' la parte che conta. Senza, un LIMIT 6 darebbe sei CORSE
+    // dello stesso corridoio a orari diversi — stessa fermata di scambio,
+    // stesse due linee, stesso margine strutturale: candidati identici
+    // travestiti da alternative. Cio' che deve variare e' la fermata di scambio
+    // e la coppia di linee, perche' e' li' che i margini differiscono.
+    //
+    // I due ORDER BY hanno scopi diversi: quello interno e' imposto da DISTINCT ON,
+    // che pretende di ordinare prima sulle proprie colonne, e sceglie la corsa piu'
+    // breve di ciascun corridoio; quello esterno ordina i corridoi fra loro, ed e'
+    // l'ordine che conta per chi legge.
+    //
+    // NB: niente commenti -- dentro la stringa. Spring Data la scandisce prima di
+    // passarla al database e conta gli apostrofi senza sapere cosa sia un commento
+    // SQL: un "piu'" in un commento apre una stringa che non si chiude mai, e il
+    // contesto non parte affatto. Le spiegazioni stanno qui sopra, dove Java le
+    // toglie di mezzo prima che qualcuno le legga come SQL.
     @Query(value = """
-        SELECT
+        SELECT c.* FROM (
+        SELECT DISTINCT ON (ss_x1.stop_id, r1.id, r2.id)
             ss_x1.stop_id AS "transferStop",
             r1.short_name AS "l1Short",
             r1.long_name  AS "l1Long",
@@ -129,12 +152,16 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
           AND ss_x1.stop_id <> :origin
           AND ss_x1.stop_id <> :dest
           AND t1.route_id <> t2.route_id
-        ORDER BY (ss_x1.arrival_seconds - ss_o.arrival_seconds)
+        ORDER BY ss_x1.stop_id, r1.id, r2.id,
+                 (ss_x1.arrival_seconds - ss_o.arrival_seconds)
                + (ss_d.arrival_seconds - ss_x2.arrival_seconds)
-        LIMIT 1
+        ) c
+        ORDER BY c."l1Sec" + c."l2Sec"
+        LIMIT :limit
         """, nativeQuery = true)
-    List<TransferRoute> findBestTransfer(@Param("origin") String origin,
-                                         @Param("dest")   String dest);
+    List<TransferRoute> findTransferCandidates(@Param("origin") String origin,
+                                               @Param("dest")   String dest,
+                                               @Param("limit")  int limit);
 
     interface TransferRoute {
         String  getTransferStop();
@@ -151,8 +178,27 @@ public interface ScheduledStopRepository extends JpaRepository<ScheduledStop, Lo
     }
 
     /**
-     * Tutte le fermate schedulate a uno stop specifico per una linea (routeShort),
-     * ordinate per ora di arrivo. Usato come fallback DB in waitMinutesFromSchedule.
+     * Le fermate schedulate a uno stop per una LINEA precisa, ordinate per ora.
+     *
+     * Dalla V26 andata e ritorno sono due route distinte che condividono lo
+     * stesso short_name: cercare per numero restituisce le corse di ENTRAMBE le
+     * direzioni, e la prima partenza utile puo' essere quella che va dalla parte
+     * opposta. Chi conosce l'id della linea deve usare questa.
+     */
+    @Query("""
+    SELECT ss FROM ScheduledStop ss
+    JOIN ss.trip t
+    JOIN t.route r
+    WHERE ss.stopId = :stopId
+      AND r.id      = :routeId
+    ORDER BY ss.arrivalSeconds
+    """)
+    List<ScheduledStop> findByStopIdAndRouteId(@Param("stopId")  String stopId,
+                                               @Param("routeId") String routeId);
+
+    /**
+     * Come sopra, per NUMERO di linea. Resta come ripiego per i chiamanti che
+     * l'id non ce l'hanno; dove c'e', si usa quello.
      */
     @Query("""
     SELECT ss FROM ScheduledStop ss

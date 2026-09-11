@@ -626,6 +626,24 @@ let _pickerHour = null;
 let _pickerMin  = null;
 let _pickerMode = 'depart'; // 'depart' | 'arrive'
 
+/**
+ * A quale giorno si riferisce l'ora scelta: 'today', 'tomorrow', o null.
+ *
+ * Ha senso solo per un'ora GIA' PASSATA — prima di allora non c'e' niente da
+ * chiarire — e in quel caso lo decide il viaggiatore. Resta null finche' la
+ * domanda non e' stata fatta, e torna null ogni volta che l'ora cambia: una
+ * risposta data per le 8:30 non dice niente sulle 14:00.
+ */
+let _pickerDay = null;
+
+/** L'ora scelta e' gia' passata oggi? Con "Adesso" la domanda non esiste. */
+function _pickedTimeIsPast() {
+    if (_pickerHour === null) return false;
+    const d = new Date();
+    d.setHours(_pickerHour, _pickerMin, 0, 0);
+    return d < new Date();
+}
+
 /** Returns a Date for the user's chosen departure time (or now if nothing chosen). */
 /**
  * When one option actually starts.
@@ -646,8 +664,12 @@ function _getPickerTripStart() {
     if (_pickerHour === null) return new Date();
     const d = new Date();
     d.setHours(_pickerHour, _pickerMin, 0, 0);
-    // If the chosen time is already past today, shift to tomorrow
-    if (d < new Date()) d.setDate(d.getDate() + 1);
+    // Ora gia' passata: si sposta a domani, a meno che il viaggiatore non
+    // abbia detto di intendere oggi. Deve dare la stessa risposta di
+    // resolveDepartureBase sul server, altrimenti gli orari che il pannello
+    // calcola da solo contraddicono quelli arrivati con i risultati.
+    if (_pickerDay === 'tomorrow' && !(d < new Date())) d.setDate(d.getDate() + 1);
+    else if (d < new Date() && _pickerDay !== 'today') d.setDate(d.getDate() + 1);
     return d;
 }
 /** Format a Date as "HH:MM". */
@@ -664,8 +686,13 @@ function updateTimeDisplay() {
         const hh = String(_pickerHour).padStart(2, '0');
         const mm = String(_pickerMin).padStart(2, '0');
         const modeLabel = _pickerMode === 'arrive' ? t('time_arrive') : t('time_depart');
-        label     = `${modeLabel} ${hh}:${mm}`;
-        pillLabel = `${hh}:${mm}`;
+        // Il giorno si scrive solo quando e' stato scelto, cioe' solo per
+        // un'ora gia' passata. Senza, "8:30" da solo non distingue la corsa di
+        // stamattina da quella di domani, e la scelta appena fatta sparirebbe
+        // dallo schermo un istante dopo averla fatta.
+        const dayLabel = _pickerDay ? ' · ' + t('day_short_' + _pickerDay) : '';
+        label     = `${modeLabel} ${hh}:${mm}${dayLabel}`;
+        pillLabel = `${hh}:${mm}${dayLabel}`;
     }
     // Sidebar pill: compact — just the time (or "Now"), highlighted when a time is set
     const sidebarEl   = document.getElementById('sidebarTimeDisplay');
@@ -762,6 +789,54 @@ function closeTimePicker(e) {
     document.getElementById('timePickerOverlay').classList.remove('open');
 }
 
+// ── Scelta del giorno ───────────────────────────────────────────────
+//
+// Quando l'ora scelta e' gia' passata, "le 8:30" puo' voler dire due cose.
+// Finora decideva l'applicazione, sempre domani: comodo nel caso frequente,
+// ma toglieva ogni modo di guardare la corsa di stamattina.
+//
+// La domanda si fa AL MOMENTO DELLA RICERCA e non nel selettore orario. Nel
+// selettore sarebbe un terzo controllo accanto a "Parte alle / Arriva entro" e
+// alle rotelle, presente sempre e utile di rado; qui compare solo quando
+// l'ambiguita' c'e' davvero, cioe' quando serve rispondere.
+let _dayChoiceResolve = null;
+
+/**
+ * Apre il riquadro e restituisce la scelta.
+ *
+ * Una Promise perche' chi chiama sta gia' costruendo una ricerca e deve
+ * fermarsi ad aspettare: con una callback la ricerca sarebbe partita comunque,
+ * con il giorno deciso d'ufficio, cioe' il difetto che si sta correggendo.
+ *
+ * Chiudendo senza scegliere si ottiene null e la ricerca non parte: e'
+ * l'annullamento, non un consenso implicito.
+ */
+function askDayChoice(hhmm) {
+    const overlay = document.getElementById('dayChoiceOverlay');
+    if (!overlay) return Promise.resolve('tomorrow');   // riquadro assente: com'era prima
+
+    document.getElementById('dcTitle').textContent    = tf('day_choice_title', { time: hhmm });
+    document.getElementById('dcSub').textContent      = t('day_choice_sub');
+    document.getElementById('dcToday').textContent    = t('day_choice_today');
+    document.getElementById('dcTomorrow').textContent = t('day_choice_tomorrow');
+
+    overlay.classList.add('open');
+    return new Promise(resolve => { _dayChoiceResolve = resolve; });
+}
+
+function answerDayChoice(day) {
+    document.getElementById('dayChoiceOverlay').classList.remove('open');
+    const resolve = _dayChoiceResolve;
+    _dayChoiceResolve = null;
+    if (resolve) resolve(day);
+}
+
+/** Tocco fuori dalla scheda: annulla. */
+function closeDayChoice(e) {
+    if (e && e.target !== document.getElementById('dayChoiceOverlay')) return;
+    answerDayChoice(null);
+}
+
 function setTimeMode(mode) {
     _pickerMode = mode;
     document.getElementById('tpDepart').classList.toggle('active', mode === 'depart');
@@ -777,6 +852,10 @@ function _getDrumValue(drumId, range) {
 function confirmTimePicker() {
     _pickerHour = _getDrumValue('drumHours', 24);
     _pickerMin  = _getDrumValue('drumMins',  60);
+    // Ora nuova, domanda nuova: una risposta data per le 8:30 non dice niente
+    // sulle 14:00, e riusarla sceglierebbe il giorno al posto del viaggiatore
+    // — che e' esattamente cio' che si voleva smettere di fare.
+    _pickerDay  = null;
     document.getElementById('timePickerOverlay').classList.remove('open');
     updateTimeDisplay();
     // Re-run search automatically if origin + dest are already set
@@ -788,6 +867,7 @@ function resetTimeToNow() {
     _pickerHour = null;
     _pickerMin  = null;
     _pickerMode = 'depart';
+    _pickerDay  = null;          // "Adesso" non ha giorni da scegliere
     document.getElementById('timePickerOverlay').classList.remove('open');
     updateTimeDisplay();
     // Re-sync the Depart toggle to active
@@ -1727,7 +1807,7 @@ function renderArrivals(list, arrivals) {
         // Crowding on first arrival
         const crowding = first.crowding_level;
         const crowdHtml = (crowding && CROWDING_BG[crowding])
-            ? `<span class="tmb-crowd" style="${CROWDING_BG[crowding]}">${t('lbl_crowding')} ${getCrowdingLabel(crowding)}</span>`
+            ? `<span class="tmb-crowd" style="${CROWDING_BG[crowding]}">${getCrowdingLabel(crowding)}</span>`
             : '';
 
         const routeId   = first.route_id || '';
@@ -1939,7 +2019,7 @@ function sortOptions(options) {
         // Higher score first — see customScore
         const scored = new Map(sorted.map(o => [o, customScore(o, sorted)]));
         sorted.sort((a, b) => scored.get(b) - scored.get(a));
-        return sorted;
+        return demoteLongWalk(sorted);
     }
     if (activeSort === 'fast') {
         sorted.sort((a, b) => sortValue(a.duration_minutes) - sortValue(b.duration_minutes));
@@ -1951,41 +2031,127 @@ function sortOptions(options) {
     return sorted;
 }
 
+// Di quanto un'opzione puo' essere peggiore della migliore prima di perdere
+// tutto il punteggio su quel criterio. Sono le soglie oltre le quali la
+// differenza smette di essere un dettaglio: tre quarti d'ora di viaggio in piu'
+// e cinque euro in piu' non si compensano con nient'altro.
+const CUSTOM_TIME_TOLERANCE_MIN = 45;
+const CUSTOM_COST_TOLERANCE_EUR = 5;
+
+/**
+ * Oltre questi minuti, una camminata smette di essere un consiglio e diventa un
+ * ripiego: resta in elenco, ma non in cima.
+ *
+ * MEZZ'ORA, e non un numero preso dalle preferenze: max_bike_walk_metres esiste
+ * gia' ma risponde a un'altra domanda — quanto sei disposto a camminare PER
+ * RAGGIUNGERE un mezzo — e vale 500 m, che come tetto per un viaggio intero non
+ * significherebbe niente.
+ */
+const WALK_LEAD_MAX_MIN = 30;
+
+/**
+ * Una camminata lunga non guida la lista quando c'e' un'alternativa che non ti
+ * fa arrivare piu' tardi.
+ *
+ * PERCHE' SERVE
+ * Nel punteggio Personalizzata tre criteri su quattro premiano la stessa cosa —
+ * non usare un mezzo. Camminare e' gratis (costo al massimo), non emette (eco al
+ * massimo) e non ha coincidenze da perdere (affidabilita' al massimo): con le
+ * risposte tutte a meta' sono circa 0,71 su 1 incassati prima ancora di guardare
+ * l'orologio. E il tempo, unico criterio che una camminata perde, satura: oltre
+ * CUSTOM_TIME_TOLERANCE_MIN il punteggio e' 0 e non puo' peggiorare, quindi
+ * novanta minuti a piedi costano quanto centottanta. Il risultato e' che una
+ * camminata di un'ora e mezza vinceva su un bus da cinquantaquattro minuti.
+ *
+ * PERCHE' NON SI TOCCA IL PUNTEGGIO
+ * Il difetto vero e' che costo ed eco, per i modi non motorizzati, sono lo
+ * stesso fatto contato due volte. Correggerlo cambia il punteggio di ogni
+ * opzione di ogni ricerca; questo invece e' un correttivo dichiarato, che agisce
+ * su un caso solo e si legge in una riga.
+ *
+ * SOLO SE L'ALTERNATIVA NON E' PIU' LENTA. Una camminata di 35 minuti contro un
+ * bus che, fra attesa e cambio, ne impiega 60 e' davvero la risposta migliore:
+ * retrocederla nasconderebbe la scelta giusta invece di una sbagliata.
+ *
+ * Solo per Personalizzata. Veloce, Economica ed Ecologica sono un ordinamento su
+ * una colonna sola, e su quella colonna una camminata che vince ha vinto
+ * davvero: chi ha chiesto "la piu' economica" non va corretto.
+ */
+function demoteLongWalk(sorted) {
+    const isLongWalk = o =>
+        o && o.mode === 'WALK' && o.duration_minutes > WALK_LEAD_MAX_MIN;
+
+    // Si guarda SOLO la testa della lista. Una camminata lunga gia' in fondo sta
+    // dove il punteggio l'ha messa: spostarla di qui la promuoverebbe, che e'
+    // l'opposto di cio' che serve.
+    if (!isLongWalk(sorted[0])) return sorted;
+
+    // La migliore alternativa non a piedi: il punteggio le ha gia' ordinate,
+    // quindi e' la prima che si incontra scendendo.
+    const alt = sorted.find(o => o && o.mode !== 'WALK');
+    if (!alt || typeof alt.duration_minutes !== 'number') return sorted;
+
+    // Quante camminate lunghe guidano la lista. Di solito una, ma contarle evita
+    // che retrocedendo la prima si ritrovi in testa la seconda — piu' lunga
+    // ancora, visto che il punteggio l'aveva messa sotto.
+    let n = 0;
+    while (isLongWalk(sorted[n]) && alt.duration_minutes <= sorted[n].duration_minutes) n++;
+    if (!n) return sorted;
+
+    const lead = sorted.splice(0, n);
+    sorted.splice(sorted.indexOf(alt) + 1, 0, ...lead);
+    return sorted;
+}
+
 /**
  * The Custom ranking: the four criteria combined with the traveller's own
  * weights.
  *
  * Weighting is back here, but it is no longer hidden — these are the numbers
  * the person set, shown in Preferences, and the other three presets stay a
- * plain sort on one column. Values are min-maxed across THIS search only: they
- * order alternatives against each other and mean nothing on their own.
+ * plain sort on one column.
  *
- * Reliability arrives already scored on an absolute 0..1 scale — see
- * JourneyPlannerService.reliabilityOf — and is used as it comes. The other
- * three are min-maxed because "cheap" only means anything against the
- * alternatives; "this connection is tight" means something on its own.
+ * PERCHE' NON SI USA PIU' IL MIN-MAX
+ * Normalizzando sul minimo e sul massimo della ricerca, il migliore prende 1 e
+ * il peggiore 0 QUALUNQUE sia la differenza vera: risparmiare un euro valeva
+ * quanto risparmiarne cento, e camminare due ore in piu' costava quanto
+ * camminarne due minuti. Con le preferenze tutte a meta', una camminata di due
+ * ore vinceva su un bus da venti minuti perche' era gratis, pulita e senza
+ * coincidenze da perdere: tre criteri su quattro, ciascuno vinto al massimo
+ * dello scarto a prescindere dall'entita'.
+ *
+ * Le scale sono quindi assolute, e i punteggi restano confrontabili fra
+ * ricerche diverse invece di dipendere da quali alternative sono comparse.
+ *
+ * COSA NON VA NORMALIZZATO AFFATTO
+ * green_index e reliability_score arrivano gia' su una scala propria — 0..100
+ * il primo, 0..1 il secondo. Passarli per il min-max distruggeva una proprieta'
+ * che il dato aveva gia': una singola opzione in bus otteneva comunque 1.0 sul
+ * criterio ambientale solo perche' era l'unica.
  */
 function customScore(option, all) {
     const w = PROFILE_WEIGHTS;
-    const norm = (v, lo, hi) => (hi - lo < 1e-9 ? 0.5 : (v - lo) / (hi - lo));
-    const span = pick => {
+
+    const bestOf = pick => {
         const vals = all.map(pick).filter(v => typeof v === 'number' && !isNaN(v));
-        return vals.length ? [Math.min(...vals), Math.max(...vals)] : [0, 1];
+        return vals.length ? Math.min(...vals) : 0;
     };
+    // 1 quando l'opzione e' la migliore, 0 quando la supera di tutta la
+    // tolleranza, lineare in mezzo.
+    const closeTo = (v, lo, tol) => 1 - Math.min(1, Math.max(0, v - lo) / tol);
 
-    const [tLo, tHi] = span(o => o.duration_minutes);
-    const [cLo, cHi] = span(o => o.cost_euros);
-    const [gLo, gHi] = span(o => o.green_index);
+    const tLo = bestOf(o => o.duration_minutes);
+    const cLo = bestOf(o => o.cost_euros);
 
-    // time and cost: lower is better, so the normalised value is inverted
-    const t = 1 - norm(sortValueOr(option.duration_minutes, tHi), tLo, tHi);
-    const c = 1 - norm(sortValueOr(option.cost_euros, cHi), cLo, cHi);
-    const g =     norm(sortValueOr(option.green_index, gLo), gLo, gHi);
+    // Un dato mancante vale come se avesse esaurito la tolleranza: penalizzato,
+    // non escluso, e senza rompere l'aritmetica.
+    const t = closeTo(sortValueOr(option.duration_minutes, tLo + CUSTOM_TIME_TOLERANCE_MIN),
+                      tLo, CUSTOM_TIME_TOLERANCE_MIN);
+    const c = closeTo(sortValueOr(option.cost_euros, cLo + CUSTOM_COST_TOLERANCE_EUR),
+                      cLo, CUSTOM_COST_TOLERANCE_EUR);
 
-    // Taken as it comes: reliability_score is already absolute. Min-maxing it
-    // like the other three is what made it useless — the planner returns a
-    // single bus option, so the only non-null margin in a set was always the
-    // maximum and every option scored 1.0, a one-minute change included.
+    // Gia' assoluti, si usano come arrivano.
+    const g = Math.max(0, Math.min(1, sortValueOr(option.green_index, 0) / 100));
     const r = typeof option.reliability_score === 'number' ? option.reliability_score : 1;
 
     return w.time * t + w.cost * c + w.eco * g + w.reliability * r;
@@ -2055,6 +2221,20 @@ async function doSearch() {
         showToast(t('toast_same_stops'), true); return;
     }
 
+    // Ora gia' passata e nessuna risposta ancora: si chiede, e si aspetta.
+    // Prima di qualsiasi effetto sullo schermo — piu' sotto la ricerca svuota
+    // la lista dei risultati e cambia pannello, e farlo per poi scoprire che il
+    // viaggiatore ha annullato lascerebbe la pagina a meta' di un'operazione
+    // che non e' avvenuta.
+    if (_pickedTimeIsPast() && _pickerDay === null) {
+        const hh = String(_pickerHour).padStart(2, '0');
+        const mm = String(_pickerMin).padStart(2, '0');
+        const chosen = await askDayChoice(`${hh}:${mm}`);
+        if (!chosen) return;              // annullato: non si cerca niente
+        _pickerDay = chosen;
+        updateTimeDisplay();
+    }
+
     // A search is a fresh start. A detail sheet left open — or a journey still running
     // because End Journey was never tapped — belongs to the previous origin/destination
     // pair: the sheet is an opaque overlay on the sidebar, so the new results rendered
@@ -2111,6 +2291,9 @@ async function doSearch() {
             const hh = String(_pickerHour).padStart(2, '0');
             const mm = String(_pickerMin).padStart(2, '0');
             payload.departure_time = `${hh}:${mm}`;
+            // Solo se una scelta c'e' stata. Senza il campo il server decide
+            // come ha sempre fatto, e i client piu' vecchi non cambiano.
+            if (_pickerDay) payload.departure_day = _pickerDay;
             if (_pickerMode === 'arrive') payload.arrive_by = true;
         }
 
@@ -2697,10 +2880,35 @@ function renderRoutes(data) {
         const changeBadge = opt.transfer_wait_minutes != null
             ? `<span class="status-badge s-change">${escHtml(tf('badge_change', { min: opt.transfer_wait_minutes }))}</span>`
             : '';
+        // ── Il titolo dice DOVE VAI TU ─────────────────────────────
+        //
+        // Prima era mode_label, cioe' il nome della LINEA: i suoi due capolinea.
+        // Con la freccia davanti, "02 → San Cesareo – Rocca d'Evandro" si legge
+        // come la destinazione del viaggio, e chi aveva cercato San Cesareo si
+        // vedeva rispondere Rocca d'Evandro. Sono due cose diverse: dove arrivi
+        // tu, e come si chiama la linea che ti ci porta.
+        //
+        // Il nome della linea non sparisce — dice quale bus salta su e in che
+        // direzione, che alla fermata serve — ma scende di un livello, sotto
+        // agli orari, con la sua pastiglia numerata.
+        //
+        // Solo per il bus: per "A piedi" o "Bici" modeLabel e' gia' il nome del
+        // modo, ed e' il titolo giusto.
+        const destName = (window._currentDest && window._currentDest.name) || '';
+        const isBusCard = opt.mode === 'BUS' && destName;
+        const cardTitle = isBusCard
+            ? `${icon} → ${escHtml(destName)}`
+            : `${icon} ${modeLabel}`;
+        const lineRow = (opt.mode === 'BUS' && modeLabel)
+            ? `<div class="route-lines">${
+                  / → | \+ /.test(modeLabel) ? fmtRouteLabel(modeLabel) : escHtml(modeLabel)
+              }</div>`
+            : '';
+
         return `
 <div class="route-card" id="card-${escAttr(key)}">
     <div class="route-top">
-        <div class="route-name">${icon} ${modeLabel}</div>
+        <div class="route-name">${cardTitle}</div>
         <div class="route-time">${opt.duration_minutes} min</div>
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin:-4px 0 6px;font-size:12px;color:var(--text-mid);font-weight:600">
@@ -2708,6 +2916,7 @@ function renderRoutes(data) {
         <span style="color:var(--border-mid)">→</span>
         <span>${_arrTime}</span>
     </div>
+    ${lineRow}
     <div class="status-row">
         ${warn || `<span class="status-badge s-ok">${t('badge_available')}</span>`}
         ${bikeWarn}
@@ -2786,21 +2995,51 @@ function showRoutePreview(mode, legs) {
                 const legColor = legLineColor(leg);
                 const coords     = leg.stop_coords.map(c => [c[0], c[1]]);
                 const stopDots   = (leg.bus_stop_coords || leg.stop_coords).map(c => [c[0], c[1]]);
+
+                // I nomi si attaccano ai pallini solo quando gli indici combaciano
+                // davvero. Senza bus_stop_coords i punti sono la geometria stradale
+                // — decine di vertici contro una manciata di fermate — e ogni
+                // etichetta finirebbe su un punto a caso della strada.
+                const stopNames = (leg.bus_stop_coords && Array.isArray(leg.stop_names)
+                                   && leg.stop_names.length === leg.bus_stop_coords.length)
+                    ? leg.stop_names : null;
+
+                // Asincrono: gli orari della corsa possono non essere in
+                // memoria, e aspettarli bloccherebbe il disegno di tutto il
+                // resto.
+                //
+                // Il .catch non e' decorativo. Il tratteggio da dove arriva il
+                // bus e' CONTESTO: se fallisce deve mancare quello, non il
+                // percorso. Senza, un errore qui dentro diventa un rifiuto non
+                // gestito che sporca la console e nasconde il problema vero.
+                drawLegApproach(leg, legColor)
+                    .catch(e => console.warn('Approach path not drawn:', e));
+
                 window._previewLayers.push(
                     L.polyline(coords, { color: legColor, weight: 4, opacity: 0.85 }).addTo(map)
                 );
                 stopDots.forEach((c, i) => {
                     const isEnd = i === 0 || i === stopDots.length - 1;
-                    window._previewLayers.push(
-                        L.circleMarker(c, {
-                            radius: isEnd ? 7 : 5,
-                            color: legColor, fillColor: '#ffffff', fillOpacity: 1, weight: 2
-                        }).addTo(map)
-                    );
+                    const dot = L.circleMarker(c, {
+                        radius: isEnd ? 7 : 5,
+                        color: legColor, fillColor: '#ffffff', fillOpacity: 1, weight: 2
+                    }).addTo(map);
+
+                    if (stopNames && stopNames[i]) {
+                        // Salita e discesa dichiarate come tali: sono le due che
+                        // contano, e su un pallino tutto uguale non si distinguono.
+                        const role = i === 0 ? t('lbl_start')
+                                  : i === stopDots.length - 1 ? t('lbl_destination')
+                                  : '';
+                        dot.bindPopup(`<b>${escHtml(stopNames[i])}</b>`
+                            + (role ? `<br><span style="font-size:11px;color:#64748b">${escHtml(role)}</span>` : ''));
+                    }
+                    window._previewLayers.push(dot);
                 });
                 if (leg.route_id) {
                     activeBusLegs.push({
                         routeId: leg.route_id,
+                        tripId:  leg.trip_id,
                         color: legColor,
                         boardingCoords: leg.stop_coords[0] // [lat, lon] of boarding stop
                     });
@@ -2833,7 +3072,10 @@ function showRoutePreview(mode, legs) {
                 fetchAndRenderBusMarkers();
                 window._busPollInterval = setInterval(fetchAndRenderBusMarkers, 12000);
             } else {
-                showStaleNotice(t('live_buses_future') || '🕐 Live positions not shown for future trips');
+                // Anche qui l'orario e' la risposta giusta: se la partenza e' fra
+                // due ore, sapere quando e da dove parte vale piu' di un puntino.
+                showStaleNotice(t('live_buses_future') || '🕐 Live positions not shown for future trips',
+                                { routeId: activeBusLegs[0].routeId });
             }
         }
     } else {
@@ -2947,7 +3189,22 @@ function _openRouteDetail(key, label, greenIndex, distanceMetres, costEuros) {
         ? buildTimeline(selectedJourney.legs, durationMin, greenIndex, opt)
         : buildSingleLegTimeline(mode, selectedJourney.legs || [], distanceKm, co2g);
 
-    const modeLabel = isBusMode ? (fmtRouteLabel(label) || label) : label;
+    // Le corse delle tratte in bus, nell'ordine in cui compaiono nell'etichetta.
+    // Se i due elenchi non combaciano — un'opzione combinata puo' nominare anche
+    // modi non in bus — l'indice manca e il segnaposto semplicemente non esce:
+    // meglio un mezzo non mostrato che il mezzo di un'altra tratta.
+    const busLegs   = (selectedJourney.legs || []).filter(l => l.mode === 'BUS');
+    const busTrips  = busLegs.map(l => l.trip_id   || null);
+    const busVehics = busLegs.map(l => l.vehicle_id || null);
+    let modeLabel = isBusMode
+        ? (fmtRouteLabel(label, undefined, busTrips, busVehics) || label)
+        : label;
+    // Con un cambio le righe le crea fmtRouteLabel (una per parte); con una
+    // tratta sola non c'e' nessun " + " su cui dividere, e senza involucro la
+    // riga tornerebbe ad andare a capo parola per parola.
+    if (isBusMode && !String(label || '').includes(' + ')) {
+        modeLabel = `<div class="rd-line-row">${modeLabel}</div>`;
+    }
     const costTxt   = (!costEuros || costEuros === 0) ? t('lbl_free') : '€' + costEuros.toFixed(2);
     const co2Txt    = Math.round(co2g) + ' g CO₂';
     const gcol      = greenColor(greenIndex);
@@ -2956,6 +3213,23 @@ function _openRouteDetail(key, label, greenIndex, distanceMetres, costEuros) {
     document.getElementById('rdLabel').innerHTML   = modeLabel;
     document.getElementById('rdTimes').textContent = `${_fmtHHMM(depDate)} → ${_fmtHHMM(arrDate)}`;
     document.getElementById('rdDur').textContent   = durationMin + ' min';
+    // A che ora e' stato calcolato quello che si sta leggendo. _routesFetchedAt
+    // e' l'istante dell'ultima pianificazione — la ricerca o un ricalcolo — ed
+    // e' il dato onesto: la scheda non si aggiorna da sola, e mentre e' aperta
+    // il ricalcolo periodico e' sospeso apposta (vedi canRefreshRoutes), per
+    // non cambiare i numeri sotto gli occhi di chi li sta leggendo.
+    const fresh = document.getElementById('rdFresh');
+    if (fresh) {
+        fresh.textContent = tf('rd_updated',
+                               { time: _fmtHHMM(new Date(_routesFetchedAt || Date.now())) });
+    }
+    const rdRefresh = document.getElementById('rdRefreshBtn');
+    if (rdRefresh) {
+        rdRefresh.innerHTML = '<span>⟳</span>';
+        rdRefresh.title = t('rd_refresh');
+        rdRefresh.setAttribute('aria-label', t('rd_refresh'));
+    }
+
     document.getElementById('rdTimeline').innerHTML = timelineHtml;
     document.getElementById('rdCost').textContent  = costTxt;
     document.getElementById('rdCo2').textContent   = co2Txt;
@@ -2965,6 +3239,11 @@ function _openRouteDetail(key, label, greenIndex, distanceMetres, costEuros) {
     // Always reset the start button in case a previous journey left it disabled
     const rdBtn = document.getElementById('rdStartBtn');
     if (rdBtn) { rdBtn.disabled = false; rdBtn.textContent = t('btn_start_journey'); }
+
+    // I segnaposto del mezzo appena creati — nell'intestazione e nelle righe
+    // delle tratte — si riempiono subito con l'ultimo elenco noto, invece di
+    // aspettare il prossimo giro di sondaggio.
+    updateLiveDots(window._liveVehicles || []);
 
     document.getElementById('routeDetailSheet').classList.add('open');
 }
@@ -3029,6 +3308,66 @@ function closeRouteDetail() {
     clearJourneySelection();
 }
 
+// ── Ricalcolo su richiesta della scheda aperta ──────────────────────
+//
+// PERCHE' SERVE UN PULSANTE. La lista dei percorsi si ricalcola da sola ogni
+// tanto, ma canRefreshRoutes() si ferma esplicitamente quando questa scheda e'
+// aperta: ridisegnarla mentre qualcuno la legge gli cambierebbe i numeri sotto
+// gli occhi, e la chiuderebbe. La conseguenza e' che piu' a lungo la scheda
+// resta aperta, piu' cio' che mostra invecchia — in silenzio, perche' una
+// durata scritta grande sembra sempre attuale. Il pulsante restituisce il
+// controllo a chi legge: si aggiorna quando lo decide lui.
+//
+// Non passa da refreshRoutes(): quella si autolimita con le stesse condizioni
+// che qui sono false per definizione, quindi non farebbe niente.
+let _rdRefreshing = false;
+
+async function refreshRouteDetail() {
+    if (_rdRefreshing) return;
+    const key = selectedJourney && selectedJourney.key;
+    if (!key || !window._lastSearchPayload) return;
+
+    _rdRefreshing = true;
+    const btn = document.getElementById('rdRefreshBtn');
+    if (btn) btn.disabled = true;
+
+    try {
+        const r = await apiFetch('/journeys/search', {
+            method: 'POST',
+            // refresh:true — ripianifica, ma non conta come una nuova ricerca:
+            // e' il denominatore del tasso di selezione sulla dashboard.
+            body: JSON.stringify({ ...window._lastSearchPayload, refresh: true })
+        });
+        if (!r.ok) throw new Error('refresh ' + r.status);
+        const data = await r.json();
+
+        window._lastSearchData = data;
+        _routesFetchedAt = Date.now();
+        renderRoutes(data);
+
+        // La soluzione scelta puo' non esserci piu': l'autobus delle 11:30 che
+        // si stava guardando alle 11:29 non e' piu' proponibile alle 11:32. Si
+        // dice, invece di riaprire una scheda a caso o di lasciarne una vuota.
+        if (!(window._routeOptions || {})[key]) {
+            showToast(t('rd_refresh_gone'), true);
+            return;
+        }
+        // Rifa' tutto il giro della selezione: scheda, anteprima sulla mappa e
+        // evidenziazione della card restano una cosa sola.
+        selectMode(key);
+    } catch (e) {
+        console.warn('[DETAIL] refresh failed:', e);
+        // Gli orari di prima restano dove sono: vecchi di qualche minuto e'
+        // meglio di una scheda vuota al posto del percorso che si stava
+        // leggendo. Il 429 del limitatore e' il caso ordinario.
+        showToast(t('rd_refresh_failed'), true);
+    } finally {
+        _rdRefreshing = false;
+        const b = document.getElementById('rdRefreshBtn');
+        if (b) b.disabled = false;
+    }
+}
+
 function startJourneyFromDetail() {
     document.getElementById('routeDetailSheet').classList.remove('open');
     startJourney();
@@ -3039,12 +3378,192 @@ function fmtD(m) { return m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(1) 
 
 
 // ── Route label: "3 → Dest" or "3 → Dest + 1 → Dest2" → circles ──
-function fmtRouteLabel(instruction, circleStyle) {
+// Orario per linea, tenuto da parte: la stessa linea compare su piu' tratte e
+// in piu' ricerche, e ripescarlo a ogni apertura sarebbe una richiesta per clic.
+const _legTtCache = {};
+
+/**
+ * Apre e chiude l'elenco delle fermate, e alla PRIMA apertura lo arricchisce
+ * con gli orari della corsa che si prende.
+ *
+ * Una tendina sola invece di due: l'elenco nudo delle fermate intermedie e la
+ * tabella oraria dicevano quasi la stessa cosa in due posti diversi. Qui
+ * l'interfaccia resta quella che c'era — il pulsante "N fermate" — e cambia il
+ * contenuto.
+ *
+ * L'elenco semplice e' gia' nel DOM e resta li' se la richiesta fallisce: si
+ * perde l'orario, non le fermate.
+ */
+async function toggleLegStops(btn, panelId) {
+    const el = document.getElementById(panelId);
+    if (!el) return;
+
+    const open = el.style.display === 'block';
+    el.style.display = open ? 'none' : 'block';
+    btn.textContent  = open ? (btn.dataset.labelClosed || '') : t('stops_hide');
+    if (open || el.dataset.loaded === '1') return;
+
+    // Le corse di ritorno vivono su una route propria dalla V26 (suffisso _R),
+    // ma l'orario le pubblica insieme all'andata: si chiede la linea base.
+    const base   = String(el.dataset.route || '').replace(/_R$/, '');
+    const tripId = el.dataset.trip;
+    if (!base || !tripId) return;          // senza corsa non c'e' orario da cercare
+
+    try {
+        if (!_legTtCache[base]) {
+            const r = await apiFetch('/journeys/timetable/routes/' + encodeURIComponent(base));
+            if (!r.ok) throw new Error('timetable ' + r.status);
+            _legTtCache[base] = await r.json();
+        }
+        const html = renderLegTimetable(_legTtCache[base], tripId,
+                                        el.dataset.board, el.dataset.alight);
+        if (html) { el.innerHTML = html; el.dataset.loaded = '1'; }
+    } catch (e) {
+        console.warn('Could not load leg timetable:', e);   // resta l'elenco semplice
+    }
+}
+
+/** Apre e chiude le fermate precedenti. Agisce sul fratello successivo, cosi'
+ *  non serve passare nessun id — ne' nessun nome di fermata — dentro l'onclick. */
+function omToggleBefore(btn) {
+    const box = btn.nextElementSibling;
+    if (!box) return;
+    const open = box.style.display === 'block';
+    box.style.display = open ? 'none' : 'block';
+    btn.textContent = (open ? '▾ ' : '▴ ') + (btn.dataset.label || '');
+}
+
+/** Le righe di un blocco, gia' formattate. */
+function ttRowsHtml(rows, cls) {
+    return rows.map(r => `<div class="tl-tt-row ${cls}">`
+        + `<span>${escHtml(r.name)}</span><b>${r.hm}</b></div>`).join('');
+}
+
+/**
+ * Divide la corsa in tre: prima della salita, il tuo tragitto, dopo la discesa.
+ * Restituisce null se la corsa non e' nell'orario pubblicato.
+ */
+function legTimetableParts(data, tripId, boardStop, alightStop) {
+    for (const dir of (data.directions || [])) {
+        const run = (dir.runs || []).find(r => r.tripId === tripId);
+        if (!run) continue;
+
+        // Prima si costruisce l'elenco, poi lo si taglia: cercare gli indici
+        // mentre si scorre costringeva a un flag di stato che sbagliava quando
+        // una fermata compare due volte, come sugli anelli.
+        const rows = [];
+        (dir.stops || []).forEach((s, i) => {
+            const sec = (run.times || [])[i];
+            if (sec == null) return;                 // corsa che salta la fermata
+            rows.push({ name: s.name, hm: secToHm(sec) });
+        });
+        if (!rows.length) return null;
+
+        let bi = rows.findIndex(r => r.name === boardStop);
+        if (bi < 0) bi = 0;
+        // La discesa si cerca DOPO la salita: su una linea ad anello lo stesso
+        // nome ricorre, e il primo riscontro potrebbe precedere la partenza.
+        let ai = rows.findIndex((r, i) => i >= bi && r.name === alightStop);
+        if (ai < 0) ai = rows.length - 1;
+
+        return {
+            headsign: dir.headsign,
+            before:   rows.slice(0, bi),
+            ride:     rows.slice(bi, ai + 1),
+            after:    rows.slice(ai + 1),
+        };
+    }
+    return null;
+}
+
+/**
+ * Riempie le righe "fermate precedenti" appena la scaletta e' nel DOM.
+ *
+ * Quante siano lo sa solo l'orario: il piano di viaggio conosce le fermate della
+ * tratta, non quelle che il bus ha gia' fatto. La riga nasce quindi nascosta e
+ * compare solo se ce n'e' almeno una — chi sale al capolinea non vede un
+ * pulsante che non aprirebbe niente.
+ */
+async function hydrateLegBefores() {
+    for (const row of document.querySelectorAll('.tl-row-before[data-trip]')) {
+        if (row.dataset.done === '1') continue;
+        row.dataset.done = '1';
+
+        const base = String(row.dataset.route || '').replace(/_R$/, '');
+        const trip = row.dataset.trip;
+        if (!base || !trip) continue;
+
+        try {
+            if (!_legTtCache[base]) {
+                const r = await apiFetch('/journeys/timetable/routes/' + encodeURIComponent(base));
+                if (!r.ok) throw new Error('timetable ' + r.status);
+                _legTtCache[base] = await r.json();
+            }
+            const parts = legTimetableParts(_legTtCache[base], trip,
+                                            row.dataset.board, row.dataset.alight);
+            if (!parts || !parts.before.length) continue;   // resta nascosta
+
+            const lbl = parts.before.length === 1
+                ? t('tt_before_one')
+                : tf('tt_before_count', { n: parts.before.length });
+            const btn = row.querySelector('.tl-before-btn');
+            btn.dataset.label = lbl;
+            btn.textContent   = '▾ ' + lbl;
+            row.querySelector('.tl-before-list').innerHTML = ttRowsHtml(parts.before, 'off');
+            row.style.display = '';
+        } catch (e) {
+            console.warn('Could not load earlier stops:', e);
+        }
+    }
+}
+
+function renderLegTimetable(data, tripId, boardStop, alightStop) {
+    const p = legTimetableParts(data, tripId, boardStop, alightStop);
+    // Corsa non pubblicata — per esempio quando il pianificatore non ha potuto
+    // risolvere il turno e ha lasciato il rappresentante del percorso. Si torna
+    // null e il chiamante tiene l'elenco semplice, che e' comunque corretto.
+    if (!p) return null;
+
+    // Le fermate precedenti NON stanno qui: hanno una riga propria sopra quella
+    // di salita. Ripeterle sarebbe la ridondanza da cui siamo partiti.
+
+    // La direzione e' quella scritta sul bus, e serve a riconoscerlo alla
+    // fermata: fra due corse della stessa linea e' l'unica cosa che le
+    // distingue. Quando pero' scendi al capolinea coincide con la tua
+    // destinazione, che e' gia' scritta due righe sotto — li' non informa,
+    // ripete. Si mostra solo quando dice qualcosa di diverso.
+    const lastRide = p.ride.length ? p.ride[p.ride.length - 1].name : null;
+    const head = (p.headsign && p.headsign !== lastRide)
+        ? `<div class="tl-tt-head">→ ${escHtml(p.headsign)}</div>`
+        : '';
+
+    return head
+         + ttRowsHtml(p.ride, 'on')
+         + ttRowsHtml(p.after, 'off');
+}
+
+function secToHm(sec) {
+    const h = Math.floor(sec / 3600) % 24, m = Math.floor(sec / 60) % 60;
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+/**
+ * @param {string[]} [tripIds] le corse delle tratte, nello stesso ordine delle
+ *        parti dell'etichetta. Quando c'e', ogni parte si porta dietro il
+ *        segnaposto del mezzo, che updateLiveDots() riempie insieme a tutti gli
+ *        altri .tl-vehicle — nessun impianto nuovo, la stessa mappa per corsa.
+ *        Omesso (i chiamanti di prima), l'etichetta esce identica a come usciva.
+ */
+function fmtRouteLabel(instruction, circleStyle, tripIds, vehicleIds) {
     if (!instruction) return t('lbl_bus');
     // Transfer labels contain " + " separating each leg label — stack vertically
     if (instruction.includes(' + ')) {
         return instruction.split(' + ')
-            .map(part => `<div style="line-height:1.6">${fmtRouteLabel(part.trim(), circleStyle)}</div>`)
+            .map((part, i) => `<div class="rd-line-row">${
+                fmtRouteLabel(part.trim(), circleStyle,
+                              tripIds ? [tripIds[i]] : undefined,
+                              vehicleIds ? [vehicleIds[i]] : undefined)
+            }</div>`)
             .join('');
     }
     const sep = instruction.indexOf(' → ');
@@ -3059,11 +3578,29 @@ function fmtRouteLabel(instruction, circleStyle) {
     // can therefore tell two lines sharing a number apart.
     const bg  = routeColor(rawNum);
     const cs  = circleStyle || `background:${bg};color:${routeTextColor(rawNum, bg)}`;
-    return `<span class="rnum-bus" style="${cs}">${num}</span> → ${dest}`;
+    // Il segnaposto del mezzo nasce nascosto e resta tale finche' non c'e' un
+    // autobus che trasmette su quella corsa: quale sara' non si sa prima che
+    // parta, e un trattino al suo posto prometterebbe un dato che arrivera'.
+    const trip = tripIds && tripIds[0];
+    const veh  = vehicleIds && vehicleIds[0];
+    const vehicle = trip
+        ? ` <span class="tl-vehicle rd-vehicle" data-trip="${escAttr(trip)}"${veh ? '' : ' hidden'}>${escHtml(veh || '')}</span>`
+        : '';
+    // La destinazione in un elemento suo: e' l'unica parte che puo' cedere
+    // spazio quando la riga non ci sta, e .rd-line-row la tronca invece di
+    // mandare a capo numero, nome e targa su righe diverse. Dove quella classe
+    // non c'e' — pastiglia della scaletta, card del risultato — lo span non
+    // cambia niente.
+    return `<span class="rnum-bus" style="${cs}">${num}</span> → `
+         + `<span class="rd-dest">${dest}</span>${vehicle}`;
 }
 
 // ── Build Google Maps-style vertical timeline ──────────────────────
 function buildTimeline(legs, totalMin, greenIdx, opt) {
+    // I due chiamanti inseriscono il risultato subito dopo, in modo sincrono:
+    // rimandare al giro successivo dell'event loop basta a trovare la scaletta
+    // gia' nel DOM, e non obbliga a toccarli entrambi.
+    setTimeout(hydrateLegBefores, 0);
     const C = { WALK:'#6366f1', WAIT:'#f59e0b', BUS:'#10b981', TRANSFER:'#ef4444',
                 BIKE:'#3b82f6', SCOOTER:'#7c3aed' };
     let html = '';
@@ -3205,6 +3742,24 @@ function buildTimeline(legs, totalMin, greenIdx, opt) {
             const alightMs = _runMs;
 
             html += `
+            <!-- Le fermate che il bus fa PRIMA della tua salita. Stanno qui, sopra
+                 la riga della tua fermata, perche' e' li' che il bus ci passa: nel
+                 pannello sotto l'ordine sullo schermo contraddiceva l'ordine dei
+                 fatti. Nasce nascosta e la riempie hydrateLegBefores(), che e'
+                 l'unico modo per sapere quante sono: il piano di viaggio conosce
+                 solo le fermate della TUA tratta. -->
+            <div class="tl-row tl-row-before" style="display:none"
+                 data-route="${escAttr(leg.route_id || '')}" data-trip="${escAttr(leg.trip_id || '')}"
+                 data-board="${escAttr(boardStop)}" data-alight="${escAttr(alightStop)}">
+              <div class="tl-left">
+                <div class="tl-dot tl-dot-faint" style="border-color:${col}"></div>
+                <div class="tl-line" style="background:${col}55"></div>
+              </div>
+              <div class="tl-body">
+                <button class="tl-before-btn" data-label="" onclick="omToggleBefore(this)">▾</button>
+                <div class="tl-before-list"></div>
+              </div>
+            </div>
             <div class="tl-row">
               <div class="tl-left">
                 <div class="tl-dot tl-dot-board" style="background:${col};border-color:${col}"></div>
@@ -3212,19 +3767,37 @@ function buildTimeline(legs, totalMin, greenIdx, opt) {
               </div>
               <div class="tl-body">
                 ${_stopRow(boardStop, boardMs)}
+                <!-- Il pallino di tracciamento sta DENTRO la pastiglia.
+                     Fuori faceva da rientro: spingeva la pastiglia di quindici
+                     pixel a destra e la disallineava da tutto cio' che le sta
+                     sotto — il pulsante delle fermate, la riga del cambio —
+                     che partono dal bordo del corpo. Dentro, la colonna torna
+                     dritta e il pallino sta accanto alla cosa di cui parla,
+                     che e' la corsa, non la fermata. -->
                 <div class="tl-meta">
-                  <span class="tl-badge" style="background:${col}18;color:${col}">🚌 ${fmtRouteLabel(leg.instruction, `background:${col};color:${contrastingText(col)}`)} · ${leg.duration_minutes || 0} min</span>
+                  <span class="tl-badge" style="background:${col}18;color:${col}">${leg.trip_id ? `<span class="tl-live-dot" data-trip="${escAttr(leg.trip_id)}" data-live="0" title="${escHtml(t('live_not_tracked'))}"></span>` : ''}🚌 ${fmtRouteLabel(leg.instruction, `background:${col};color:${contrastingText(col)}`)} · ${leg.duration_minutes || 0} min</span>
+                  <!-- Quale mezzo, non quale linea: il numero della linea sta
+                       gia' nella pastiglia qui sopra. Questo e' l'autobus che
+                       si ferma davanti a te, e serve a riconoscerlo quando ne
+                       arrivano due della stessa linea a un minuto di distanza.
+                       Si riempie da solo, come l'affollamento. -->
+                  ${leg.trip_id ? `<span class="tl-vehicle" data-trip="${escAttr(leg.trip_id)}"${leg.vehicle_id ? '' : ' hidden'}>${escHtml(leg.vehicle_id || '')}</span>` : ''}
+                  ${leg.trip_id ? `<span class="tl-crowd" data-trip="${escAttr(leg.trip_id)}" hidden></span>` : ''}
                   ${leg.distance_metres ? `<span class="tl-sub">${fmtD(leg.distance_metres)}</span>` : ''}
                 </div>
                 ${intermediates.length > 0 ? `
-                <button class="tl-expand-btn" onclick="
-                  var el=document.getElementById('${stopListId}');
-                  var btn=this;
-                  var open=el.style.display==='block';
-                  el.style.display=open?'none':'block';
-                  btn.textContent=open?'▾ ${intermediates.length} '+window.t(${intermediates.length}===1?'lbl_stop':'lbl_stops'):window.t('stops_hide');
-                ">▾ ${intermediates.length} ${intermediates.length === 1 ? t('lbl_stop') : t('lbl_stops')}</button>
-                <div id="${stopListId}" class="tl-stop-list" style="display:none">
+                <button class="tl-expand-btn"
+                        title="${escHtml(t('tt_this_run'))}"
+                        data-label-closed="▾ ${intermediates.length} ${intermediates.length === 1 ? t('lbl_stop') : t('lbl_stops')}"
+                        onclick="toggleLegStops(this,'${stopListId}')">▾ ${intermediates.length} ${intermediates.length === 1 ? t('lbl_stop') : t('lbl_stops')}</button>
+                <!-- I nomi delle fermate viaggiano su data-* e non dentro un
+                     onclick: escAttr() non protegge l'apostrofo, e "Capo d'Acqua"
+                     chiudeva la stringa JS rendendo la pastiglia inerte. In un
+                     attributo HTML delimitato da virgolette l'apostrofo è legittimo. -->
+                <div id="${stopListId}" class="tl-stop-list" style="display:none"
+                     data-route="${escAttr(leg.route_id || '')}" data-trip="${escAttr(leg.trip_id || '')}"
+                     data-board="${escAttr(boardStop)}" data-alight="${escAttr(alightStop)}"
+                     data-loaded="0">
                   ${stopListHtml}
                 </div>` : ''}
               </div>
@@ -3442,6 +4015,23 @@ async function startJourney() {
                     const line = L.polyline(coords, { color: legColor, weight: 5, opacity: 0.9 }).addTo(map);
                     window._busRouteLines.push(line);
 
+                    // Da dove arriva il bus resta disegnato anche a viaggio
+                    // avviato: e' il tratto che sta percorrendo adesso mentre
+                    // lo aspetti, quindi e' proprio ora che vuol dire qualcosa.
+                    // I layer vanno fra quelli del viaggio, non fra quelli
+                    // dell'anteprima — che il passo 4 ha appena buttato via.
+                    drawLegApproach(leg, legColor, '_busRouteLines')
+                        .catch(e => console.warn('Approach path not drawn:', e));
+
+                    // Stessa regola dell'anteprima: i nomi si attaccano ai
+                    // pallini solo se gli indici combaciano davvero. Senza
+                    // bus_stop_coords i punti sono la geometria stradale —
+                    // decine di vertici contro una manciata di fermate — e ogni
+                    // etichetta finirebbe su un punto a caso della strada.
+                    const stopNames = (leg.bus_stop_coords && Array.isArray(leg.stop_names)
+                                       && leg.stop_names.length === leg.bus_stop_coords.length)
+                        ? leg.stop_names : null;
+
                     stopDots.forEach((c, i) => {
                         const isFirst = i === 0;
                         const isLast  = i === stopDots.length - 1;
@@ -3450,6 +4040,21 @@ async function startJourney() {
                             radius: isFirst || isLast ? 7 : 5,
                             color: legColor, fillColor: dotColor, fillOpacity: 1, weight: 2
                         }).addTo(map);
+
+                        // I NOMI SERVONO PIU' QUI CHE NELL'ANTEPRIMA. Avviando
+                        // il percorso le fermate della rete vengono nascoste
+                        // (passo 3), quindi questi pallini restano gli unici
+                        // cliccabili: senza etichetta, proprio mentre si e' in
+                        // viaggio — il momento in cui serve sapere a che
+                        // fermata si e' arrivati — la mappa smetteva di
+                        // rispondere alla domanda.
+                        if (stopNames && stopNames[i]) {
+                            const role = isFirst ? t('lbl_start')
+                                      : isLast  ? t('lbl_destination')
+                                      : '';
+                            dot.bindPopup(`<b>${escHtml(stopNames[i])}</b>`
+                                + (role ? `<br><span style="font-size:11px;color:#64748b">${escHtml(role)}</span>` : ''));
+                        }
                         window._busRouteLines.push(dot);
                     });
                 } else if (leg.mode === 'WALK' && leg.stop_coords && leg.stop_coords.length >= 2) {
@@ -3542,6 +4147,7 @@ async function startJourney() {
                 .filter(l => l.mode === 'BUS' && l.route_id)
                 .map((l, idx) => ({
                     routeId: l.route_id,
+                    tripId:  l.trip_id,
                     color: legLineColor(l),
                     boardingCoords: l.stop_coords ? l.stop_coords[0] : null
                 }));
@@ -3579,7 +4185,47 @@ async function startJourney() {
 
 // ── Live bus markers ──────────────────────────────────────────────
 
-function makeBusMarkerHtml(color) {
+/**
+ * Lo stesso colore, annacquato verso il bianco.
+ *
+ * Serve alla parte VUOTA del disco: sbiadire verso il bianco — il fondo di
+ * questa mappa — invece che verso il grigio tiene la tinta della linea
+ * riconoscibile anche dove il mezzo non e' pieno. Un grigio direbbe soltanto
+ * "manca qualcosa".
+ */
+function washHex(hex, k) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    const up = c => Math.round(c + (255 - c) * k);
+    const r = up((n >> 16) & 255), g = up((n >> 8) & 255), b = up(n & 255);
+    return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Il pallino del mezzo, riempito dal basso in proporzione a chi c'e' a bordo.
+ *
+ * DUE INFORMAZIONI IN UN SEGNO SOLO: la tinta dice quale linea, l'altezza del
+ * riempimento dice quanto e' carico. E' lo stesso criterio della bolla in
+ * CassiTrack, cosi' un mezzo mezzo pieno si legge uguale nelle due
+ * applicazioni.
+ *
+ * OCCUPAZIONE IGNOTA -> DISCO PIENO, come si e' sempre visto. Un pallino vuoto
+ * non e' una reticenza, e' un'affermazione: direbbe "non c'e' nessuno", che
+ * non e' cio' che sappiamo. Preferiamo non dire niente.
+ *
+ * Il glifo resta bianco e prende un contorno scuro appena percettibile: senza,
+ * su un mezzo quasi vuoto verrebbe a trovarsi su una tinta chiarissima e
+ * sparirebbe.
+ */
+function makeBusMarkerHtml(color, occupancyPct) {
+    const p = (typeof occupancyPct === 'number' && isFinite(occupancyPct))
+        ? Math.max(0, Math.min(100, Math.round(occupancyPct)))
+        : null;
+    // to top: il riempimento sale da sotto, come il livello in un recipiente.
+    const disc = p === null
+        ? color
+        : `linear-gradient(to top, ${color} 0 ${p}%, ${washHex(color, 0.82)} ${p}% 100%)`;
     return `
     <div style="position:relative;width:30px;height:30px">
       <div style="
@@ -3591,11 +4237,12 @@ function makeBusMarkerHtml(color) {
       <div style="
         position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
         width:24px;height:24px;border-radius:50%;
-        background:${color};border:2px solid white;
+        background:${disc};border:2px solid white;
         box-shadow:0 2px 6px rgba(0,0,0,0.3);
         display:flex;align-items:center;justify-content:center;cursor:pointer;
       ">
-        <svg width="14" height="14" viewBox="0 0 32 32" fill="white" xmlns="http://www.w3.org/2000/svg">
+        <svg width="14" height="14" viewBox="0 0 32 32" fill="white" xmlns="http://www.w3.org/2000/svg"
+             style="filter:drop-shadow(0 0 1px rgba(15,23,42,.55))">
           <!-- roof / destination sign -->
           <rect x="6" y="2" width="20" height="5" rx="2" fill="white"/>
           <!-- body -->
@@ -3617,6 +4264,319 @@ function makeBusMarkerHtml(color) {
     </div>`;
 }
 
+/** Geometrie chieste una per linea e tenute da parte. */
+const _shapeCache = {};
+
+/**
+ * La geometria stradale di una linea, come vettore di [lat, lon, isStop].
+ *
+ * NETWORK_ROUTES la porta gia' per quasi tutte — la mappa di rete la carica una
+ * volta sola — ma non per le linee di ritorno: /routes/shapes le salta di
+ * proposito, perche' disegnerebbero una seconda linea identica sopra l'andata.
+ * Per quelle si chiede la singola linea, che invece legge la tabella.
+ */
+async function routeShapePoints(routeId) {
+    if (!routeId) return null;
+
+    const cached = (NETWORK_ROUTES || []).find(r => r.route_id === routeId);
+    if (cached && Array.isArray(cached.points) && cached.points.length > 1) return cached.points;
+
+    if (_shapeCache[routeId] !== undefined) return _shapeCache[routeId];
+    try {
+        const r = await apiFetch('/journeys/routes/' + encodeURIComponent(routeId) + '/shape');
+        if (r.ok) {
+            _shapeCache[routeId] = await r.json();
+            return _shapeCache[routeId];
+        }
+        // NON si memorizza un fallimento.
+        //
+        // Un 404 e' una risposta stabile — quella linea non ha geometria — ma un
+        // 401 durante il rinnovo del token, un 429 del limitatore o una rete che
+        // sfarfalla sono episodi. Memorizzandoli, UN solo errore spegneva il
+        // tratteggio di quella linea per TUTTA la sessione, e nessuna ricarica
+        // della pagina a parte lo rimetteva a posto: e' questo il motivo per cui
+        // il difetto sembrava capitare "ogni tanto" senza una regola.
+        //
+        // Anche il 404 si riprova: costa una richiesta ogni tanto, e il caso in
+        // cui la geometria viene importata mentre la pagina e' aperta smette di
+        // richiedere un ricaricamento.
+        console.debug('[SHAPE] non disponibile per', routeId, '— HTTP', r.status);
+        return null;
+    } catch (e) {
+        console.warn('Could not load shape for', routeId, e);
+        return null;
+    }
+}
+
+/**
+ * La geometria da usare per una tratta, ritorni compresi.
+ *
+ * IL RIPIEGO SULLA LINEA BASE E' IL PUNTO. Dalla V26 un ritorno vive su una
+ * route propria col suffisso _R, ma la sua geometria non e' un dato nuovo: e'
+ * la stessa strada dell'andata, percorsa al contrario. In OmniMove le forme
+ * arrivano dall'import NeTEx indicizzate per id di linea, quindi per LINEA_02_R
+ * spesso non c'e' nessuna riga e l'endpoint risponde 404 — mentre per LINEA_02
+ * la geometria c'e' ed e' esattamente quella giusta. Il verso lo sistema chi
+ * chiama, che sa dove cadono salita e discesa.
+ */
+async function legShapePoints(leg) {
+    let pts = await routeShapePoints(leg && leg.route_id);
+    if (Array.isArray(pts) && pts.length > 1) return pts;
+
+    const base = String((leg && leg.route_id) || '').replace(/_R$/, '');
+    if (base && base !== leg.route_id) {
+        pts = await routeShapePoints(base);
+        if (Array.isArray(pts) && pts.length > 1) return pts;
+    }
+    return null;
+}
+
+/** Indice del vertice piu' vicino a un punto, o -1. Distanze al quadrato: si
+ *  confrontano fra loro e la radice non cambierebbe l'ordine. */
+function _nearestVertex(points, target) {
+    if (!Array.isArray(points) || !target) return -1;
+    let idx = -1, best = Infinity;
+    points.forEach((p, i) => {
+        const d = (p[0] - target[0]) * (p[0] - target[0])
+                + (p[1] - target[1]) * (p[1] - target[1]);
+        if (d < best) { best = d; idx = i; }
+    });
+    return idx;
+}
+
+/**
+ * Le fermate che il bus ha gia' fatto prima di arrivare alla tua, in ordine di
+ * marcia, con l'orario di passaggio.
+ *
+ * Le chiede all'ORARIO della corsa e non alla geometria della linea: l'orario
+ * e' l'unica fonte che conosce il verso: la stessa forma serve andata e
+ * ritorno, e da li' non si ricava in che direzione la si stia percorrendo.
+ *
+ * Le corse di ritorno vivono su una route propria dalla V26 (suffisso _R), ma
+ * l'orario le pubblica insieme all'andata: si chiede la linea base. La risposta
+ * finisce nella stessa cache che usa la tendina delle fermate, quindi aprire
+ * l'una non fa ripagare la richiesta all'altra.
+ */
+async function legBeforeStops(leg) {
+    const base = String((leg && leg.route_id) || '').replace(/_R$/, '');
+    if (!leg || !leg.trip_id || !base) return [];
+    try {
+        if (!_legTtCache[base]) {
+            const r = await apiFetch('/journeys/timetable/routes/' + encodeURIComponent(base));
+            // Come per la geometria: un fallimento non si memorizza. Prima
+            // bastava un errore momentaneo perche' quella linea restasse senza
+            // orario — e quindi senza fermate precedenti — fino al
+            // ricaricamento della pagina.
+            if (!r.ok) {
+                console.debug('[TIMETABLE] non disponibile per', base, '— HTTP', r.status);
+                return [];
+            }
+            _legTtCache[base] = await r.json();
+        }
+        if (!_legTtCache[base]) return [];
+
+        // GLI STESSI RIPIEGHI DEL PANNELLO. buildTimeline calcola le due fermate
+        // cosi': `names[0] || leg.from`, con names = leg.stop_names || [].
+        // Qui invece si passava solo stop_names, e quando il pianificatore non
+        // riesce a ritagliare la tratta quell'array manca: il pannello ripiegava
+        // su leg.from e trovava le fermate precedenti, questa funzione passava
+        // undefined e legTimetableParts non trovava la salita — bi = -1, che
+        // diventa 0, e before restava VUOTO.
+        //
+        // Da qui il sintomo: "6 fermate precedenti" scritte nel pannello e
+        // nessun tratteggio sulla mappa, sulla stessa tratta. Due percorsi che
+        // leggono lo stesso dato con ripieghi diversi finiscono per raccontare
+        // due cose diverse — ed e' la seconda volta che succede in questa
+        // funzione.
+        const names  = leg.stop_names || [];
+        const board  = names[0] || leg.from || '';
+        const alight = names[names.length - 1] || leg.to || '';
+
+        const parts = legTimetableParts(_legTtCache[base], leg.trip_id, board, alight);
+        return (parts && parts.before) || [];
+    } catch (e) {
+        console.warn('Could not read the earlier stops:', e);
+        return [];
+    }
+}
+
+/**
+ * La fermata con questo nome, presa dal registro gia' in memoria.
+ *
+ * Il nome non e' una chiave: due pensiline sui due lati della stessa strada
+ * portano lo stesso nome e sono due righe distinte. Fra omonime si sceglie la
+ * piu' vicina a un punto di riferimento — la fermata di salita — che sul tratto
+ * di avvicinamento e' quella giusta praticamente sempre, e comunque sbaglia al
+ * massimo di una carreggiata.
+ *
+ * NON CHIAMARLA stopNamed: piu' in basso esiste gia' una funzione con quel
+ * nome che risponde a un'altra domanda — se un'etichetta corrisponda a una
+ * fermata ancora servita — e restituisce un BOOLEANO. In JavaScript vince
+ * l'ultima dichiarazione, quindi l'omonimia non da' nessun errore: le chiamate
+ * finiscono in silenzio sull'altra funzione, e qui il booleano true diventava
+ * una fermata con lat e lon indefinite.
+ */
+function stopByName(name, near) {
+    if (!name) return null;
+    let best = null, bestDist = Infinity;
+    for (const id in STOPS) {
+        const s = STOPS[id];
+        if (!s || s.name !== name || s.lat == null || s.lon == null) continue;
+        const d = near
+            ? (s.lat - near[0]) * (s.lat - near[0]) + (s.lon - near[1]) * (s.lon - near[1])
+            : 0;
+        if (d < bestDist) { bestDist = d; best = s; }
+    }
+    return best;
+}
+
+/**
+ * Disegna il tratto che il bus percorre PRIMA di arrivare alla tua fermata:
+ * stesso colore, tratteggiato e smorzato.
+ *
+ * DOVE FINISCONO I LAYER lo decide chi chiama, con il nome della raccolta:
+ * l'anteprima li mette fra i propri, che spariscono appena si cambia percorso;
+ * il viaggio avviato fra i suoi, che durano quanto il viaggio. Prima erano
+ * cablati sull'anteprima, e avviare il percorso faceva sparire il tratteggio
+ * insieme a tutto il resto dell'anteprima — anche se il bus, da dove arriva,
+ * continua ad arrivarci.
+ */
+async function drawLegApproach(leg, legColor, sinkName = '_previewLayers') {
+    // Perche' il tratteggio non e' comparso. Questa funzione ha cinque uscite
+    // anticipate, tutte legittime — si sale al capolinea, la corsa non ha
+    // orario, il percorso e' cambiato nel frattempo — e dall'esterno sono
+    // indistinguibili: si vede solo una mappa senza tratteggio. Ognuna dice
+    // quale, cosi' la prossima volta la domanda si risolve leggendo la console
+    // invece che per tentativi.
+    const bail = (why, extra) => {
+        console.debug('[APPROACH] non disegnato:', why,
+                      { route: leg && leg.route_id, trip: leg && leg.trip_id,
+                        sink: sinkName, ...(extra || {}) });
+    };
+
+    if (!leg || !leg.route_id || !Array.isArray(leg.stop_coords) || !leg.stop_coords.length)
+        return bail('tratta senza route_id o senza stop_coords');
+
+    // Riferimento a QUESTA raccolta: piu' avanti si ricontrolla che sia ancora
+    // quella corrente, perche' fra un await e l'altro puo' essere stata
+    // sostituita da un altro percorso.
+    const sink = window[sinkName];
+    if (!Array.isArray(sink)) return bail('la raccolta di layer non esiste');
+
+    const board  = leg.stop_coords[0];
+    const alight = leg.stop_coords[leg.stop_coords.length - 1];
+
+    // LA LINEA NON DIPENDE DALLE FERMATE, ed e' l'errore che teneva la mappa
+    // vuota: qui sopra si risolvevano prima i nomi delle fermate precedenti in
+    // coordinate e, se anche UNA sola non si trovava nel registro, si usciva —
+    // portandosi via anche il tratteggio, che di quelle coordinate non ha
+    // bisogno. Bastava un nome scritto diverso fra orario e registro ("V.le
+    // Europa", "Staz. FF.SS.") perche' non si disegnasse piu' niente.
+    //
+    // Ora le due cose sono separate: prima il tracciato, che serve alla
+    // geometria e basta; poi i pallini, che sono un di piu'.
+
+    // ── Per che strada ci arriva ───────────────────────────────
+    //
+    // Dalla GEOMETRIA della linea, la stessa che CassiTrack disegna. Congiungere
+    // le fermate in retta, come faceva la versione precedente, taglia per i
+    // campi: fra due fermate di periferia sono chilometri di differenza, e il
+    // tratteggio smetteva di somigliare a una strada.
+    //
+    // IL VERSO NON SI DEDUCE DALL'ORDINE DEI VERTICI. La geometria di una linea
+    // di ritorno e' quella dell'andata, con gli stessi vertici nello stesso
+    // ordine: tagliare sempre "da 0 fino alla salita" da' il pezzo che il bus
+    // deve ANCORA fare. Lo si ricava invece dalla tratta stessa — dove cadono
+    // salita e discesa lungo i vertici — che il verso lo sa per definizione.
+    let coords = null;
+    const shape = await legShapePoints(leg);
+    if (!shape) {
+        bail('nessuna geometria per la linea (si prova il ripiego sulle fermate)');
+    } else {
+        const iBoard  = _nearestVertex(shape, board);
+        const iAlight = _nearestVertex(shape, alight);
+        if (iBoard >= 0 && iAlight >= 0 && iBoard !== iAlight) {
+            const run = (iAlight > iBoard)
+                ? shape.slice(0, iBoard + 1)      // vertici nel verso di marcia
+                : shape.slice(iBoard).reverse();  // vertici al contrario
+            if (run.length > 1) coords = run.map(p => [p[0], p[1]]);
+            else bail('salita sul primo vertice della geometria: prima non c e niente',
+                      { iBoard, iAlight, vertici: shape.length });
+        } else {
+            bail('salita e discesa cadono sullo stesso vertice',
+                 { iBoard, iAlight, vertici: shape.length });
+        }
+    }
+
+    // ── Le fermate gia' fatte ──────────────────────────────────
+    //
+    // Nomi e orari dall'ORARIO della corsa, coordinate dal registro fermate.
+    // Ogni pallino porta con se' il proprio nome invece di appoggiarsi a due
+    // elenchi paralleli: una fermata che non si risolve toglie un pallino e
+    // basta, non sfasa le etichette di tutte le altre. Era quel rischio di
+    // sfasamento a giustificare il "tutto o niente" di prima, e senza elenchi
+    // paralleli il rischio non c'e'.
+    //
+    // Se falliscono, si perdono i pallini. Il tratteggio resta.
+    const dots = [];
+    try {
+        const before = await legBeforeStops(leg);
+        before.forEach(b => {
+            const s = stopByName(b.name, board);
+            // Si controllano i NUMERI, non solo che l'oggetto ci sia: una
+            // coordinata indefinita non ferma niente qui, arriva fino a Leaflet
+            // e manda in eccezione il disegno di tutta l'anteprima.
+            if (s && Number.isFinite(s.lat) && Number.isFinite(s.lon)) {
+                dots.push({ lat: s.lat, lon: s.lon, name: b.name, hm: b.hm });
+            }
+        });
+    } catch (e) {
+        console.warn('Earlier stops not resolved:', e);
+    }
+
+    // Nessuna geometria: si ripiega sulle fermate in retta. Approssimato, ma
+    // presente — ed e' comunque meglio di un tratto che non compare.
+    if (!coords && dots.length) {
+        coords = dots.map(d => [d.lat, d.lon]).concat([[board[0], board[1]]]);
+    }
+    // Meno di due punti non e' una linea: o sali al capolinea, o non sappiamo
+    // abbastanza per dire da dove arriva.
+    if (!coords || coords.length < 2)
+        return bail('nessun tracciato ricavabile', { fermatePrecedenti: dots.length });
+
+    // Nel frattempo l'utente puo' aver chiuso o cambiato percorso: quel disegno
+    // non appartiene piu' a nessuna mappa.
+    if (window[sinkName] !== sink)
+        return bail('la raccolta di layer e stata sostituita durante l attesa');
+
+    console.debug('[APPROACH] disegnato', { route: leg.route_id, punti: coords.length,
+                                            fermate: dots.length, sink: sinkName });
+
+    // Tratteggio piu' marcato di prima: a 0.32 di opacita' su una mappa chiara
+    // spariva. Resta comunque sotto la tratta che percorri (0.85, linea piena),
+    // quindi la gerarchia si legge lo stesso.
+    const line = L.polyline(coords, {
+        color: legColor, weight: 4, opacity: 0.6,
+        dashArray: '8,8', lineCap: 'round'
+    }).addTo(map).bindTooltip(t('approach_hint'), { sticky: true });
+    if (line.bringToBack) line.bringToBack();   // contesto, non parte del viaggio
+    sink.push(line);
+
+    dots.forEach(d => {
+        // Piu' piccoli e piu' tenui dei pallini del tuo tragitto: stesso
+        // vocabolario visivo, gerarchia diversa.
+        const dot = L.circleMarker([d.lat, d.lon], {
+            radius: 4, color: legColor, fillColor: '#ffffff',
+            fillOpacity: 1, weight: 2, opacity: 0.7
+        }).addTo(map);
+        dot.bindPopup(`<b>${escHtml(d.name)}</b>`
+            + `<br><span style="font-size:11px;color:#64748b">${escHtml(d.hm)}`
+            + ` · ${escHtml(t('approach_hint'))}</span>`);
+        if (dot.bringToBack) dot.bringToBack();
+        sink.push(dot);
+    });
+}
+
 function clearBusMarkers() {
     (window._busMarkers || []).forEach(m => map.removeLayer(m));
     window._busMarkers = [];
@@ -3629,29 +4589,106 @@ function _latLonDist(lat1, lon1, lat2, lon2) {
     return Math.sqrt(d);
 }
 
+/**
+ * Accende il pallino delle tratte per cui un mezzo sta trasmettendo ADESSO.
+ *
+ * Sta insieme al disegno dei marker e non a parte perche' e' la stessa domanda
+ * — esiste un veicolo su questa corsa? — e due risposte diverse sulla stessa
+ * schermata sarebbero peggio di nessuna risposta.
+ */
+function updateLiveDots(vehicles) {
+    // L'ultimo elenco noto, per chi disegna FUORI dal giro di sondaggio.
+    // L'intestazione della scheda nasce quando si sceglie un percorso, che non
+    // e' un momento del sondaggio: senza questa copia i suoi segnaposto
+    // resterebbero vuoti fino al giro successivo, che puo' essere fra decine di
+    // secondi — e nel frattempo la stessa corsa mostrerebbe il mezzo sulla
+    // tratta e non nell'intestazione.
+    if (Array.isArray(vehicles)) window._liveVehicles = vehicles;
+
+    const byTrip = new Map();
+    (vehicles || []).forEach(v => {
+        if (v.trip_id && v.lat != null && v.lon != null) byTrip.set(v.trip_id, v);
+    });
+
+    document.querySelectorAll('.tl-live-dot').forEach(dot => {
+        const on = byTrip.has(dot.dataset.trip);
+        dot.dataset.live = on ? '1' : '0';
+        dot.title = t(on ? 'live_tracked' : 'live_not_tracked');
+    });
+
+    // L'affollamento si aggiorna qui e non al disegno dell'itinerario perche'
+    // e' la stessa notizia del pallino: quanta gente c'e' a bordo lo si sa solo
+    // se un mezzo su quella corsa sta trasmettendo adesso. Le due cose nascono
+    // e muoiono insieme, e tenerle in due punti diversi le farebbe divergere.
+    //
+    // Corsa non ancora tracciata -> la pastiglia sparisce invece di mostrare un
+    // trattino: sull'itinerario di un viaggio futuro non e' un'informazione
+    // mancante, e' una domanda che non ha ancora senso.
+    // QUALE mezzo, non quale linea. Due corse della stessa linea a un minuto di
+    // distanza sono due autobus diversi, e alla fermata la domanda e' "e' questo
+    // il mio?". Compare solo quando un mezzo sta davvero trasmettendo su quella
+    // corsa: prima di allora quale sara' non lo sa nessuno, nemmeno l'azienda.
+    // Il mezzo arriva gia' con la tratta, letto dall'orario: qui si corregge
+    // solo se ne sta trasmettendo uno DIVERSO — una sostituzione del giorno.
+    // Assente dal flusso dal vivo non significa niente: la corsa puo' partire
+    // fra un'ora. Cancellare la targa in quel caso, come faceva la versione
+    // precedente, toglieva un dato buono per mancanza di un altro.
+    document.querySelectorAll('.tl-vehicle').forEach(tag => {
+        const v = byTrip.get(tag.dataset.trip);
+        if (!v || !v.vehicle_id) return;               // si tiene quella di tabella
+        tag.hidden = false;
+        tag.textContent = v.vehicle_id;
+        tag.title = t('vehicle_hint');
+    });
+
+    document.querySelectorAll('.tl-crowd').forEach(chip => {
+        const v   = byTrip.get(chip.dataset.trip);
+        const lvl = v && v.crowding_level;
+        if (!lvl || !CROWDING_BG[lvl]) { chip.hidden = true; chip.textContent = ''; return; }
+        chip.hidden = false;
+        chip.setAttribute('style', CROWDING_BG[lvl]);
+        chip.textContent = getCrowdingLabel(lvl);
+    });
+}
+
 function renderBusMarkers(vehicles) {
+    updateLiveDots(vehicles);
     clearBusMarkers();
     const legs = window._activeBusLegs || [];
 
-    if (legs.length === 0) {
-        // No leg context — fall back to showing all vehicles (black)
-        vehicles.forEach(v => {
-            if (v.lat == null || v.lon == null) return;
-            const icon = L.divIcon({ html: makeBusMarkerHtml('#0f172a'), className: '', iconSize: [32,32], iconAnchor: [16,16] });
-            window._busMarkers.push(L.marker([v.lat, v.lon], { icon }).addTo(map));
-        });
-        return;
-    }
+    // Senza contesto di tratta non si disegna nulla. Prima si ripiegava su
+    // TUTTI i veicoli in nero: su una mappa che mostra UN percorso, quei mezzi
+    // non c'entrano niente con il viaggio, e si leggono come se c'entrassero.
+    // Da quando il marker segue la corsa, il ripiego contraddice il resto.
+    if (legs.length === 0) return;
 
-    // One marker per leg: pick the vehicle on that route closest to the boarding stop
+    // Un marker per tratta, ma solo se e' DAVVERO il mezzo di quella corsa.
+    //
+    // Prima il filtro era su route_id: prendeva un veicolo qualsiasi della linea
+    // — il piu' vicino alla fermata di salita — e lo disegnava dove si trovava.
+    // Nessun controllo che stesse facendo la tua corsa o che fosse sul tratto
+    // che percorrerai, per cui compariva regolarmente fuori dalla linea
+    // disegnata: quella e' solo la FETTA fra salita e discesa, mentre la linea
+    // prosegue oltre entrambi i capi.
+    //
+    // Il caso peggiore era la partenza fra qualche minuto: il mezzo che
+    // prenderai alle 19:00 alle 18:46 sta finendo un'altra corsa, da tutt'altra
+    // parte, e veniva mostrato come se fosse il tuo.
+    let shown = 0;
     legs.forEach(leg => {
-        const candidates = vehicles.filter(v => v.route_id === leg.routeId && v.lat != null && v.lon != null);
-        if (candidates.length === 0) return;
+        const onTrip = leg.tripId
+            ? vehicles.filter(v => v.trip_id === leg.tripId && v.lat != null && v.lon != null)
+            : [];
 
-        let best = candidates[0];
-        if (candidates.length > 1 && leg.boardingCoords) {
+        // Nessun mezzo su quella corsa: non se ne mostra nessuno. Il ripiego
+        // sulla linea sarebbe di nuovo il veicolo sbagliato, e un veicolo
+        // sbagliato disegnato con sicurezza e' peggio di uno assente.
+        if (onTrip.length === 0) return;
+
+        let best = onTrip[0];
+        if (onTrip.length > 1 && leg.boardingCoords) {
             const [bLat, bLon] = leg.boardingCoords;
-            best = candidates.reduce((b, v) =>
+            best = onTrip.reduce((b, v) =>
                 _latLonDist(v.lat, v.lon, bLat, bLon) < _latLonDist(b.lat, b.lon, bLat, bLon) ? v : b
             );
         }
@@ -3659,20 +4696,50 @@ function renderBusMarkers(vehicles) {
         const delayTxt = best.delay_minutes == null
             ? t('delay_unknown')
             : best.delay_minutes <= 0 ? t('on_time') : tf('delay_late', { m: best.delay_minutes });
+
+        // L'affollamento in parole, non in percentuale: "molto affollato" dice
+        // subito se salire, "87%" chiede un calcolo. La percentuale segue fra
+        // parentesi per chi la vuole, e solo quando c'e' davvero.
+        //
+        // Riga assente quando il dato manca, invece di un trattino: qui non si
+        // sta compilando una scheda tecnica: una riga in meno passa inosservata,
+        // un trattino invece si legge come "vuoto".
+        const crowdTxt = best.crowding_level ? getCrowdingLabel(best.crowding_level) : null;
+        // Solo l'etichetta. La percentuale la dice gia' il riempimento
+        // dell'icona, e ripeterla in cifre chiede di leggere due volte la
+        // stessa cosa — per di piu' con una precisione che il dato non ha:
+        // i passeggeri sono una stima, il 15% e il 18% non sono distinguibili.
+        const crowdHtml = crowdTxt
+            ? `<br><span style="${CROWDING_BG[best.crowding_level] || ''};`
+              + `padding:1px 6px;border-radius:5px;font-weight:700;font-size:11px">`
+              + `${escHtml(crowdTxt)}</span>`
+            : '';
+
         const popup = `<b>🚌 ${escHtml(best.vehicle_id || '—')}</b><br>`
             + `${t('lbl_route')}: ${escHtml(best.route_name || best.route_id || '—')}<br>`
             + `${escHtml(delayTxt)}<br>`
-            + `${t('next_stop')}: ${escHtml(best.next_stop_name || '—')}`;
+            + `${t('next_stop')}: ${escHtml(best.next_stop_name || '—')}`
+            + crowdHtml;
 
         const icon = L.divIcon({
-            html: makeBusMarkerHtml(leg.color),
+            html: makeBusMarkerHtml(leg.color, best.occupancy_pct),
             className: '', iconSize: [32, 32], iconAnchor: [16, 16]
         });
         window._busMarkers.push(L.marker([best.lat, best.lon], { icon }).addTo(map).bindPopup(popup));
+        shown++;
     });
+
+    // Tratte in bus previste ma nessun mezzo tracciato su quelle corse: si dice,
+    // invece di lasciare una mappa muta che si legge come un guasto. Il caso
+    // normale e' la corsa che deve ancora partire.
+    if (shown === 0 && legs.length > 0) {
+        // La linea della PRIMA tratta: e' quella che l'utente sta aspettando,
+        // e su un percorso con cambio le altre gli servono piu' tardi.
+        showStaleNotice(t('bus_not_departed'), { routeId: legs[0].routeId });
+    }
 }
 
-function showStaleNotice(msg) {
+function showStaleNotice(msg, action) {
     document.getElementById('bus-stale-notice')?.remove(); // replace if already shown
     const el = document.createElement('div');
     el.id = 'bus-stale-notice';
@@ -3683,9 +4750,40 @@ function showStaleNotice(msg) {
         'display:flex;align-items:center;gap:8px;white-space:nowrap;pointer-events:auto'
     ].join(';');
     const text = msg || t('stale_bus_data');
-    el.innerHTML = text + ' <span onclick="this.parentElement.remove()" style="cursor:pointer;opacity:0.7;margin-left:4px">✕</span>';
+
+    // Un avviso che spiega un'assenza dovrebbe anche dire dove guardare. Quando
+    // il mezzo non e' ancora in strada l'informazione utile esiste gia' — e'
+    // l'orario della linea — e sta a due clic di distanza: tanto vale portarcelo.
+    const btn = action && action.routeId
+        ? `<button id="bus-notice-act" style="margin-left:10px;background:rgba(255,255,255,.16);
+             color:#fff;border:none;border-radius:6px;padding:4px 10px;font:inherit;
+             font-size:11px;cursor:pointer">${escHtml(action.label || t('see_timetable'))}</button>`
+        : '';
+
+    el.innerHTML = text + btn +
+        ' <span onclick="this.parentElement.remove()" style="cursor:pointer;opacity:0.7;margin-left:4px">✕</span>';
     const mapEl = document.getElementById('map');
     if (mapEl) mapEl.appendChild(el);
+
+    if (btn) {
+        el.querySelector('#bus-notice-act')
+          ?.addEventListener('click', () => openTimetableFor(action.routeId));
+    }
+}
+
+/**
+ * Porta l'utente all'orario di una linea.
+ *
+ * Il cambio di pannello passa dal click sulla voce di menu invece che da una
+ * chiamata diretta: quel gestore fa anche altro — chiude il menu su mobile e
+ * aggiorna data-pane sul body — e replicarlo qui vorrebbe dire tenere due
+ * versioni della stessa cosa. timetableOpened() e' idempotente, quindi
+ * chiamarlo di nuovo non ricarica nulla.
+ */
+async function openTimetableFor(routeId) {
+    document.querySelector('.sidebar-nav .nav-item[data-pane="timetable"]')?.click();
+    await timetableOpened();
+    if (routeId) await selectTimetableRoute(routeId);
 }
 
 function hideStaleNotice() {
@@ -3711,6 +4809,7 @@ async function fetchAndRenderBusMarkers() {
             renderBusMarkers(list);
         } else {
             console.warn('[BUS] empty list → showing stale notice');
+            updateLiveDots([]);
             clearBusMarkers();
             showStaleNotice();
         }
@@ -3721,7 +4820,72 @@ async function fetchAndRenderBusMarkers() {
     }
 }
 
-function endJourney() {
+/**
+ * @param {{arrived?: boolean}} [opts] arrived=true quando la destinazione e'
+ *        stata RAGGIUNTA, non quando il viaggio e' stato chiuso a mano.
+ */
+async function endJourney(opts) {
+    const arrived = !!(opts && opts.arrived);
+
+    // ── Si chiede PRIMA di chiudere ────────────────────────────
+    //
+    // "Sicuro di voler terminare?" dopo aver gia' terminato non e' una domanda:
+    // qualunque cosa risponda l'utente, il viaggio e' finito. Quindi si guarda
+    // com'e' messa la corsa — senza chiuderla, /journeys/running non scrive
+    // nulla — e solo se chiudere adesso costerebbe i punti si chiede conferma.
+    //
+    // Salta per l'arrivo rilevato: li' non c'e' niente da confermare, e
+    // sbarrare la strada a chi e' appena arrivato sarebbe assurdo.
+    let asked = false;
+    if (!arrived) {
+        try {
+            const q = await apiFetch('/journeys/running');
+            if (q.ok) {
+                const st = await q.json();
+                if (st.running && st.earns_points === false) {
+                    asked = true;
+                    // Annullato: non si chiude niente e il viaggio prosegue
+                    // esattamente com'era — nessun layer smontato, nessun
+                    // conto azzerato, nessuna richiesta inviata.
+                    if (!(await askEndConfirm())) return;
+                }
+            }
+        } catch (e) {
+            // Senza rete non si sa cosa costerebbe: si chiude senza domande,
+            // invece di sbarrare la strada per un dubbio nostro.
+            console.warn('Could not check the running journey:', e);
+        }
+    }
+
+    // Chiude la corsa lato server e chiede l'esito. La decisione — se il
+    // viaggio sia durato abbastanza da valere eco points — la prende il server,
+    // che ha l'ora di partenza e la durata prevista sulla riga: chiederla al
+    // browser vorrebbe dire far dichiarare l'esito a chi viene controllato.
+    //
+    // Prima di smontare la schermata: se la richiesta fallisce si smonta lo
+    // stesso, ma l'avviso deve poter comparire sopra qualcosa.
+    let earned = true;
+    try {
+        const r = await apiFetch('/journeys/complete', {
+            method: 'POST',
+            // L'arrivo e' un fatto misurato: il puntino GPS e' sulla
+            // destinazione. Chi ci arriva in anticipo sul previsto — il bus ha
+            // recuperato, si e' tagliato a piedi l'ultimo tratto — ha fatto il
+            // viaggio, e sottoporlo al conteggio dei minuti significherebbe
+            // togliere i punti proprio a chi e' andato meglio del previsto.
+            body: JSON.stringify({ arrived })
+        });
+        if (r.ok) {
+            const res = await r.json();
+            earned = res.completed !== false;
+        }
+    } catch (e) {
+        // Rete assente a fine viaggio: il viaggio e' finito comunque, e non e'
+        // il momento di mostrare un errore. La riga resta in corso e nessun
+        // avviso viene dato: nel dubbio non si accusa nessuno.
+        console.warn('Could not close the journey server-side:', e);
+    }
+
     stopDelayWatch();
     clearJourneySelection();
 
@@ -3743,8 +4907,49 @@ function endJourney() {
         + `<div style="font-size:12px;margin-top:6px">${t('search_new_route')}</div>`
         + '</div>';
 
-    if (!window.matchMedia('(max-width: 768px)').matches) showToast(t('toast_journey_ended'));
+    // Un avviso solo, e solo se non e' gia' stato detto. Chi ha appena
+    // confermato "Termina comunque" lo sa: ripeterglielo suona come un
+    // rimprovero per una scelta che gli era stata offerta.
+    if (!earned && !asked) {
+        showToast(t('toast_journey_incomplete'), true);
+    } else if (earned && !window.matchMedia('(max-width: 768px)').matches) {
+        showToast(t('toast_journey_ended'));
+    }
     loadEcoStats();
+}
+
+// ── Conferma di chiusura ────────────────────────────────────────────
+//
+// Stessa meccanica della scelta del giorno, e come quella tiene la promessa in
+// una variabile invece che in una callback: chi chiama deve FERMARSI ad
+// aspettare la risposta, e con una callback la chiusura sarebbe partita lo
+// stesso mentre la domanda era ancora sullo schermo.
+//
+// Se ne comparisse una terza, queste due andrebbero generalizzate in un unico
+// foglio con titolo, testo e pulsanti come parametri. Con due si vede il
+// motivo, con tre si vede la duplicazione.
+let _endConfirmResolve = null;
+
+/** @returns {Promise<boolean>} true = termina comunque, false = continua. */
+function askEndConfirm() {
+    const overlay = document.getElementById('endConfirmOverlay');
+    if (!overlay) return Promise.resolve(true);   // foglio assente: com'era prima
+
+    document.getElementById('ecTitle').textContent = t('end_confirm_title');
+    document.getElementById('ecSub').textContent   = t('end_confirm_sub');
+    document.getElementById('ecKeep').textContent  = t('end_confirm_keep');
+    document.getElementById('ecEnd').textContent   = t('end_confirm_end');
+
+    overlay.classList.add('open');
+    return new Promise(resolve => { _endConfirmResolve = resolve; });
+}
+
+function answerEndConfirm(end) {
+    const overlay = document.getElementById('endConfirmOverlay');
+    if (overlay) overlay.classList.remove('open');
+    const resolve = _endConfirmResolve;
+    _endConfirmResolve = null;
+    if (resolve) resolve(!!end);
 }
 
 // Puts the search back to the state it has on a cold open.
@@ -4805,9 +6010,25 @@ function _acPosition(inputEl) {
     const acList = document.getElementById('acList');
     if (!acList || !inputEl) return;
     const r = inputEl.getBoundingClientRect();
+    const GUTTER = 8;
+
+    // La tendina si dimensiona sul PROPRIO contenuto e usa il campo solo come
+    // minimo. Bloccarla su r.width troncava "Colle San Magno" in "Colle …"
+    // dentro il segmento origine, che e' stretto: spariva con i puntini proprio
+    // la parte che distingue una fermata dall'altra, cioe' l'unica cosa per cui
+    // la lista esiste.
+    acList.style.width    = 'auto';
+    acList.style.minWidth = r.width + 'px';
+    acList.style.maxWidth = Math.max(180, window.innerWidth - 2 * GUTTER) + 'px';
+
+    acList.style.top  = (r.bottom + 4) + 'px';
     acList.style.left = r.left + 'px';
-    acList.style.top = (r.bottom + 4) + 'px';
-    acList.style.width = r.width + 'px';
+
+    // Misurata DOPO aver dimensionato: un contenuto piu' largo dello spazio a
+    // destra del campo uscirebbe dallo schermo, ed e' il caso del segmento
+    // destinazione, che sta gia' vicino al bordo.
+    const w = acList.offsetWidth;
+    acList.style.left = Math.max(GUTTER, Math.min(r.left, window.innerWidth - w - GUTTER)) + 'px';
 }
 
 function _acShow(inputEl, showAll) {
@@ -4817,15 +6038,19 @@ function _acShow(inputEl, showAll) {
     const items = _acItems(inputEl, showAll ? '' : inputEl.value);
     if (!items.length) { acList.style.display = 'none'; return; }
     acList.innerHTML = items.map(it =>
-        `<div class="ac-item" data-id="${escAttr(it.id)}">${escHtml(it.name)}</div>`).join('');
+        `<div class="ac-item" role="option" aria-selected="false" data-id="${escAttr(it.id)}">${escHtml(it.name)}</div>`).join('');
     _acIndex = -1;              // the rows were just rebuilt, nothing is highlighted
-    _acPosition(inputEl);
+    // Prima si mostra, poi si posiziona: _acPosition misura la larghezza resa
+    // per tenere la lista dentro il viewport, e un elemento nascosto misura 0.
     acList.style.display = 'block';
+    _acPosition(inputEl);
+    inputEl.setAttribute('aria-expanded', 'true');
 }
 
 function _acHide() {
     const acList = document.getElementById('acList');
     if (acList) acList.style.display = 'none';
+    if (_acFor) _acFor.setAttribute('aria-expanded', 'false');
     _acFor = null;
     _acIndex = -1;
 }
@@ -4842,7 +6067,11 @@ function _acHighlight(i) {
     const items = acList.querySelectorAll('.ac-item');
     if (!items.length) return;
     _acIndex = (i % items.length + items.length) % items.length;
-    items.forEach((el, n) => el.classList.toggle('ac-active', n === _acIndex));
+    items.forEach((el, n) => {
+        const on = n === _acIndex;
+        el.classList.toggle('ac-active', on);
+        el.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
     items[_acIndex].scrollIntoView({ block: 'nearest' });
 }
 
@@ -5933,7 +7162,7 @@ function startEtaCountdown(minutes) {
 /** Destination reached without End Journey being tapped: a fact, so it closes. */
 function arriveAtDestination(destName) {
     showJourneyEndPopup('arrived', destName);
-    endJourney();
+    endJourney({ arrived: true });
 }
 
 /**

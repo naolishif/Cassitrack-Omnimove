@@ -27,8 +27,14 @@ public class RouteMatchingService {
     private final StopRepository stopRepository;
     private final RoutePatternService routePatternService;
 
-    /** A stop identified by both its id and its human-readable name. */
-    public record NamedStop(String id, String name) {}
+    /**
+     * La prossima fermata: identita' e orario previsto.
+     *
+     * arrivalSeconds è l'orario di tabella (secondi dalla mezzanotte), non
+     * un'attesa: chi lo riceve calcola quanto manca sommandoci il ritardo
+     * misurato e sottraendo l'ora corrente.
+     */
+    public record UpcomingStop(String id, String name, Integer arrivalSeconds) {}
 
     /** Una riga di orario con la sua fermata, risolta dal pattern della linea. */
     public record StopOnTrip(String stopId, int stopSequence, int arrivalSeconds) {}
@@ -138,11 +144,99 @@ public class RouteMatchingService {
         return best != null ? best.getStopSequence()
                 : (tripSequence(tripId).isEmpty() ? null : 1);
     }
-    /** La fermata immediatamente successiva nella sequenza. Null al capolinea. */
-    public NamedStop nextStopAfterSequence(String tripId, Integer stopSequence) {
-        if (stopSequence == null) return null;
+    /**
+     * La fermata immediatamente successiva nella sequenza. Null al capolinea.
+     *
+     * SENZA ANCORAGGIO SI RISPONDE LO STESSO
+     * stopSequence e' null quando il mezzo non ha ancora superato nessuna fermata.
+     * Succede per tutta l'attesa al capolinea, che non e' un caso raro: la corsa
+     * viene assegnata fino a PRE_TRIP_LEAD_SECONDS (mezz'ora) prima di partire, e
+     * con un orario semihorario significa che a ogni istante buona parte della
+     * flotta e' in quello stato.
+     *
+     * Prima si tornava null e l'interfaccia mostrava un trattino. Ma un mezzo
+     * fermo al capolinea la prossima fermata ce l'ha eccome — e' la prima della
+     * corsa che sta per fare — e la conosciamo gia'. La fermata PRECEDENTE resta
+     * invece vuota, ed e' corretto: di fermate non ne ha ancora fatte.
+     */
+    public UpcomingStop nextStopAfterSequence(String tripId, Integer stopSequence) {
+        if (stopSequence == null) {
+            List<ScheduledStop> seq = tripSequence(tripId);
+            if (seq.isEmpty()) return null;
+
+            // Si risolve qui invece di chiamare stopAtSequence: quello
+            // riinterrogherebbe la stessa sequenza appena letta, e questo metodo
+            // gira a ogni messaggio GPS di ogni mezzo in attesa.
+            //
+            // Non si assume che la prima posizione sia 1: si prende quella che la
+            // corsa dichiara per prima.
+            ScheduledStop first = seq.get(0);
+            String routeId = first.getTrip() != null && first.getTrip().getRoute() != null
+                    ? first.getTrip().getRoute().getId() : null;
+            String stopId = routePatternService.stopIdAt(routeId, first.getStopSequence());
+            return stopId == null ? null
+                    : new UpcomingStop(stopId, stopName(stopId), first.getArrivalSeconds());
+        }
         StopOnTrip next = stopAtSequence(tripId, stopSequence + 1);
-        return next != null ? namedStop(next.stopId()) : null;
+        return next == null ? null
+                : new UpcomingStop(next.stopId(), stopName(next.stopId()), next.arrivalSeconds());
+    }
+
+    /**
+     * Fra due occorrenze equidistanti si sceglie per orario: sotto questa
+     * soglia le distanze si considerano uguali. Un metro basta — su un anello
+     * la stessa fermata ripetuta da' distanze identiche al bit, non simili.
+     */
+    private static final double SAME_DISTANCE_METRES = 1.0;
+
+    /**
+     * La posizione della sequenza piu' vicina al punto in cui si trova il mezzo.
+     *
+     * A COSA SERVE
+     * A rimettere l'ancora dove il bus e' davvero, quando la macchina degli
+     * arrivi si accorge di averla persa. E' una risposta della GEOGRAFIA, non
+     * della sequenza: non presuppone di sapere quanta strada sia stata fatta,
+     * ed e' esattamente cio' che serve quando quel presupposto e' saltato.
+     *
+     * ANELLI
+     * Su una linea che ripassa dalle stesse fermate la distanza da sola non
+     * distingue il quinto passaggio dal quattordicesimo: sono lo stesso punto.
+     * A parita' di distanza decide l'orario di tabella piu' vicino all'ora
+     * corrente — lo stesso criterio di bootstrapSequence, per non avere due
+     * regole diverse che rispondono alla stessa domanda.
+     *
+     * @return la stop_sequence piu' vicina, o null se la corsa non e' leggibile
+     */
+    public Integer nearestSequence(String tripId, Double lat, Double lon, int nowSecondsOfDay) {
+        if (lat == null || lon == null) return null;
+        List<ScheduledStop> seq = tripSequence(tripId);
+        if (seq.isEmpty()) return null;
+
+        String routeId = seq.get(0).getTrip() != null && seq.get(0).getTrip().getRoute() != null
+                ? seq.get(0).getTrip().getRoute().getId() : null;
+        if (routeId == null) return null;
+
+        Integer best = null;
+        double  bestDistance = Double.MAX_VALUE;
+        int     bestTimeGap  = Integer.MAX_VALUE;
+
+        for (ScheduledStop ss : seq) {
+            String stopId = routePatternService.stopIdAt(routeId, ss.getStopSequence());
+            if (stopId == null) continue;
+            Double d = distanceToStop(stopId, lat, lon);
+            if (d == null) continue;
+
+            int gap = Math.abs(ss.getArrivalSeconds() - nowSecondsOfDay);
+            boolean closer   = d < bestDistance - SAME_DISTANCE_METRES;
+            boolean sameSpot = Math.abs(d - bestDistance) <= SAME_DISTANCE_METRES;
+
+            if (closer || (sameSpot && gap < bestTimeGap)) {
+                best         = ss.getStopSequence();
+                bestDistance = Math.min(d, bestDistance);
+                bestTimeGap  = gap;
+            }
+        }
+        return best;
     }
 
     /**
@@ -152,12 +246,6 @@ public class RouteMatchingService {
     public String stopName(String stopId) {
         if (stopId == null) return null;
         return stopRepository.findById(stopId).map(Stop::getName).orElse(stopId);
-    }
-
-    /** Wrap a stop id together with its resolved name. */
-    public NamedStop namedStop(String stopId) {
-        if (stopId == null) return null;
-        return new NamedStop(stopId, stopName(stopId));
     }
 
     /**

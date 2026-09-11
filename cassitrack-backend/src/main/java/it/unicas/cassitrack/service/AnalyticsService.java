@@ -184,6 +184,115 @@ public class AnalyticsService {
         return out;
     }
 
+    /**
+     * Come sono andate le corse del periodo, contate una per una.
+     *
+     * PERCHE' NON BASTA status_counts
+     * Quello conta i mezzi che stanno trasmettendo adesso: e' una fotografia
+     * dell'istante, e una corsa conclusa alle nove non ci compare piu'. Per
+     * dire com'e' andato un periodo serve contare le CORSE, ciascuna con
+     * l'esito con cui si e' chiusa — o con quello attuale se e' ancora in
+     * strada.
+     *
+     * SU PIU' GIORNI
+     * L'ultimo delay per trip_id vale per l'INTERA finestra, non per giorno: gli
+     * id delle corse si ripetono ogni giorno, quindi una settimana di corse
+     * LINEA_1_28800 collasserebbe in una sola. Il raggruppamento include percio'
+     * anche il giorno, e ogni esercizio quotidiano conta separatamente.
+     *
+     * window(every: 1d) taglia a mezzanotte UTC, cioe' alle 01:00 o 02:00 locali.
+     * Va bene perche' il servizio va dalle 05 alle 22: nessuna corsa attraversa
+     * quel confine e quindi nessuna viene spezzata in due. Se un giorno
+     * comparisse un servizio notturno, questo e' il punto da rivedere.
+     *
+     * COME
+     * L'ultimo `delay` registrato per ogni trip_id della giornata, che per una
+     * corsa finita e' la misura all'ultima fermata e per una in corso e' la
+     * piu' recente. La classificazione passa da statusFromDelay, la stessa che
+     * usa il resto del sistema: soglie diverse qui darebbero un anello in
+     * disaccordo con i colori sulla mappa.
+     *
+     * NON CLASSIFICATE
+     * Corse che hanno trasmesso una posizione ma per cui non esiste nessun
+     * `delay`: il mezzo e' partito e non ha ancora superato una fermata, quindi
+     * non c'e' niente da confrontare con l'orario. Si ricavano per differenza
+     * fra le corse viste e quelle misurate. Le corse che devono ancora partire
+     * non compaiono affatto: non sono "non classificate", non sono successe.
+     */
+    private Map<String, Long> tripStatusCounts(String startTime, String endTime, String busId) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        counts.put("UNCLASSIFIED",       0L);
+        counts.put("EARLY",              0L);
+        counts.put("ON_TIME",            0L);
+        counts.put("SLIGHTLY_LATE",      0L);
+        counts.put("SIGNIFICANTLY_LATE", 0L);
+
+        // Il tag vale "UNKNOWN" quando il mezzo trasmetteva senza una corsa
+        // risolta: non e' una corsa e non va contata come tale.
+        // Chiave corsa+giorno: la stessa corsa esercitata martedi' e mercoledi'
+        // sono due esiti distinti, e con la sola corsa il secondo cancellerebbe
+        // il primo.
+        java.util.Set<String> measured = new java.util.HashSet<>();
+        try {
+            String flux = String.format(
+                    "from(bucket: \"%s\") " +
+                            "|> range(%s) " +
+                            "|> filter(fn: (r) => r[\"_measurement\"] == \"vehicle_position\") " +
+                            "|> filter(fn: (r) => r[\"_field\"] == \"delay\")%s " +
+                            "|> window(every: 1d) " +
+                            "|> group(columns: [\"trip_id\", \"_start\"]) " +
+                            "|> last()", bucket, buildFluxRange(startTime, endTime),
+                    buildVehicleFilter(busId));
+            for (FluxTable table : influxDBClient.getQueryApi().query(flux))
+                for (FluxRecord rec : table.getRecords()) {
+                    Object tripId = rec.getValueByKey("trip_id");
+                    Object value  = rec.getValue();
+                    if (tripId == null || "UNKNOWN".equals(tripId.toString())) continue;
+                    if (!(value instanceof Number n)) continue;
+                    measured.add(tripDayKey(rec, tripId));
+                    String status = ScheduleAdherenceService
+                            .statusFromDelay((int) Math.round(n.doubleValue())).name();
+                    counts.merge(status, 1L, Long::sum);
+                }
+        } catch (Exception e) {
+            log.error("Error querying today's trip adherence from InfluxDB", e);
+            return counts;
+        }
+
+        // Le corse VISTE: si interroga un campo sempre presente (lat), perche'
+        // delay viene scritto solo quando esiste una misura — ed e' proprio la
+        // sua assenza che stiamo cercando di contare.
+        try {
+            String flux = String.format(
+                    "from(bucket: \"%s\") " +
+                            "|> range(%s) " +
+                            "|> filter(fn: (r) => r[\"_measurement\"] == \"vehicle_position\") " +
+                            "|> filter(fn: (r) => r[\"_field\"] == \"lat\")%s " +
+                            "|> window(every: 1d) " +
+                            "|> group(columns: [\"trip_id\", \"_start\"]) " +
+                            "|> last()", bucket, buildFluxRange(startTime, endTime),
+                    buildVehicleFilter(busId));
+            long unclassified = 0;
+            for (FluxTable table : influxDBClient.getQueryApi().query(flux))
+                for (FluxRecord rec : table.getRecords()) {
+                    Object tripId = rec.getValueByKey("trip_id");
+                    if (tripId == null || "UNKNOWN".equals(tripId.toString())) continue;
+                    if (!measured.contains(tripDayKey(rec, tripId))) unclassified++;
+                }
+            counts.put("UNCLASSIFIED", unclassified);
+        } catch (Exception e) {
+            log.error("Error counting unmeasured trips from InfluxDB", e);
+        }
+
+        return counts;
+    }
+
+    /** Identifica un ESERCIZIO di una corsa: la corsa piu' il giorno in cui e' avvenuta. */
+    private static String tripDayKey(FluxRecord rec, Object tripId) {
+        Object start = rec.getValueByKey("_start");
+        return tripId + "|" + (start == null ? "" : start.toString());
+    }
+
     // ── Busiest hours (GET /api/v1/analytics/busiest-hours) ───────────────────
 
     public Map<String, Object> getBusiestHours(String startTime, String endTime, String busId) {
@@ -533,23 +642,19 @@ public class AnalyticsService {
 
         // ── KPI 2: average delay, and the change against the previous window ──
         out.put("avg_delay_minutes", round1(scan.avgDelay()));
+
+        // Come sono andate le corse del periodo. Sta qui e non in /adherence
+        // perche' e' l'unico endpoint che riceve il filtro: la stessa domanda
+        // su "oggi" e su "ultimi 7 giorni" ha risposte diverse, e prima
+        // l'anello rispondeva sempre e comunque su oggi.
+        out.put("trip_status_counts", tripStatusCounts(startTime, endTime, busId));
         out.put("delay_delta",       previousWindowDelta(startTime, endTime, busId, scan.avgDelay()));
 
         // ── Panel 1: buses on road per line, right now ────────────────────
         out.put("buses_on_road", busesOnRoadByLine());
 
         // ── Panel 2: average delay per weekday ────────────────────────────
-        // Always all seven days, in calendar order, with null for days the
-        // period never covered. A gap in the line is honest; silently dropping
-        // Sunday would make a 6-day week look like a 7-day one.
-        Map<String, Object> byWeekday = new LinkedHashMap<>();
-        for (java.time.DayOfWeek d : java.time.DayOfWeek.values()) {
-            List<Double> vals = scan.delayByWeekday.get(d);
-            byWeekday.put(
-                d.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH),
-                (vals == null || vals.isEmpty()) ? null : round1(average(vals)));
-        }
-        out.put("delay_by_weekday", byWeekday);
+        weekdayPanel(startTime, endTime, busId, scan, out);
 
         // ── Panel 3: occupancy per hour ───────────────────────────────────
         // Weighted by capacity (sum of passengers / sum of seats), not an
@@ -592,13 +697,150 @@ public class AnalyticsService {
         final Set<String>                       routeIds       = new HashSet<>();
         final List<Double>                      allDelays      = new ArrayList<>();
         final Map<java.time.DayOfWeek, List<Double>> delayByWeekday = new EnumMap<>(java.time.DayOfWeek.class);
+        /**
+         * Gli stessi ritardi, ma tenuti per DATA.
+         *
+         * Su una finestra corta "martedi'" e' un giorno preciso e va messo dove
+         * cade nel calendario; su un mese e' una categoria, e i quattro martedi'
+         * vanno mediati insieme. Servono entrambe le viste, e ricavare la prima
+         * dalla seconda non si puo': il giorno della settimana ha perso la data.
+         */
+        final Map<java.time.LocalDate, List<Double>> delayByDate = new TreeMap<>();
         final Map<String, List<Double>>         delayByRoute   = new LinkedHashMap<>();
         /** hour → {passengers, seats} */
         final Map<Integer, long[]>              paxCapByHour   = new HashMap<>();
 
-        double avgDelay() {
-            return allDelays.isEmpty() ? 0.0
+        /**
+         * La media, oppure null quando non c'e' nulla da mediare.
+         *
+         * Prima restituiva 0.0 in entrambi i casi, e il cruscotto mostrava un
+         * sicuro "0.0 min" — cioe' "rete perfettamente in orario" — anche
+         * filtrando su un mezzo che non ha mai trasmesso. Il front-end il ramo
+         * per il dato assente ce l'aveva gia' (v == null -> "—"), ma non poteva
+         * scattare perche' qui il null non arrivava mai.
+         */
+        Double avgDelay() {
+            return allDelays.isEmpty() ? null
                  : allDelays.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+        }
+    }
+
+    /**
+     * Il ritardo medio giorno per giorno.
+     *
+     * DUE FORME, NON UNA
+     * Finche' i giorni della finestra si possono disegnare uno per uno — fino a un
+     * mese — ogni punto e' UNA DATA, in ordine cronologico. Chi ha chiesto
+     * l'1-8 settembre vuole sapere com'e' andato il 3, non com'e' andato "il
+     * mercoledi'": con le categorie due date diverse finivano nella stessa casella
+     * e l'asse mostrava sempre e comunque lunedi'-domenica.
+     *
+     * Oltre il mese le date diventano troppe per un asse leggibile, e la lettura
+     * utile torna a essere la categoria: i martedi' del periodo mediati insieme.
+     *
+     * Prima c'era solo la seconda forma, sempre e comunque sette caselle. Con
+     * "Today" ne restava piena una, e un grafico a linee con un punto solo non
+     * dice niente — non e' nemmeno una linea.
+     *
+     * LA FINESTRA MINIMA
+     * Se il periodo scelto e' piu' corto della settimana in corso, il pannello si
+     * allarga a lunedi'-oggi. E' l'unico dei pannelli a farlo, quindi lo dichiara:
+     * `delay_by_weekday_label` dice su cosa e' stato calcolato davvero, e il
+     * front-end lo scrive nel sottotitolo invece di ripetere il periodo scelto.
+     */
+    /**
+     * Oltre quanti giorni il grafico smette di disegnarli uno per uno.
+     *
+     * Un mese di punti su un asse sta ancora in piedi; un trimestre no — e a quel
+     * punto la domanda cambia comunque natura: non "com'e' andato il 3 settembre"
+     * ma "come vanno i mercoledi'".
+     */
+    private static final int MAX_DAYS_PLOTTED_ONE_BY_ONE = 31;
+
+    private void weekdayPanel(String startTime, String endTime, String busId,
+                              Scan scan, Map<String, Object> out) {
+
+        java.time.ZoneId zone = ZoneId.systemDefault();
+        java.time.LocalDate today = java.time.LocalDate.now(zone);
+        java.time.LocalDate monday = today.with(java.time.DayOfWeek.MONDAY);
+
+        java.time.LocalDate from = parseDate(startTime, zone);
+        java.time.LocalDate to   = parseDate(endTime,   zone);
+
+        String label;
+        Scan use = scan;
+
+        // Si allarga per DURATA, non per posizione. "Copre lunedi'-oggi?" avrebbe
+        // allargato anche un custom di mercoledi'-venerdi' e il mese scorso, che
+        // sono finestre volute e piu' lunghe: la domanda giusta e' se il periodo
+        // scelto ha meno giorni della settimana in corso.
+        long weekDays = java.time.temporal.ChronoUnit.DAYS.between(monday, today) + 1;
+        long askedDays = (from == null || to == null)
+                ? 0
+                : java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
+
+        if (askedDays < weekDays) {
+            // Nota: il lunedi' la settimana in corso e' un giorno solo, quindi qui
+            // non si allarga niente e il grafico ha un punto. E' la conseguenza di
+            // aver scelto la settimana di calendario invece di sette giorni mobili.
+            from  = monday;
+            to    = today;
+            label = "This week, from Monday";
+            use   = scanPeriod(monday.atStartOfDay(zone).toInstant().toString(),
+                               Instant.now().toString(), busId);
+        } else {
+            label = null;   // il periodo scelto va bene com'e'
+        }
+
+        Map<String, Object> series = new LinkedHashMap<>();
+        long days = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
+        boolean byDate = days <= MAX_DAYS_PLOTTED_ONE_BY_ONE;
+
+        if (byDate) {
+            // Dentro una sola settimana il nome del giorno basta e si legge meglio:
+            // sette nomi distinti, nessuna ambiguita'. Appena la finestra ne
+            // attraversa due, "Mar" comparirebbe due volte con valori diversi, e
+            // allora serve la data. Il confronto e' fra i due lunedi': se e' lo
+            // stesso giorno, la settimana ISO e' la stessa.
+            boolean sameWeek = from.with(java.time.DayOfWeek.MONDAY)
+                          .equals(to.with(java.time.DayOfWeek.MONDAY));
+
+            // Un punto per data, nell'ordine in cui i giorni sono passati.
+            for (java.time.LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
+                List<Double> vals = use.delayByDate.get(d);
+                String key = sameWeek
+                        ? d.getDayOfWeek().getDisplayName(
+                                java.time.format.TextStyle.SHORT, Locale.ENGLISH)
+                        : d.getDayOfMonth() + "/" + d.getMonthValue();
+                series.put(key,
+                           (vals == null || vals.isEmpty()) ? null : round1(average(vals)));
+            }
+        } else {
+            // Sette categorie, da lunedi' a domenica. Un buco resta un buco: dire
+            // che domenica non c'e' servizio e' un'informazione, toglierla farebbe
+            // sembrare la settimana di sei giorni.
+            for (java.time.DayOfWeek d : java.time.DayOfWeek.values()) {
+                List<Double> vals = use.delayByWeekday.get(d);
+                series.put(d.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH),
+                           (vals == null || vals.isEmpty()) ? null : round1(average(vals)));
+            }
+        }
+
+        out.put("delay_by_weekday", series);
+        out.put("delay_by_weekday_label", label);
+        // Il front-end cambia anche il TITOLO: un grafico per data non e' "per
+        // giorno della settimana", e lasciare l'intestazione vecchia sopra punti
+        // datati sarebbe l'unica cosa peggiore di mostrare le categorie.
+        out.put("delay_by_weekday_mode", byDate ? "date" : "weekday");
+    }
+
+    /** La data di un istante ISO, o null se manca o non e' leggibile. */
+    private static java.time.LocalDate parseDate(String iso, java.time.ZoneId zone) {
+        if (iso == null || iso.isBlank()) return null;
+        try {
+            return Instant.parse(iso).atZone(zone).toLocalDate();
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -610,7 +852,24 @@ public class AnalyticsService {
             "|> range(%s) " +
             "|> filter(fn: (r) => r[\"_measurement\"] == \"vehicle_position\") " +
             "|> filter(fn: (r) => r[\"_field\"] == \"delay\" or r[\"_field\"] == \"passengers\" " +
-            "                  or r[\"_field\"] == \"capacity\")%s",
+            "                  or r[\"_field\"] == \"capacity\")%s " +
+            // Media oraria PRIMA di aggregare, per due ragioni distinte.
+            //
+            // La prima e' di metodo: mediando i punti grezzi, ogni valore pesa
+            // quanto spesso il mezzo trasmette. Le unita' OBU mandano un
+            // messaggio al minuto, gps_simulator3 uno ogni cinque secondi: la
+            // stessa ora di servizio contava dodici volte tanto a seconda della
+            // sorgente, e una giornata simulata sommergeva una settimana di
+            // storico. Su una griglia oraria ogni ora vale uno.
+            //
+            // La seconda e' di costo: qui passavano centinaia di migliaia di
+            // record grezzi, trasferiti e ciclati uno a uno in Java.
+            //
+            // timeSrc: \"_start\" perche' aggregateWindow marca la finestra con
+            // il suo estremo FINALE, e un punto delle 23:30 finirebbe timbrato
+            // alle 00:00 del giorno dopo — spostandolo di giorno nel grafico per
+            // giorno della settimana.
+            "|> aggregateWindow(every: 1h, fn: mean, createEmpty: false, timeSrc: \"_start\")",
             bucket, buildFluxRange(startTime, endTime), buildVehicleFilter(busId));
 
         try {
@@ -632,6 +891,9 @@ public class AnalyticsService {
                             s.allDelays.add(value);
                             s.delayByWeekday
                              .computeIfAbsent(zdt.getDayOfWeek(), k -> new ArrayList<>())
+                             .add(value);
+                            s.delayByDate
+                             .computeIfAbsent(zdt.toLocalDate(), k -> new ArrayList<>())
                              .add(value);
                             if (realRoute) {
                                 s.routeIds.add(routeId);
@@ -659,7 +921,8 @@ public class AnalyticsService {
      * open-ended period has no "previous", and a genuine 0.0 change is a
      * different statement from "unknown".
      */
-    private Double previousWindowDelta(String startTime, String endTime, String busId, double current) {
+    private Double previousWindowDelta(String startTime, String endTime, String busId, Double current) {
+        if (current == null) return null;   // senza un valore attuale non c'e' variazione da calcolare
         if (startTime == null || startTime.isBlank() || endTime == null || endTime.isBlank()) return null;
         try {
             Instant from = Instant.parse(startTime), to = Instant.parse(endTime);
@@ -724,5 +987,10 @@ public class AnalyticsService {
 
     private static double round1(double v) {
         return Math.round(v * 10.0) / 10.0;
+    }
+
+    /** Come sopra, ma lascia passare l'assenza di dato invece di trasformarla in zero. */
+    private static Double round1(Double v) {
+        return v == null ? null : Math.round(v * 10.0) / 10.0;
     }
 }

@@ -17,6 +17,20 @@ public class JourneyLeg {
     /** Only the actual bus stop positions (subset of stop_coords), used for dot markers. */
     @JsonProperty("bus_stop_coords")  private List<double[]> busStopCoords;
     private String instruction;
+    /** La corsa da prendere su questa tratta, non solo la linea. */
+    @JsonProperty("trip_id") private String tripId;
+
+    /**
+     * Il mezzo assegnato a quella corsa, es. "BUS29".
+     *
+     * Viene dall'ORARIO, non dal tempo reale: trips.bus_id lo dice per ogni
+     * corsa della giornata, quindi c'e' anche per una tratta che deve ancora
+     * partire — dove il flusso dal vivo non ha ancora niente da dire.
+     *
+     * E' l'assegnazione prevista. Se il giorno stesso il mezzo viene sostituito,
+     * quello che trasmette e' un altro, e il client preferisce quello quando c'e'.
+     */
+    @JsonProperty("vehicle_id") private String vehicleId;
     @JsonProperty("route_id") private String routeId;
     /**
      * WAIT legs only: true when the wait is a change of bus rather than the initial wait.

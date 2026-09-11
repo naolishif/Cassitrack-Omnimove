@@ -96,6 +96,17 @@ const OMNI_T = {
     search_btn:'Search',
     time_depart:'Depart at', time_arrive:'Arrive by',
     time_now:'Now', btn_done:'Done',
+    // Asked only when the chosen time has already gone by today.
+    day_choice_title:'{time} has already passed',
+    day_choice_sub:'Which day do you mean? Today’s run has already left — you can still look at it to see when it went and how late it was.',
+    day_choice_today:'Today, already gone',
+    day_choice_tomorrow:'Tomorrow',
+    day_short_today:'today', day_short_tomorrow:'tomorrow',
+    // Detail sheet: the times are frozen at search time, and this says so.
+    rd_updated:'Worked out at {time}',
+    rd_refresh:'Recalculate now',
+    rd_refresh_gone:'This option is no longer offered — pick another.',
+    rd_refresh_failed:'Could not recalculate. The times shown are the earlier ones.',
     // Login messages & validation
     err_required:'Mandatory field',
     err_pwd_weak:'Min 8 chars: uppercase, lowercase, number & special character',
@@ -188,6 +199,12 @@ const OMNI_T = {
     tt_pick:'Choose a line to see its timetable.',
     tt_loading:'Loading timetable…',
     tt_error:'Could not load the timetable.',
+    tt_run_not_found:'This run is not in the published timetable.',
+    tt_this_run:'This run, stop by stop',
+    live_tracked:'Bus tracked in real time',
+    live_not_tracked:'No live tracking for this run yet',
+    approach_hint:'Where this bus comes from before reaching you',
+    tt_before_count:'{n} earlier stops', tt_before_one:'1 earlier stop',
     err_captcha_broken:'The security check could not load. Reload the page, or contact the administrator if it persists.',
     msg_check_email:'Check your email (and spam folder).',
     msg_pwd_updated:'Password updated! You can now sign in.',
@@ -360,6 +377,8 @@ const OMNI_T = {
     live_tracking:'Live tracking active',
     you_are_here:'You are here',
     live_buses_future:'🕐 Live bus positions not shown for future departures',
+    bus_not_departed:'🕐 The bus for this trip is not on the road yet',
+    see_timetable:'See timetable',
     stale_bus_data:'⚠️ Live bus data unavailable — positions may be outdated',
     ai_greeting:"👋 Hi {name}! I'm OmniAI. I can help you find the best route, check real-time delays, or suggest eco-friendly alternatives. What do you need?",
     ai_greeting_anon:"👋 Hi! I'm OmniAI. I can help you find the best route, check real-time delays, or suggest eco-friendly alternatives. What do you need?",
@@ -402,7 +421,11 @@ const OMNI_T = {
     delay_at_stop:' at {stop}',
     lbl_now:'Now',
     lbl_crowding:'Crowding:',
-    crowd_low:'Low', crowd_medium:'Medium', crowd_high:'High', crowd_very_high:'Very High',
+    // Said as a state of the bus, not as a grade. "High" answers "high what?";
+    // "Crowded" answers the only question the traveller is actually asking,
+    // which is whether to get on this one or wait for the next.
+    crowd_low:'Not crowded', crowd_medium:'Filling up',
+    crowd_high:'Crowded',    crowd_very_high:'Very crowded',
     // Route cards
     // Mode labels on route cards (opt.mode → display name)
     mode_bus:'Bus', mode_bike:'Bike', mode_scooter:'Scooter', mode_walk:'Walking',
@@ -451,6 +474,14 @@ const OMNI_T = {
     toast_journey_started:'Journey started! {min} min to destination',
     toast_journey_start_fail:'⚠️ Could not start the journey',
     toast_journey_ended:'🏁 Journey ended — great trip!',
+    // Says what happened, not the rule behind it: a threshold spelled out is a
+    // threshold to play against.
+    toast_journey_incomplete:'Journey not completed. No eco points will be awarded.',
+    end_confirm_title:'End the journey?',
+    end_confirm_sub:'No eco points will be awarded, because you have not reached your destination.',
+    end_confirm_keep:'Keep going',
+    end_confirm_end:'End anyway',
+    vehicle_hint:'The vehicle running this trip right now',
     toast_fav_error:'Could not save the favourite',
     // Search flow
     finding_routes:'Finding best routes...',
@@ -566,6 +597,17 @@ const OMNI_T = {
     search_btn:'Cerca',
     time_depart:'Parte alle', time_arrive:'Arriva entro',
     time_now:'Adesso', btn_done:'Fatto',
+    // Si chiede solo quando l'ora scelta e' gia' passata oggi.
+    day_choice_title:'Le {time} sono già passate',
+    day_choice_sub:'Quale giorno intendi? La corsa di oggi è già partita, ma puoi comunque vederla: a che ora è passata e con quanto ritardo.',
+    day_choice_today:'Oggi, già passata',
+    day_choice_tomorrow:'Domani',
+    day_short_today:'oggi', day_short_tomorrow:'domani',
+    // Scheda di dettaglio: gli orari sono fermi al momento della ricerca, e qui lo si dice.
+    rd_updated:'Calcolato alle {time}',
+    rd_refresh:'Ricalcola adesso',
+    rd_refresh_gone:'Questa soluzione non è più proposta — scegline un\'altra.',
+    rd_refresh_failed:'Ricalcolo non riuscito. Gli orari mostrati sono quelli di prima.',
     // Login messages & validation
     err_required:'Campo obbligatorio',
     err_pwd_weak:'Min 8 caratteri: maiuscola, minuscola, numero e carattere speciale',
@@ -658,6 +700,12 @@ const OMNI_T = {
     tt_pick:'Scegli una linea per vedere i suoi orari.',
     tt_loading:'Caricamento orari…',
     tt_error:'Impossibile caricare gli orari.',
+    tt_run_not_found:'Questa corsa non compare nell\'orario pubblicato.',
+    tt_this_run:'Questa corsa, fermata per fermata',
+    live_tracked:'Bus tracciato in tempo reale',
+    live_not_tracked:'Nessun tracciamento per questa corsa',
+    approach_hint:'Da dove arriva il bus prima di raggiungerti',
+    tt_before_count:'{n} fermate precedenti', tt_before_one:'1 fermata precedente',
     err_captcha_broken:'La verifica di sicurezza non si è caricata. Ricarica la pagina, o contatta l\'amministratore se il problema persiste.',
     msg_check_email:'Controlla la tua email (e la cartella spam).',
     msg_pwd_updated:'Password aggiornata! Puoi ora accedere.',
@@ -830,6 +878,8 @@ const OMNI_T = {
     live_tracking:'Tracking in tempo reale',
     you_are_here:'Sei qui',
     live_buses_future:'🕐 Posizioni in tempo reale non disponibili per partenze future',
+    bus_not_departed:'🕐 Il bus di questa corsa non è ancora in servizio',
+    see_timetable:'Vedi orari',
     stale_bus_data:'⚠️ Dati bus in tempo reale non disponibili — le posizioni potrebbero non essere aggiornate',
     ai_greeting:'👋 Ciao {name}! Sono OmniAI. Posso aiutarti a trovare il percorso migliore, controllare i ritardi in tempo reale o suggerirti alternative ecologiche. Di cosa hai bisogno?',
     ai_greeting_anon:'👋 Ciao! Sono OmniAI. Posso aiutarti a trovare il percorso migliore, controllare i ritardi in tempo reale o suggerirti alternative ecologiche. Di cosa hai bisogno?',
@@ -872,7 +922,11 @@ const OMNI_T = {
     delay_at_stop:' a {stop}',
     lbl_now:'Ora',
     lbl_crowding:'Affollamento:',
-    crowd_low:'Basso', crowd_medium:'Medio', crowd_high:'Alto', crowd_very_high:'Molto alto',
+    // Detto come stato del mezzo e non come voto: "Alto" costringe a chiedersi
+    // "alto cosa?", "Affollato" risponde subito alla sola domanda che il
+    // viaggiatore si sta facendo — salgo o aspetto il prossimo.
+    crowd_low:'Non affollato', crowd_medium:'Si sta riempiendo',
+    crowd_high:'Affollato',    crowd_very_high:'Molto affollato',
     // Route cards
     // Mode labels
     mode_bus:'Bus', mode_bike:'Bici', mode_scooter:'Monopattino', mode_walk:'A piedi',
@@ -921,6 +975,14 @@ const OMNI_T = {
     toast_journey_started:'Viaggio avviato! {min} min alla destinazione',
     toast_journey_start_fail:'⚠️ Impossibile avviare il percorso',
     toast_journey_ended:'🏁 Viaggio concluso — buon proseguimento!',
+    // Dice cosa e' successo, non la regola che c'e' dietro: una soglia scritta
+    // e' una soglia contro cui giocare.
+    toast_journey_incomplete:'Percorso non completo. Non verranno assegnati eco points.',
+    end_confirm_title:'Sicuro di voler terminare?',
+    end_confirm_sub:'Non verranno assegnati eco points, in quanto non sei arrivato a destinazione.',
+    end_confirm_keep:'Continua il percorso',
+    end_confirm_end:'Termina comunque',
+    vehicle_hint:'Il mezzo che sta facendo questa corsa adesso',
     toast_fav_error:'Impossibile salvare il preferito',
     // Search flow
     finding_routes:'Ricerca dei percorsi migliori...',

@@ -112,10 +112,41 @@ public class MqttMessageHandler implements MessageHandler {
             // Sets lastStopRegisteredId when the bus is inside a stop radius.
             scheduleAdherenceService.processBusAdherence(entity);
 
+            // ── Step 5b: la corsa assegnata regge ai fatti? ───────
+            //
+            // processBusAdherence ha appena confrontato il verso di marcia con
+            // l'ordine delle fermate della corsa. Se il mezzo l'ha percorsa
+            // all'indietro abbastanza volte di fila, quella corsa non e' la sua:
+            // si toglie di mezzo e la si esclude dalle candidate, cosi' il
+            // messaggio successivo ne cerchera' un'altra invece di riprendere
+            // questa.
+            //
+            // Su QUESTO messaggio il mezzo resta senza corsa. E' la risposta
+            // onesta: pubblicare linea, fermata successiva e ritardo di una
+            // corsa appena smentita significherebbe dare per buono cio' che si
+            // e' appena stabilito essere falso.
+            if (ScheduleAdherenceService.runsWrongWay(entity)) {
+                tripResolutionService.reject(pos.getVehicleId(), entity.getTripId());
+                entity.setTripId(null);
+                entity.setRouteId(null);
+                entity.setRouteName(null);
+                entity.setTripStartSeconds(null);
+                entity.setLastStopSequence(null);
+                entity.setLastStopRegisteredId(null);
+                entity.setWrongWayStrikes(0);
+                // Anche la macchina di avvicinamento: i suoi minimi si
+                // riferiscono a una fermata della corsa appena scartata.
+                entity.setApproachStopSequence(null);
+                entity.setApproachMinDistanceMetres(null);
+                entity.setApproachMinTimestamp(null);
+            }
+
             // ── Step 6: resolve stop identities ───────────────────
-            // The bus never told us where it is. If adherence found no arrival
-            // and we have no carried-over anchor, fall back to the nearest stop
-            // on the trip so the UI still has something to show.
+            // Il bus non dice dove si trova: le due fermate si deducono qui.
+            //
+            // Senza ancoraggio la PRECEDENTE resta vuota — non ne ha superata
+            // nessuna — mentre la PROSSIMA e' la prima della corsa, che
+            // nextStopAfterSequence sa restituire da sola.
             entity.setLastStopRegistered(
                     routeMatchingService.stopName(entity.getLastStopRegisteredId()));
 
@@ -124,6 +155,10 @@ public class MqttMessageHandler implements MessageHandler {
             if (next != null) {
                 entity.setNextStopId(next.id());
                 entity.setNextStop(next.name());
+                // L'orario di tabella viaggia con la fermata: e' gia' stato
+                // letto dalla sequenza, e riprenderlo a ogni chiamata API
+                // costerebbe una query per mezzo.
+                entity.setNextStopArrivalSeconds(next.arrivalSeconds());
             }
 
             // ── Step 6b: how long has it been standing still? ─────
