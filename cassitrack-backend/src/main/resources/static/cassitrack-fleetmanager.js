@@ -235,10 +235,28 @@ let fleetSize = 4;
 let routeFilter    = null;   // route id, or null = all routes
 let serviceFilter  = 'all';  // 'all' | 'in' (has trip) | 'out' (no trip)
 let delayThreshold = 0;      // minutes; 0 = off, else keep only delay >= N
+let busSearch      = '';     // testo cercato, gia' in minuscolo; '' = off
 // How to draw a line nobody is running right now: 'dim' keeps it faint on
 // the map (the road exists even outside service hours), 'hide' removes it
 // with its stops, for an uncluttered view of what is actually moving.
 let idleRoutesMode = 'dim';
+// Cerca su cio' che l'operatore ha davvero sotto gli occhi: il nome sulla card
+// (vehicle_id) per sottostringa, e il numero di registro (bus_id) esatto.
+//
+// Entrambi, e in quest'ordine, perche' non sono la stessa cosa. Un mezzo il cui
+// id il registro non conosce ha bus_id null — che e' esattamente il caso che
+// vale la pena cercare — quindi un filtro sul solo numero sarebbe cieco proprio
+// sui veicoli che piu' interessa trovare.
+//
+// Il numero combacia esatto e non per sottostringa: "1" tirerebbe dentro 1,
+// 10..19, 21, 31 e si leggerebbe come rumore. La ricerca progressiva la copre
+// gia' il nome, visto che digitare "16" isola BUS16 da solo.
+function busMatchesSearch(v){
+    if(!busSearch) return true;
+    if((v.vehicle_id || '').toLowerCase().includes(busSearch)) return true;
+    const id = v.busId != null ? v.busId : v.bus_id;
+    return id != null && String(id) === busSearch;
+}
 // A bus is shown only if it passes EVERY active filter (logical AND).
 function busPassesFilter(v){
     if(!v) return true;
@@ -246,6 +264,7 @@ function busPassesFilter(v){
     if(serviceFilter === 'in'  && !v.trip_id) return false;
     if(serviceFilter === 'out' &&  v.trip_id) return false;
     if(delayThreshold > 0 && (v.delay_minutes || 0) < delayThreshold) return false;
+    if(busSearch && !busMatchesSearch(v)) return false;
     return true;
 }
 
@@ -359,12 +378,45 @@ function inkOn(bg){
  * +10 minuti), non soglie proprie della mappa: lo stesso mezzo deve avere lo
  * stesso colore qui, nella tab Trips e nelle Analytics.
  */
-function busIcon(id,status,routeColor){
+/**
+ * Lo stesso colore, spento: si mescola verso il fondo scuro della mappa e non
+ * verso il nero, cosi' la parte vuota della bolla resta riconoscibile come la
+ * tinta dello stato invece di diventare un grigio qualunque.
+ */
+function dimHex(hex, k){
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+    if(!m) return hex;
+    const n = parseInt(m[1], 16);
+    const mix = (c, t) => Math.round(c + (t - c) * k);
+    const r = mix((n >> 16) & 255, 0x12),
+          g = mix((n >>  8) & 255, 0x1B),
+          b = mix( n        & 255, 0x2B);
+    return '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+}
+
+function busIcon(id,status,routeColor,occupancyPct){
     const st = SC[status] ? status : 'UNKNOWN';
     const col = routeColor || '#4B5563';
+    const full = SC[st] || '#4B5563';
+
+    // La bolla porta DUE informazioni: la tinta dice la puntualita', il
+    // riempimento dice quanto e' carico il mezzo.
+    //
+    // Il gradiente e' a 45deg e non a 0deg perche' .bus-icon-body e' ruotato di
+    // -45deg per fare la goccia: l'angolo e' espresso nel sistema dell'elemento,
+    // quindi 45 - 45 = 0 e sullo schermo il riempimento sale dal basso.
+    //
+    // Occupazione ignota -> nessun data-bg, e il fondo resta quello pieno del
+    // CSS: una bolla vuota direbbe "nessuno a bordo", che e' un'altra cosa.
+    const p = (typeof occupancyPct === 'number' && isFinite(occupancyPct))
+        ? Math.max(0, Math.min(100, Math.round(occupancyPct)))
+        : null;
+    const fill = p === null ? ''
+        : ` data-bg="${escHtml(`linear-gradient(45deg, ${full} 0 ${p}%, ${dimHex(full,.68)} ${p}% 100%)`)}"`;
+
     // data-bg/data-fg invece di style="": la CSP vieta gli stili in linea,
     // e applyDynStyles() li trasferisce via CSSOM dopo il montaggio.
-    return L.divIcon({className:'',html:`<div class="bus-icon-wrap"><div class="bus-icon-body" data-status="${st}"><span class="bus-icon-emoji">🚌</span></div><div class="bus-icon-label" data-bg="${escHtml(col)}" data-fg="${inkOn(col)}">${escHtml(id)}</div></div>`,iconSize:[60,58],iconAnchor:[18,50]});
+    return L.divIcon({className:'',html:`<div class="bus-icon-wrap"><div class="bus-icon-body" data-status="${st}"${fill}><span class="bus-icon-emoji">🚌</span></div><div class="bus-icon-label" data-bg="${escHtml(col)}" data-fg="${inkOn(col)}">${escHtml(id)}</div></div>`,iconSize:[60,58],iconAnchor:[18,50]});
 }
 
 async function fetchVehicles(){
@@ -422,11 +474,11 @@ function updateMap(vehicles){
         const rc = routeColors[v.route_id] || routeColors[v.route_name] || '#4B5563';
         if(markers[v.vehicle_id]){
             markers[v.vehicle_id].setLatLng(pos);
-            markers[v.vehicle_id].setIcon(busIcon(v.vehicle_id,st,rc));
+            markers[v.vehicle_id].setIcon(busIcon(v.vehicle_id,st,rc,occPct(v)));
             applyDynStyles(markers[v.vehicle_id].getElement());
         }
         else{
-            const m=L.marker(pos,{icon:busIcon(v.vehicle_id,st,rc)}).addTo(map);
+            const m=L.marker(pos,{icon:busIcon(v.vehicle_id,st,rc,occPct(v))}).addTo(map);
             applyDynStyles(m.getElement());
             m.bindPopup(popupV(v));
             // CSP FIX (A05): popup content (popupV()) carries data-fg/data-bg
@@ -564,7 +616,11 @@ function buildBusDetail(v){
     const cp  = crowdPct(v.crowding_level), cc = cp>70?'#EF4444':cp>40?'#F59E0B':'#22C55E';
     const hidden   = isBusHidden(v.vehicle_id);
     const delayTxt = v.delay_minutes>0 ? `+${v.delay_minutes}m` : 'In orario';
-    const eta = v.eta_seconds ? Math.round(v.eta_seconds/60)+' min' : '—';
+    // eta_seconds == 0 significa "sta arrivando", non "non lo so": con un test
+    // di verita' lo zero cadeva nel trattino insieme a null.
+    const eta = v.eta_seconds == null ? '—'
+              : v.eta_seconds < 60    ? '<1 min'
+              : Math.round(v.eta_seconds/60)+' min';
     const el  = document.createElement('div');
     el.className='bus-detail';
     el.innerHTML=`
@@ -621,6 +677,10 @@ function selV(id){
 
 // Helpers
 function crowdPct(v){return typeof v.occupancy_pct === 'number' ? v.occupancy_pct : 0;}
+// Come sopra, ma null invece di 0 quando il dato manca: sulla barra della card
+// zero e ignoto si disegnano uguale, sulla bolla no — la` una bolla vuota
+// sarebbe un'affermazione ("nessuno a bordo") e non una reticenza.
+function occPct(v){return typeof v.occupancy_pct === 'number' ? v.occupancy_pct : null;}
 function crowdColor(l){return {LOW:'#22C55E',MEDIUM:'#F59E0B',HIGH:'#EF4444',VERY_HIGH:'#EF4444'}[l]||'#4B5563';}
 // Every caller of this paints TEXT on a dark panel, so it hands back the ink
 // variant rather than the raw line colour. The polylines take routeColors
@@ -765,6 +825,7 @@ function toggleRouteFilter(rid){
     setRouteFilter(next);
 }
 function setServiceFilter(val){ serviceFilter = val || 'all'; refreshFilters(); }
+function setBusSearch(q){ busSearch = (q || '').trim().toLowerCase(); refreshFilters(); }
 function setDelayThreshold(min){ delayThreshold = Math.max(0, parseInt(min, 10) || 0); refreshFilters(); }
 
 function adherenceText(v){
@@ -1030,6 +1091,7 @@ function renderRoutesAdmin(){
                 <td>${hex ? `<span class="rt-swatch" data-bg="${escHtml(hex)}"></span><span class="bm-mono">${escHtml(rt.color)}</span>` : '—'}</td>
                 <td>${rt.active ? '<span class="bm-badge on">Active</span>' : '<span class="bm-badge off">Inactive</span>'}</td>
                 <td class="bm-actions-col">
+                    <button type="button" class="bm-row-btn" data-act="stops" data-id="${escHtml(rt.id)}">Stops</button>
                     <button type="button" class="bm-row-btn" data-act="edit" data-id="${escHtml(rt.id)}">Edit</button>
                     <button type="button" class="bm-row-btn danger" data-act="del" data-id="${escHtml(rt.id)}">Delete</button>
                 </td>`;
@@ -1432,6 +1494,64 @@ let rtPattern = [];
 function rtFmtOffset(sec){
     const s = Math.max(0, sec|0);
     return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+
+/**
+ * Mostra o nasconde le fermate di una linea, in una riga sotto la sua.
+ *
+ * I dati arrivano da /routes/{id}/shape, che gia' restituisce il pattern in
+ * ordine con nome e scarto: non serve un endpoint nuovo. E' lo stesso che
+ * alimenta l'editor di percorso, quindi le due viste non possono discordare.
+ *
+ * La riga di dettaglio e' figlia della tabella e non un riquadro a parte perche'
+ * cosi' segue la riga anche quando si filtra o si riordina — e sparisce da sola
+ * al ridisegno, che e' il comportamento giusto: il pattern potrebbe essere
+ * cambiato nel frattempo.
+ */
+async function rtToggleStops(routeId, btn){
+    const tr = btn.closest('tr');
+    if(!tr) return;
+
+    const next = tr.nextElementSibling;
+    if(next && next.classList.contains('rt-stops-row')){
+        next.remove();
+        btn.textContent = 'Stops';
+        return;
+    }
+
+    const row = document.createElement('tr');
+    row.className = 'rt-stops-row';
+    row.innerHTML = `<td colspan="6" class="rt-stops-cell">Loading…</td>`;
+    tr.after(row);
+    btn.textContent = 'Hide';
+
+    try{
+        const r = await fetch(`${API}/routes/${encodeURIComponent(routeId)}/shape`,
+                              {headers:{'Accept':'application/json'}});
+        if(!r.ok) throw new Error(r.status);
+        const info  = await r.json();
+        const stops = info.stops || [];
+
+        if(!stops.length){
+            row.querySelector('td').textContent =
+                'This route has no stop pattern yet.';
+            return;
+        }
+
+        // Lo scarto e' cumulativo dalla partenza — e' cosi' che V27 lo
+        // memorizza — quindi si mostra come tempo dal capolinea e non come
+        // intervallo dalla fermata precedente.
+        row.querySelector('td').innerHTML =
+            `<div class="rt-stops-hd">${stops.length} stops · time from the first</div>`
+          + '<ol class="rt-stops-list">'
+          + stops.map(s => `<li><span class="rt-stops-name">${escHtml(s.name || s.stopId)}</span>`
+                         + `<span class="bm-mono rt-stops-id">${escHtml(s.stopId)}</span>`
+                         + `<span class="bm-mono rt-stops-off">${rtFmtOffset(s.offsetSeconds)}</span></li>`).join('')
+          + '</ol>';
+    }catch(e){
+        console.error('Could not load route stops', e);
+        row.querySelector('td').textContent = 'Could not load the stops for this route.';
+    }
 }
 
 function rtHidePreview(){
@@ -2363,7 +2483,7 @@ function populateBusDropdown(vehicles) {
 // is a bug waiting to be reported — so the backend derives them all from a
 // single pass and returns them together.
 
-let linesChartInstance   = null;
+let tripStatusChartInstance = null;
 let weekdayChartInstance = null;
 let peakChartInstance    = null;
 
@@ -2371,6 +2491,111 @@ let peakChartInstance    = null;
 const AN_TICK  = { color: '#4B5563', font: { family: 'DM Mono', size: 9 } };
 const AN_GRID_X = { grid: { display: false }, ticks: AN_TICK };
 const AN_GRID_Y = { grid: { color: 'rgba(255,255,255,.04)' }, ticks: AN_TICK };
+
+// ── Stato di attesa ────────────────────────────────────────
+//
+// UN CONTATORE, NON UN BOOLEANO. loadNetwork() e loadAdherence() partono
+// insieme e finiscono quando capita: con un flag, la prima che torna
+// spegnerebbe la velatura mentre l'altra sta ancora interrogando Influx, e
+// l'utente vedrebbe la pagina 'pronta' con meta' pannelli fermi ai valori
+// vecchi. Il contatore la spegne solo quando non resta nulla in volo.
+let anBusyCount = 0;
+let anBusyTimer = null;
+
+// ── La percentuale ─────────────────────────────────────────
+//
+// E' una STIMA, e non puo' essere altro: ne' il browser ne' il backend
+// sanno a che punto sia Influx dentro una query, quindi non esiste un
+// avanzamento vero da leggere. Si stima da due cose che invece si sanno —
+// da quanto si aspetta, e quante delle richieste avviate sono gia' tornate.
+let anBusyTotal = 0;      // richieste avviate in questo ciclo
+let anBusyStart = 0;
+let anPctTimer  = null;
+
+// Quanto e' durato l'ultimo caricamento, mediato. Parte da una stima e si
+// tara sull'uso reale: su un intervallo di un mese le query sono piu' lente
+// che su 'oggi', e una costante fissa mentirebbe in un verso o nell'altro.
+let anLoadAvgMs = 2500;
+
+function anPctTick() {
+    const txt  = document.getElementById('anBusyPct');
+    const fill = document.getElementById('anBusyFill');
+    if (!txt) return;
+
+    // Asintotica verso il 92%, senza mai arrivarci da sola. Una barra che
+    // tocca il 100% prima della fine e' peggio di nessuna barra: promette
+    // una cosa, poi resta ferma li' e sembra bloccata.
+    const elapsed = performance.now() - anBusyStart;
+    const byTime  = 92 * (1 - Math.exp(-elapsed / Math.max(300, anLoadAvgMs)));
+    const byDone  = anBusyTotal > 0
+        ? (anBusyTotal - anBusyCount) / anBusyTotal * 92
+        : 0;
+
+    const pct = Math.round(Math.max(byTime, byDone));
+    txt.textContent = pct + '%';
+    if (fill) {
+        // data-width-pct + applyDynStyles come ovunque in questa pagina,
+        // per non lasciare in giro l'unico punto che scrive style.width
+        // per conto proprio.
+        fill.dataset.widthPct = String(pct);
+        applyDynStyles(fill.parentElement);
+    }
+}
+
+// Sotto questa soglia non si mostra niente: su una risposta rapida la
+// velatura farebbe solo un lampo, che si legge come un difetto e non come
+// un'informazione.
+const AN_BUSY_DELAY_MS = 140;
+
+function anBusyVeil(visible) {
+    const el = document.getElementById('anBusy');
+    if (el) el.hidden = !visible;
+    const stage = document.getElementById('anStage');
+    if (stage) stage.setAttribute('aria-busy', visible ? 'true' : 'false');
+
+    if (anPctTimer !== null) { clearInterval(anPctTimer); anPctTimer = null; }
+    if (visible) {
+        anPctTick();                       // subito, senza aspettare il primo tick
+        anPctTimer = setInterval(anPctTick, 120);
+    }
+}
+
+function anBusy(on) {
+    // Un ciclo comincia quando si passa da zero richieste a una: e' da li'
+    // che si contano il tempo e la quota di lavoro conclusa.
+    if (on && anBusyCount === 0) { anBusyTotal = 0; anBusyStart = performance.now(); }
+    if (on) anBusyTotal++;
+
+    anBusyCount = Math.max(0, anBusyCount + (on ? 1 : -1));
+    const busy = anBusyCount > 0;
+
+    // Ciclo finito: la durata vera taratura la stima del prossimo. Media
+    // mobile e non ultimo valore, cosi' un singolo caricamento anomalo non
+    // sballa la barra per tutta la sessione.
+    if (!busy && anBusyStart > 0) {
+        const elapsed = performance.now() - anBusyStart;
+        anLoadAvgMs = Math.min(30000, Math.max(400, anLoadAvgMs * 0.7 + elapsed * 0.3));
+        anBusyStart = 0;
+    }
+
+    // Il pulsante si disabilita SUBITO, senza aspettare la soglia: quella
+    // serve a non far lampeggiare la velatura, non a lasciare aperta una
+    // finestra in cui si puo' far partire una seconda interrogazione.
+    const btn = document.getElementById('applyFiltersBtn');
+    if (btn) {
+        btn.disabled = busy;
+        btn.textContent = busy ? 'Loading…' : 'Apply Filters';
+    }
+
+    if (busy) {
+        if (anBusyTimer === null)
+            anBusyTimer = setTimeout(() => { anBusyTimer = null; anBusyVeil(true); },
+                                     AN_BUSY_DELAY_MS);
+    } else {
+        if (anBusyTimer !== null) { clearTimeout(anBusyTimer); anBusyTimer = null; }
+        anBusyVeil(false);
+    }
+}
 
 /** Show a canvas or the "nothing here" note in its place, never both. */
 function anToggleChart(wrapId, emptyId, hasData) {
@@ -2381,6 +2606,7 @@ function anToggleChart(wrapId, emptyId, hasData) {
 }
 
 async function loadNetwork() {
+    anBusy(true);
     try {
         const r = await fetch(`${API}/analytics/network?${buildFilterParams()}`);
         if (!r.ok) throw new Error(r.status);
@@ -2391,15 +2617,21 @@ async function loadNetwork() {
         lastNetwork = d;
 
         renderNetworkKpis(d);
-        renderLinesChart(d.buses_on_road   || []);
-        renderWeekdayChart(d.delay_by_weekday || {});
+        renderTripStatusDonut(d.trip_status_counts || {});
+        renderWeekdayChart(d.delay_by_weekday || {}, d.delay_by_weekday_label,
+                           d.delay_by_weekday_mode);
         renderPeakChart(d.occupancy_by_hour   || []);
         renderDelayByLine(d.delay_by_line     || []);
     } catch (e) {
         console.error('Failed to load network overview', e);
-        anToggleChart('lines-chart-wrap',   'linesChartEmpty',   false);
+        anToggleChart('trip-status-wrap', 'tripStatusEmpty', false);
         anToggleChart('weekday-chart-wrap', 'weekdayChartEmpty', false);
         anToggleChart('peak-chart-wrap',    'peakChartEmpty',    false);
+    } finally {
+        // In finally e non in coda al try: se la richiesta fallisce la
+        // velatura deve comunque sparire, altrimenti un errore lascia la
+        // tab velata per sempre e sembra un blocco.
+        anBusy(false);
     }
 }
 
@@ -2441,48 +2673,81 @@ function renderNetworkKpis(d) {
     }
 }
 
-// ── Panel 1: buses on road, per line ───────────────────────
+// ── Panel 1: come sono andate le corse di oggi ─────────────
+//
+// Sostituisce il vecchio istogramma dei mezzi per linea. Quello contava chi
+// trasmette ADESSO; questo conta le CORSE della giornata, comprese quelle
+// gia' concluse, ciascuna con l'esito con cui si e' chiusa. Sono due domande
+// diverse, e la seconda e' quella a cui serve rispondere per dire se la
+// giornata sta andando bene.
 
-function renderLinesChart(rows) {
-    const canvas = document.getElementById('linesChart');
+// Stessi colori degli stati sulla mappa e nelle card: un mezzo giallo li' non
+// puo' finire in una fetta verde qui.
+const TRIP_STATUS_ORDER = ['UNCLASSIFIED','EARLY','ON_TIME','SLIGHTLY_LATE','SIGNIFICANTLY_LATE'];
+const TRIP_STATUS_LABEL = {
+    UNCLASSIFIED:'Not yet measured', EARLY:'Early', ON_TIME:'On time',
+    SLIGHTLY_LATE:'Slightly late',   SIGNIFICANTLY_LATE:'Late'
+};
+const TRIP_STATUS_COLOR = {
+    UNCLASSIFIED:'#4B5563', EARLY:'#06B6D4', ON_TIME:'#22C55E',
+    SLIGHTLY_LATE:'#F59E0B', SIGNIFICANTLY_LATE:'#EF4444'
+};
+
+function renderTripStatusDonut(counts) {
+    const canvas = document.getElementById('tripStatusChart');
     if (!canvas) return;
 
-    if (linesChartInstance) linesChartInstance.destroy();
-    anToggleChart('lines-chart-wrap', 'linesChartEmpty', rows.length > 0);
-    if (!rows.length) { linesChartInstance = null; return; }
+    // Solo le fette con almeno una corsa: una legenda con tre voci a zero
+    // occupa spazio per dire nulla.
+    const keys   = TRIP_STATUS_ORDER.filter(k => (counts[k] || 0) > 0);
+    const values = keys.map(k => counts[k]);
+    const total  = values.reduce((a, b) => a + b, 0);
 
-    const values = rows.map(r => r.buses);
-    // Highlight the lines carrying the most vehicles: at a glance, where the
-    // fleet is concentrated right now.
-    const busiest = Math.max(...values);
+    if (tripStatusChartInstance) tripStatusChartInstance.destroy();
+    anToggleChart('trip-status-wrap', 'tripStatusEmpty', total > 0);
 
-    linesChartInstance = new Chart(canvas, {
-        type: 'bar',
+    // Periodo scritto sia nella spunta sia nel sottotitolo: l'anello ora
+    // risponde al filtro, e senza dirlo si confonderebbe con i pannelli dal
+    // vivo qui sotto, che al filtro non rispondono.
+    const period = PRESET_LABEL[activeFilters.preset] || '';
+    const chip = document.getElementById('tripStatusChip');
+    if (chip) chip.textContent = period.toUpperCase();
+
+    const sub = document.getElementById('tripStatusSub');
+    if (sub) sub.textContent = total > 0
+        ? `${total} trip${total === 1 ? '' : 's'}, by how they ended`
+        : 'no trip recorded in this period';
+
+    if (!total) { tripStatusChartInstance = null; return; }
+
+    tripStatusChartInstance = new Chart(canvas, {
+        type: 'doughnut',
         data: {
-            labels: rows.map(r => r.label),
+            labels: keys.map(k => TRIP_STATUS_LABEL[k]),
             datasets: [{
                 data: values,
-                backgroundColor: values.map(v => v >= busiest && busiest > 1 ? '#06B6D4' : '#3B82F6'),
-                borderRadius: 4,
-                maxBarThickness: 18
+                backgroundColor: keys.map(k => TRIP_STATUS_COLOR[k]),
+                borderColor: '#0F1623',      // il colore dei pannelli: separa le
+                borderWidth: 2               // fette senza aggiungere un colore
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            cutout: '62%',
             plugins: {
-                legend: { display: false },
+                legend: {
+                    position: 'right',
+                    labels: { color: '#E2E8F0', boxWidth: 10, boxHeight: 10,
+                              font: { family: 'DM Mono', size: 10 } }
+                },
                 tooltip: { callbacks: {
-                    title: ctx => rows[ctx[0].dataIndex].name || rows[ctx[0].dataIndex].label,
-                    label: ctx => `${ctx.parsed.y} bus${ctx.parsed.y === 1 ? '' : 'es'} on road`
+                    label: ctx => {
+                        const n = ctx.parsed;
+                        const pct = Math.round(n / total * 100);
+                        return `${n} trip${n === 1 ? '' : 's'} · ${pct}%`;
+                    }
                 } }
-            },
-            scales: {
-                x: AN_GRID_X,
-                y: { ...AN_GRID_Y, beginAtZero: true,
-                     ticks: { ...AN_TICK, precision: 0 },
-                     title: { display: true, text: 'Buses',
-                              color: '#4B5563', font: { family: 'DM Mono', size: 10 } } }
             }
         }
     });
@@ -2490,9 +2755,24 @@ function renderLinesChart(rows) {
 
 // ── Panel 2: average delay per weekday ─────────────────────
 
-function renderWeekdayChart(byDay) {
+function renderWeekdayChart(byDay, windowLabel, mode) {
     const canvas = document.getElementById('weekdayChart');
     if (!canvas) return;
+
+    // Questo pannello e' l'unico che puo' allargare la finestra da solo: con
+    // "Today" un grafico per giorno avrebbe un punto solo. Quando lo fa il
+    // backend manda l'etichetta della finestra vera, e va scritta — altrimenti
+    // sotto il grafico resta "Today" mentre i punti sono quelli della settimana.
+    const sub = document.getElementById('weekdayChartSub');
+    if (sub && windowLabel) sub.textContent = 'Minutes · ' + windowLabel;
+
+    // Il titolo segue i dati. Su un intervallo di date i punti sono date, e
+    // lasciare scritto "by day of week" sopra un asse che dice 1/9, 2/9, 3/9
+    // sarebbe una didascalia che smentisce il grafico.
+    const title = document.getElementById('weekdayChartTitle');
+    if (title) title.textContent = (mode === 'date')
+        ? 'Avg delay by day'
+        : 'Avg delay by day of week';
 
     const labels = Object.keys(byDay);
     const values = labels.map(k => byDay[k]);
@@ -2645,6 +2925,7 @@ function renderDelayByLine(rows) {
 // you were looking at.
 
 async function loadAdherence() {
+    anBusy(true);
     try {
         const r = await fetch(`${API}/analytics/adherence`);
         if (!r.ok) throw new Error(r.status);
@@ -2654,6 +2935,8 @@ async function loadAdherence() {
         renderVehicleTable(lastAdherenceVehicles);
     } catch (e) {
         console.error('Failed to load adherence', e);
+    } finally {
+        anBusy(false);
     }
 }
 
@@ -2958,6 +3241,7 @@ if(rtTableBody) rtTableBody.addEventListener('click', e => {
     const id = btn.dataset.id;   // route id is a string
     if(btn.dataset.act === 'edit'){ const rt = rtRoutes.find(x=>x.id===id); if(rt) openRouteForm(rt); }
     else if(btn.dataset.act === 'del'){ deleteRoute(id); }
+    else if(btn.dataset.act === 'stops'){ rtToggleStops(id, btn); }
 });
 
 // Fleet Monitor > filters (route + service + min delay)
@@ -2972,6 +3256,11 @@ if(idleRoutesEl) idleRoutesEl.addEventListener('change', e => {
     idleRoutesMode = e.target.value;
     updateRouteVisibility();    // pure redraw: no data is refetched
 });
+
+// 'input' e non 'change': la lista si restringe mentre si digita, e
+// refreshFilters() e' un ridisegno locale — non rifa' nessuna richiesta.
+const busSearchEl = document.getElementById('busSearch');
+if(busSearchEl) busSearchEl.addEventListener('input', e => setBusSearch(e.target.value));
 
 const delayFilterEl = document.getElementById('delayFilter');
 if(delayFilterEl) delayFilterEl.addEventListener('input', e => {

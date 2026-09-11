@@ -47,6 +47,26 @@ public class SessionService {
     }
 
     /**
+     * Sostituisce il token della sessione con uno nuovo.
+     *
+     * Sta qui accanto a terminate() perche' e' fatto degli stessi pezzi: il
+     * vecchio va revocato, la sua chiave di sessione chiusa, quella nuova
+     * aperta e il cookie riscritto. Sono quattro passi, tre dei quali facili da
+     * dimenticare, ed e' proprio per questo che questa classe esiste.
+     *
+     * La sessione resta UNA: al termine esiste esattamente un token vivo per
+     * questo accesso, come prima del rinnovo.
+     */
+    public void rotate(HttpServletResponse response, String oldToken, String newToken) {
+        long remaining = jwtUtil.getRemainingValidityMs(oldToken);
+        if (remaining > 0) tokenBlacklistService.blacklist(oldToken, remaining);
+        activeSessionService.close(oldToken);
+        activeSessionService.open(newToken, jwtUtil.extractEmail(newToken),
+                                  jwtUtil.getExpirationMs());
+        issue(response, newToken, jwtUtil.getExpirationMs());
+    }
+
+    /**
      * Revokes the caller's session and expires the cookie.
      *
      * @return the email the dead token belonged to, or null if there was

@@ -371,10 +371,16 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 .fm-filter-lbl{font-family:var(--mono);font-size:11px;color:var(--text);min-width:58px}
 .fm-filter-select{flex:1;max-width:none}
 .fm-filter-range{flex:1;min-width:0;accent-color:var(--accent);cursor:pointer}
+/* .filter-select nasce per i menu a tendina e porta cursor:pointer: su un
+   campo di testo la freccia direbbe "qui si apre qualcosa" invece di
+   invitare a scrivere. min-width:0 perche' un input non si lascia
+   comprimere da flex sotto la sua larghezza intrinseca. */
+input.fm-filter-select{cursor:text;min-width:0}
+input.fm-filter-select::placeholder{color:var(--dim)}
 .fm-filter-val{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:34px;text-align:right}
 
 .apply-btn{
-    margin-left:auto;
+    margin-left:0;   /* Era auto, e spingeva Apply Filters a fondo barra: su un monitor largo restava mezzo schermo lontano dai controlli su cui agisce. Zero e non un valore proprio perche' la spaziatura la danno gia' i contenitori — gap:8px nella barra dei filtri, gap:10px in .bm-form-actions, che questa stessa classe usa per i tre pulsanti Save. */
     padding:6px 14px;border-radius:6px;
     background:var(--accent);color:white;
     border:none;font-family:var(--mono);font-size:10px;
@@ -391,6 +397,69 @@ header{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--
 /* =========================================
    ANALYTICS DASHBOARD
 ========================================= */
+
+/* ── Stato di caricamento della tab Analytics ─────────────────────── */
+.an-stage{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+
+.an-busy{
+    position:absolute;inset:0;z-index:20;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+    /* --bg con trasparenza: i pannelli restano intravedibili sotto, cosi' la
+       pagina non sembra svuotata mentre si aspetta. */
+    background:rgba(7,9,15,.78);
+    backdrop-filter:blur(2px);
+}
+/* Senza questa riga la velatura resterebbe SEMPRE visibile: il display:flex
+   qui sopra batte l'attributo hidden, che di suo vale solo display:none. */
+.an-busy[hidden]{display:none}
+
+.an-spin{
+    width:32px;height:32px;border-radius:50%;
+    border:2px solid var(--border);border-top-color:var(--accent);
+    animation:an-rot .8s linear infinite;
+}
+@keyframes an-rot{to{transform:rotate(360deg)}}
+.an-busy-txt{font-family:var(--mono);font-size:11px;letter-spacing:2px;color:var(--text)}
+.an-busy-sub{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.an-busy-bar{width:190px;height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.an-busy-fill{height:100%;width:0;background:var(--accent);transition:width .18s linear}
+
+/* Chi ha chiesto meno animazioni riceve comunque il segnale, fermo. */
+@media (prefers-reduced-motion: reduce){ .an-spin{animation:none} }
+
+.apply-btn:disabled{opacity:.5;cursor:default}
+
+/* ── Fermate di una linea, sotto la sua riga ──────────────────────── */
+.rt-stops-cell{padding:10px 14px 14px;background:var(--panel2);color:var(--dim);
+               font-family:var(--mono);font-size:11px}
+.rt-stops-hd{color:var(--dim);letter-spacing:1px;margin-bottom:8px}
+.rt-stops-list{margin:0;padding-left:26px;display:grid;gap:4px}
+.rt-stops-list li{color:var(--text)}
+/* Nome largo, id e scarto incolonnati a destra: si scorre la colonna dei
+   tempi senza rileggere ogni riga. */
+.rt-stops-list li{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:baseline}
+.rt-stops-name{font-family:var(--display);font-size:12px}
+.rt-stops-id{color:var(--dim)}
+.rt-stops-off{color:var(--accent);min-width:52px;text-align:right}
+
+/* ── Stacco fra i pannelli filtrabili e quelli dal vivo ───────────── */
+/* Una riga con l'etichetta al centro: costa poco e dice esplicitamente
+   quello che le spunte NOW dicevano una per una, cioe' che sotto il
+   filtro del periodo non arriva. */
+.an-live-sep{
+    display:flex;align-items:center;gap:14px;
+    margin:26px 2px 4px;
+}
+.an-live-sep::before,.an-live-sep::after{
+    content:'';flex:1;height:1px;background:var(--border);
+}
+.an-live-sep-lbl{
+    font-family:var(--mono);font-size:10px;letter-spacing:2px;
+    color:var(--dim);white-space:nowrap;
+}
+/* Il bordo acceso ripete il messaggio sul pannello stesso, per chi arriva
+   scorrendo e il separatore lo ha gia' superato. */
+.an-live-card{border-color:rgba(34,197,94,.28)}
 
 .analytics-dashboard{
     display:flex;

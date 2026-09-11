@@ -60,7 +60,18 @@ public class TravellerProfileService {
                     return Math.max(0, carCo2 - j.getCo2Grams());
                 }).sum();
 
-        long ecoPoints = all.stream().mapToInt(JourneyLog::getGreenIndex).sum();
+        // SOLO LE CORSE CONCLUSE. La riga nasce quando il viaggio comincia, non
+        // quando finisce: sommando tutto, i punti si prendevano premendo Inizia
+        // percorso e subito Termina percorso. TRUE e' l'unico stato che conta —
+        // null e' un viaggio ancora in corso, FALSE uno chiuso troppo presto.
+        //
+        // Il filtro riguarda i punti e basta. Piu' sotto trips e co2SavedKg
+        // continuano a contare ogni riga, perche' un viaggio interrotto resta
+        // un viaggio scelto: e' un dato onesto su cosa la gente sceglie, e non
+        // e' un premio da revocare.
+        long ecoPoints = all.stream()
+                .filter(j -> Boolean.TRUE.equals(j.getCompleted()))
+                .mapToInt(JourneyLog::getGreenIndex).sum();
 
         return Map.of(
                 "ecoPoints",  ecoPoints,

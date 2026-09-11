@@ -118,7 +118,8 @@ public class JourneyPlannerService {
         if (!req.isArriveBy() || req.getDepartureTime() == null || req.getDepartureTime().isBlank())
             return planOnce(req);
 
-        java.time.Instant deadline = resolveDepartureBase(req.getDepartureTime(), null, req.isItalian());
+        java.time.Instant deadline = resolveDepartureBase(
+                req.getDepartureTime(), req.getDepartureDay(), null, req.isItalian());
 
         JourneyRequest probe = copyRequest(req);
         probe.setArriveBy(false);
@@ -467,7 +468,8 @@ public class JourneyPlannerService {
                 && (req.getDepartureTime() == null || req.getDepartureTime().isBlank());
         java.time.Instant departureBase = req.getBaseOverride() != null
                 ? req.getBaseOverride()
-                : resolveDepartureBase(req.getDepartureTime(), msgs, req.isItalian());
+                : resolveDepartureBase(req.getDepartureTime(), req.getDepartureDay(),
+                                       msgs, req.isItalian());
 
         boolean useGoogle = googleApiSettings.isSearchEnabled();
 
@@ -526,8 +528,11 @@ public class JourneyPlannerService {
             boardedTripId  = line.getTripId();
             lineLabel = line.getShortName() + " → " + line.getLongName();
             DelayInfo[] delayOut = { DelayInfo.none() };
+            // La corsa da prendere davvero, non il rappresentante che la query
+            // ha scelto per calcolare tempi e geometria.
+            String[] tripOut = { null };
             waitMin = waitMinutesForLine(nearestStop, line.getRouteId(), line.getShortName(),
-                    msgs, delayOut, departureBase, isNow, req.isItalian());
+                    msgs, delayOut, departureBase, isNow, req.isItalian(), 0, tripOut);
             busDelay = delayOut[0];
 
             java.time.Instant boarding = departureBase.plusSeconds(60L * waitMin);
@@ -541,6 +546,11 @@ public class JourneyPlannerService {
             busMetres = seg.metres();
 
             String tripId = line.getTripId();
+            // La corsa davvero presa: tripOut la scrive waitMinutesForLine
+            // guardando l'orario, e quella di line e' solo un rappresentante
+            // della linea. Si risolve una volta perche' serve due volte — per
+            // il campo trip_id e per il mezzo assegnato.
+            String trip0 = tripOut[0] != null ? tripOut[0] : tripId;
             StopSlice slice0 = stopSliceBetween(tripId, nearestStop, destStop);
             busLegs.add(JourneyLeg.builder().mode("BUS")
                     .from(fmtStop(nearestStop)).to(req.getDestName())
@@ -550,13 +560,21 @@ public class JourneyPlannerService {
                     .stopNames(slice0.names())
                     .busStopCoords(slice0.busStopCoords())
                     .routeId(line.getRouteId())
+                    .tripId(trip0)
+                    .vehicleId(vehicleForTrip(trip0))
                     .build());
         } else {
-            Transfer t = findBestTransfer(nearestStop, destStop);
+            // Margine minimo e scelta del corridoio dipendono dallo stesso profilo:
+            // si legge una volta sola per tutto il ramo.
+            UserPreferences transferPrefs = activePreferences(req);
+            int minChange = minChangeMinutes(transferPrefs);
+            Transfer t = chooseTransfer(findTransferCandidates(nearestStop, destStop),
+                    nearestStop, departureBase, transferPrefs, minChange);
             if (t != null) {
                 DelayInfo[] delayOut = { DelayInfo.none() };
+                String[] trip1Out = { null }, trip2Out = { null };
                 waitMin    = waitMinutesForLine(nearestStop, t.l1RouteId(), t.l1Short(),
-                        msgs, delayOut, departureBase, isNow, req.isItalian());
+                        msgs, delayOut, departureBase, isNow, req.isItalian(), 0, trip1Out);
                 busDelay = delayOut[0];
 
                 java.time.Instant boarding1 = departureBase.plusSeconds(60L * waitMin);
@@ -569,8 +587,10 @@ public class JourneyPlannerService {
                 java.time.Instant atTransfer = boarding1.plusSeconds(60L * firstLegMin);
                 boolean liveAtTransfer = isNow && !atTransfer.isAfter(
                         java.time.Instant.now().plusSeconds(15 * 60));
+                // minChange e' gia' stato calcolato sopra: la stessa soglia che ha
+                // guidato la scelta vale ora per l'attesa reale.
                 int changeWait = waitMinutesForLine(t.stop(), t.l2RouteId(), t.l2Short(),
-                        msgs, null, atTransfer, liveAtTransfer, req.isItalian());
+                        msgs, null, atTransfer, liveAtTransfer, req.isItalian(), minChange, trip2Out);
                 transferWait   = changeWait;
                 boardedRouteId = t.l1RouteId();
                 boardedTripId  = t.l1TripId();
@@ -592,6 +612,9 @@ public class JourneyPlannerService {
 
                 StopSlice slice1 = stopSliceBetween(t.l1TripId(), nearestStop, t.stop());
                 StopSlice slice2 = stopSliceBetween(t.l2TripId(), t.stop(), destStop);
+                // Come sopra: la corsa effettiva, risolta una volta per tratta.
+                String trip1 = trip1Out[0] != null ? trip1Out[0] : t.l1TripId();
+                String trip2 = trip2Out[0] != null ? trip2Out[0] : t.l2TripId();
                 busLegs.add(JourneyLeg.builder().mode("BUS")
                         .from(fmtStop(nearestStop)).to(fmtStop(t.stop()))
                         .durationMinutes(l1Min).distanceMetres(m1)
@@ -600,6 +623,8 @@ public class JourneyPlannerService {
                         .stopNames(slice1.names())
                         .busStopCoords(slice1.busStopCoords())
                         .routeId(t.l1RouteId())
+                        .tripId(trip1)
+                        .vehicleId(vehicleForTrip(trip1))
                         .build());
                 // The change is described by structured fields; the client writes the
                 // sentence in the traveller's own language from `from` and transfer_line.
@@ -615,6 +640,8 @@ public class JourneyPlannerService {
                         .stopNames(slice2.names())
                         .busStopCoords(slice2.busStopCoords())
                         .routeId(t.l2RouteId())
+                        .tripId(trip2)
+                        .vehicleId(vehicleForTrip(trip2))
                         .build());
             } else {
                 log.warn("BUS: nessuna linea diretta né cambio trovato tra {} e {}", nearestStop, destStop);
@@ -1137,6 +1164,52 @@ public class JourneyPlannerService {
     /** Slack at which an interchange stops feeling tight, in minutes. */
     private static final double COMFORTABLE_CHANGE_MIN = 10.0;
 
+    /**
+     * Minimo interscambio in minuti, ricavato dalla risposta Q4 (0..5).
+     *
+     * Non e' una costante perche' non e' un fatto fisico: quanto margine serva
+     * dipende da chi viaggia. Chi ha risposto 0 ("margini ampi") non vuole vedersi
+     * proporre una coincidenza sotto i cinque minuti; chi ha risposto 5 ("strette
+     * va bene") ha chiesto esplicitamente anche quelle esatte, e nascondergliele
+     * sarebbe ignorare la sua risposta tanto quanto proporre uno zero a chi il
+     * rischio non lo vuole.
+     *
+     *   risposta 0 -> 5 min     risposta 3 -> 2 min     risposta 5 -> 0 min
+     *
+     * A 5 la soglia vale 0 e il filtro si spegne da solo: nessun caso speciale
+     * da ricordare, il comportamento "mostra tutto" e' il valore limite della
+     * stessa formula.
+     */
+    private static int minChangeMinutes(UserPreferences p) {
+        Integer a = (p == null) ? null : p.getAnswerReliability();
+        int answer = (a == null) ? 3 : Math.max(0, Math.min(5, a));
+        return 5 - answer;
+    }
+
+    /**
+     * Quanti corridoi di scambio distinti valutare prima di sceglierne uno.
+     *
+     * Ogni candidato costa due letture d'orario nella prima passata, quindi il
+     * numero e' un compromesso: sotto i tre non c'e' scelta vera, sopra la
+     * decina si pagano confronti fra alternative che nessuno prenderebbe.
+     */
+    private static final int TRANSFER_CANDIDATES = 6;
+
+    /**
+     * Oltre quanti minuti in piu' del migliore un candidato perde tutto il
+     * punteggio sul tempo.
+     *
+     * Serve una scala ASSOLUTA. Un min-max sull'insieme dei candidati darebbe
+     * 1.0 al piu' veloce e 0.0 al piu' lento qualunque sia la differenza vera:
+     * fra 24 e 30 minuti aprirebbe tutta la forbice esattamente come fra 24 e
+     * 90, e con due soli candidati la aprirebbe sempre. Il termine tempo
+     * finirebbe al massimo dello scarto in ogni confronto e la robustezza non
+     * potrebbe quasi mai ribaltarlo, cioe' il difetto che questa modifica
+     * esiste per togliere. Rapportare i minuti a una tolleranza fissa li tiene
+     * proporzionati a se stessi e rende i punteggi confrontabili fra ricerche.
+     */
+    private static final double TIME_TOLERANCE_MIN = 15.0;
+
     /** Chains longer than this stop being itineraries and start being puzzles. */
     private static final int MAX_COMBINED_LEGS = 4;
 
@@ -1351,6 +1424,7 @@ public class JourneyPlannerService {
         c.setDestStopId(r.getDestStopId());
         c.setUserId(r.getUserId());         c.setLang(r.getLang());
         c.setDepartureTime(r.getDepartureTime());
+        c.setDepartureDay(r.getDepartureDay());
         c.setArriveBy(r.getArriveBy());
         c.setBaseOverride(r.getBaseOverride());
         c.setModes(r.getModes());
@@ -1429,21 +1503,74 @@ public class JourneyPlannerService {
     }
 
     /**
+     * Il mezzo assegnato a una corsa, o null.
+     *
+     * DALL'ORARIO, non dal tempo reale. trips.bus_id assegna un mezzo a ogni
+     * corsa della giornata, quindi la risposta esiste anche per una tratta che
+     * parte fra un'ora — dove il flusso dal vivo, per definizione, non ha
+     * ancora niente da dire.
+     *
+     * Null quando la corsa non si trova o quando il mezzo non ha un
+     * identificativo di bordo assegnato: e' un dato in piu' per il viaggiatore,
+     * non una ragione per far fallire una pianificazione.
+     */
+    private String vehicleForTrip(String tripId) {
+        if (tripId == null) return null;
+        try {
+            return tripRepository.findById(tripId)
+                    .map(it.unicas.omnimove.model.Trip::getBus)
+                    .map(it.unicas.omnimove.model.Bus::getCurrentVehicleId)
+                    .orElse(null);
+        } catch (Exception e) {
+            log.debug("Mezzo non risolto per la corsa {}: {}", tripId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Istante di partenza del viaggio.
      *  - null/vuoto  -> adesso
      *  - "HH:mm"     -> quell'ora oggi (Europe/Rome); se gia' passata, domani
      * Se sposta a domani, lo annuncia in msgs.
      */
     private java.time.Instant resolveDepartureBase(String hhmm, List<String> msgs, boolean italian) {
+        return resolveDepartureBase(hhmm, null, msgs, italian);
+    }
+
+    /**
+     * Come sopra, ma sapendo a quale giorno si riferisce l'ora chiesta.
+     *
+     * PERCHE' SERVE SAPERLO
+     * "Le 8:30" alle 14:00 e' ambiguo, e finora l'ambiguita' veniva risolta
+     * d'ufficio: sempre domani. E' la lettura giusta quasi sempre, ma toglieva
+     * ogni modo di guardare la corsa di stamattina \u2014 a che ora passava, con che
+     * ritardo \u2014 perche' qualunque ora passata scivolava al giorno dopo.
+     *
+     * {@code day}:
+     *   "today"     l'utente ha detto oggi: si resta a oggi anche se e' passata
+     *   "tomorrow"  l'utente ha detto domani: si sposta, ma senza avviso \u2014
+     *               annunciare una decisione che ha preso lui sarebbe rumore
+     *   null        nessuna indicazione: come prima, si sposta e lo si dice
+     */
+    private java.time.Instant resolveDepartureBase(String hhmm, String day,
+                                                   List<String> msgs, boolean italian) {
         if (hhmm == null || hhmm.isBlank()) return java.time.Instant.now();
         try {
             java.time.ZoneId tz = java.time.ZoneId.of("Europe/Rome");
             java.time.LocalTime t = java.time.LocalTime.parse(hhmm.trim());   // "HH:mm"
             java.time.ZonedDateTime now = java.time.ZonedDateTime.now(tz);
             java.time.ZonedDateTime cand = now.with(t);
-            if (cand.isBefore(now)) {
+
+            boolean askedToday    = "today".equalsIgnoreCase(day);
+            boolean askedTomorrow = "tomorrow".equalsIgnoreCase(day);
+
+            // Domani su richiesta anche per un'ora non ancora passata: chi
+            // cerca le 23:50 alle 23:00 puo' volere davvero la notte dopo.
+            if (askedTomorrow && !cand.isBefore(now)) cand = cand.plusDays(1);
+
+            if (cand.isBefore(now) && !askedToday) {
                 cand = cand.plusDays(1);
-                if (msgs != null) {
+                if (msgs != null && !askedTomorrow) {
                     msgs.add(italian
                             ? "\u23F0 Le " + hhmm.trim()
                                 + " sono gi\u00e0 passate oggi \u2014 mostro i risultati per domani."
@@ -1758,21 +1885,107 @@ public class JourneyPlannerService {
                             String l1RouteId, String l1Short,
                             String l1TripId,  String l2TripId) {}
 
-    /** Cerca il miglior percorso con UN cambio: origine → X → destinazione. */
-    private Transfer findBestTransfer(String origin, String dest) {
-        var rows = scheduledStopRepository.findBestTransfer(origin, dest);
-        if (rows.isEmpty()) return null;
-        var x = rows.get(0);
-        int m1 = (int) Math.ceil(x.getL1Sec() / 60.0);
-        int m2 = (int) Math.ceil(x.getL2Sec() / 60.0);
-        return new Transfer(
-                x.getTransferStop(),
-                x.getL1Short() + " → " + x.getL1Long(), m1,
-                x.getL2Short() + " → " + x.getL2Long(), m2,
-                m1 + m2,
-                x.getL2RouteId(), x.getL2Short(),
-                x.getL1RouteId(), x.getL1Short(),
-                x.getL1TripId(),  x.getL2TripId());
+    /** I percorsi con UN cambio possibili, dal piu' breve a bordo. */
+    private List<Transfer> findTransferCandidates(String origin, String dest) {
+        return scheduledStopRepository
+                .findTransferCandidates(origin, dest, TRANSFER_CANDIDATES)
+                .stream()
+                .map(x -> {
+                    int m1 = (int) Math.ceil(x.getL1Sec() / 60.0);
+                    int m2 = (int) Math.ceil(x.getL2Sec() / 60.0);
+                    return new Transfer(
+                            x.getTransferStop(),
+                            x.getL1Short() + " → " + x.getL1Long(), m1,
+                            x.getL2Short() + " → " + x.getL2Long(), m2,
+                            m1 + m2,
+                            x.getL2RouteId(), x.getL2Short(),
+                            x.getL1RouteId(), x.getL1Short(),
+                            x.getL1TripId(),  x.getL2TripId());
+                })
+                .toList();
+    }
+
+    /** Un candidato con quello che la prima passata ha potuto misurarne. */
+    private record ScoredTransfer(Transfer t, int totalMin, int changeWait) {}
+
+    /**
+     * Sceglie fra i corridoi di scambio, invece di prendere il primo che esce.
+     *
+     * PERCHE' LA SCELTA NON POTEVA STARE NELLA QUERY
+     * Ordinare per solo tempo a bordo e chiudere con LIMIT 1 significa decidere
+     * prima di sapere quanto si aspetta al cambio: il margine veniva calcolato
+     * dopo, a scelta fatta, e non poteva influenzarla. La risposta Q4 del
+     * viaggiatore non aveva quindi nulla su cui agire — ed e' anche il motivo per
+     * cui il min-max in reliabilityOf era stato abbandonato: con un candidato
+     * solo, ogni valore e' contemporaneamente il minimo e il massimo.
+     *
+     * DUE PASSATE, E QUESTA E' LA PRIMA
+     * Qui si misura con il SOLO orario statico: niente ETA live, niente Google.
+     * I candidati sono sei e pagarli a colpi di chiamate esterne sarebbe
+     * insostenibile in linea. L'itinerario vero, con dati live e tempi Google, lo
+     * costruisce il chiamante per il solo vincitore.
+     *
+     * IL PUNTEGGIO HA DUE TERMINI, NON QUATTRO
+     * Fra itinerari in bus dello stesso viaggio, costo e CO2 non cambiano: stesso
+     * biglietto, stesso mezzo. Restano tempo totale e robustezza, pesati come li
+     * ha scelti il viaggiatore e rinormalizzati fra loro perche' il punteggio
+     * resti leggibile in [0,1].
+     */
+    private Transfer chooseTransfer(List<Transfer> candidates, String origin,
+                                    java.time.Instant departureBase,
+                                    UserPreferences prefs, int minChange) {
+        if (candidates == null || candidates.isEmpty()) return null;
+        if (candidates.size() == 1) return candidates.get(0);
+
+        List<ScoredTransfer> viable = new ArrayList<>();
+        for (Transfer t : candidates) {
+            Integer wait1 = scheduledWaitMinutes(origin, t.l1RouteId(), t.l1Short(), departureBase, 0);
+            if (wait1 == null) continue;              // la linea 1 non passa piu' oggi
+
+            java.time.Instant atTransfer =
+                    departureBase.plusSeconds(60L * (wait1 + t.l1Min()));
+            Integer changeWait =
+                    scheduledWaitMinutes(t.stop(), t.l2RouteId(), t.l2Short(), atTransfer, minChange);
+            // Nessuna corsa della linea 2 oltre il margine richiesto: la coincidenza
+            // non esiste, e va scartata anziche' stimata. Il ripiego a cinque minuti
+            // il ripiego a cinque minuti qui farebbe vincere un cambio impossibile,
+            // per giunta assegnandogli l'attesa piu' breve del gruppo.
+            if (changeWait == null) continue;
+
+            viable.add(new ScoredTransfer(
+                    t, wait1 + t.l1Min() + changeWait + t.l2Min(), changeWait));
+        }
+
+        // Se l'orario statico non promuove nessuno — festivo, ultime corse gia'
+        // passate — si restituisce il primo candidato, che e' esattamente cio' che
+        // la vecchia query avrebbe dato: nessun peggioramento rispetto a prima.
+        if (viable.isEmpty()) return candidates.get(0);
+
+        PreferenceWeights w = PreferenceWeights.from(prefs);
+        double wt = w.time(), wr = w.reliability();
+        double sum = wt + wr;
+        if (sum <= 0) { wt = 0.5; wr = 0.5; } else { wt /= sum; wr /= sum; }
+
+        int minTotal = viable.stream().mapToInt(ScoredTransfer::totalMin).min().orElse(0);
+
+        ScoredTransfer best = null;
+        double bestScore = -1.0;
+        for (ScoredTransfer s : viable) {
+            double timeNorm = 1.0 - Math.min(1.0,
+                    (s.totalMin() - minTotal) / TIME_TOLERANCE_MIN);
+            double score = wt * timeNorm
+                         + wr * reliabilityOf("BUS", s.changeWait(), null);
+            // A parita' di punteggio vince il piu' breve: un criterio verificabile,
+            // invece dell'ordine in cui il database ha restituito le righe.
+            boolean better = (best == null) || score > bestScore
+                    || (score == bestScore && s.totalMin() < best.totalMin());
+            if (better) { bestScore = score; best = s; }
+        }
+
+        log.debug("Cambio scelto: {}+{} a {} — {} min totali, {} di margine (punteggio {})",
+                best.t().l1Short(), best.t().l2Short(), best.t().stop(),
+                best.totalMin(), best.changeWait(), String.format("%.3f", bestScore));
+        return best.t();
     }
 
     /**
@@ -1782,11 +1995,15 @@ public class JourneyPlannerService {
      *   1. Cerca il match esatto sulla linea richiesta (per routeId, poi per routeShort parziale).
      *   2. Se non trova la linea nei dati RT, usa il prossimo bus generico alla fermata
      *      e aggiunge un avviso in msgs.
-     *   3. Se CassiTrack non risponde o la lista è vuota, cade su waitMinutesFromSchedule (DB).
+     *   3. Se CassiTrack non risponde o la lista è vuota, cade su nextScheduledRun (DB).
      */
     private int waitMinutesForLine(String stopId, String routeId, String routeShort,
                                    List<String> msgs, DelayInfo[] out,
-                                   java.time.Instant when, boolean useLive, boolean italian) {
+                                   java.time.Instant when, boolean useLive, boolean italian,
+                                   int minLeadMin, String[] tripOut) {
+        // Nessuna corsa che parta prima di questo istante e' una coincidenza:
+        // e' quella che si perde correndo. minLeadMin = 0 spegne il filtro.
+        final java.time.Instant earliest = when.plusSeconds(60L * Math.max(0, minLeadMin));
         // useLive == false -> ricerca per un orario futuro: un bus tracciato ADESSO
         // non dice nulla su quel momento, quindi si va diritti all'orario di tabella.
         if (useLive) {
@@ -1795,10 +2012,24 @@ public class JourneyPlannerService {
 
                 // Solo un bus DELLA LINEA RICHIESTA e' rilevante: il prossimo bus di
                 // un'altra linea non dice nulla ne' sull'attesa ne' sul ritardo.
+                // L'id se c'e', il numero SOLO in sua assenza — e mai in OR con
+                // l'id. Con l'OR bastava che il nome contenesse "10" perche' un
+                // arrivo di LINEA_10_R passasse per una richiesta su LINEA_10: la
+                // stessa confusione fra andata e ritorno che c'era nel ramo da
+                // orario, qui pero' sui dati dal vivo.
+                //
+                // E contains() su un numero e' doppiamente largo: "1" si ritrova
+                // dentro 11, 10, 21 e 01. Quando si ripiega sul numero si confronta
+                // ora route_short_name per intero, che e' il campo giusto e
+                // viaggiava gia' nella risposta senza che nessuno lo guardasse.
                 Optional<StopArrivalDTO> exactMatch = arrivals.stream()
-                        .filter(a -> (routeId    != null && routeId.equals(a.getRouteId()))
-                                || (routeShort != null && a.getRouteName() != null
-                                && a.getRouteName().contains(routeShort)))
+                        .filter(a -> routeId != null
+                                ? routeId.equals(a.getRouteId())
+                                : (routeShort != null && routeShort.equals(a.getRouteShortName())))
+                        // Scarta le corse che passano prima del margine richiesto: al
+                        // cambio la prima utile e' la prima PRENDIBILE, non la prima.
+                        .filter(a -> a.getEstimatedArrival() == null
+                                || !a.getEstimatedArrival().isBefore(earliest))
                         .findFirst();
 
                 if (exactMatch.isPresent()) {
@@ -1807,6 +2038,12 @@ public class JourneyPlannerService {
                     // Il ritardo si raccoglie SOLO dal match esatto. Prima veniva preso
                     // dal primo bus qualsiasi: la scheda mostrava il ritardo di un altro
                     // bus spacciandolo per quello del viaggio dell'utente.
+                    // La corsa che quel mezzo sta facendo davvero. E' il dato
+                    // migliore che si possa avere: viene dal veicolo, non da una
+                    // deduzione sull'orario.
+                    if (tripOut != null && match.getTripId() != null)
+                        tripOut[0] = match.getTripId();
+
                     if (out != null) {
                         boolean live = match.getVehicleId() != null;
                         out[0] = new DelayInfo(
@@ -1817,9 +2054,18 @@ public class JourneyPlannerService {
                     }
 
                     if (match.getEstimatedArrival() != null) {
+                        // L'attesa si misura da QUANDO CI ARRIVI, cioe' da `when`.
+                        // Misurarla da System.currentTimeMillis() rispondeva a una
+                        // domanda diversa — "quanto manca a quel bus da adesso" — che
+                        // coincide solo se sei gia' fermo alla fermata. Al cambio il
+                        // chiamante passa l'istante di arrivo all'interscambio, e quel
+                        // parametro veniva silenziosamente ignorato proprio li'.
                         long etaSec = match.getEstimatedArrival().getEpochSecond()
-                                - System.currentTimeMillis() / 1000;
-                        return (int) Math.max(0, etaSec / 60);
+                                - when.getEpochSecond();
+                        // Per eccesso, come il ramo da orario: un bus che parte fra 59
+                        // secondi non e' "fra 0 minuti", ed e' esattamente il caso in cui
+                        // arrotondare per difetto fa nascere la coincidenza impossibile.
+                        return (int) Math.max(0, Math.ceil(etaSec / 60.0));
                     }
                 } else {
                     // Linea non tracciata ora: si usa l'ORARIO DI TABELLA della linea
@@ -1842,7 +2088,10 @@ public class JourneyPlannerService {
         }
 
         // Orario statico della linea richiesta, all'istante di riferimento.
-        return waitMinutesFromSchedule(stopId, routeShort, when);
+        NextRun run = nextScheduledRun(stopId, routeId, routeShort, when, minLeadMin);
+        if (run == null) return 5;          // nessuna corsa rimasta oggi → stima minima
+        if (tripOut != null && tripOut[0] == null) tripOut[0] = run.tripId();
+        return run.minutes();
     }
 
     /**
@@ -1852,24 +2101,62 @@ public class JourneyPlannerService {
      * Usato quando CassiTrack non è disponibile o non ha dati per quella linea.
      * Restituisce 5 solo se non ci sono più corse oggi (ultima corsa già passata).
      */
-    private int waitMinutesFromSchedule(String stopId, String routeShort, java.time.Instant when) {
+    /** La prossima partenza utile: fra quanti minuti, e di quale corsa. */
+    private record NextRun(int minutes, String tripId) {}
+
+    /**
+     * Come sopra, ma null quando non c'e' nessuna corsa utile.
+     *
+     * La differenza sta tutta in quel null. Un ripiego a cinque minuti e' una
+     * stima ragionevole quando si deve comunque mostrare un itinerario, e diventa
+     * dannoso quando se ne stanno confrontando sei: darebbe a una coincidenza
+     * inesistente l'attesa piu' breve del gruppo, e quindi la vittoria.
+     */
+    private Integer scheduledWaitMinutes(String stopId, String routeId, String routeShort,
+                                         java.time.Instant when, int minLeadMin) {
+        NextRun r = nextScheduledRun(stopId, routeId, routeShort, when, minLeadMin);
+        return r == null ? null : r.minutes();
+    }
+
+    /**
+     * Come sopra, ma dice anche QUALE corsa e'.
+     *
+     * Serve perche' la corsa da prendere non e' quella che la ricerca del percorso
+     * ha usato per i calcoli: findLinesConnecting ordina per durata del tragitto e
+     * ignora l'ora, quindi restituisce un rappresentante del percorso, non il
+     * turno delle 19:35. Chi vuole riconoscere il mezzo giusto sulla mappa deve
+     * partire da qui.
+     */
+    private NextRun nextScheduledRun(String stopId, String routeId, String routeShort,
+                                     java.time.Instant when, int minLeadMin) {
         // Secondi dalla mezzanotte dell'ISTANTE DI RIFERIMENTO, non di "adesso":
         // per una ricerca futura conta l'orario scelto, non l'ora corrente.
         int nowSec = when.atZone(ZoneId.of("Europe/Rome")).toLocalTime().toSecondOfDay();
 
-        List<ScheduledStop> candidates = (routeShort != null)
-                ? scheduledStopRepository.findByStopIdAndRouteShort(stopId, routeShort)
-                : scheduledStopRepository.findByStopId(stopId);
+        // L'id della linea PRIMA del numero. Dalla V26 andata e ritorno sono due
+        // route distinte con lo stesso short_name: cercando per numero, la prima
+        // partenza utile da una fermata puo' essere una corsa della direzione
+        // opposta. Il risultato e' un orario plausibile ma di un'altra corsa — e da
+        // quando la tratta porta il trip_id, il mezzo disegnato sulla mappa e'
+        // quello che sta all'altro capo della linea.
+        List<ScheduledStop> candidates =
+                  (routeId    != null) ? scheduledStopRepository.findByStopIdAndRouteId(stopId, routeId)
+                : (routeShort != null) ? scheduledStopRepository.findByStopIdAndRouteShort(stopId, routeShort)
+                :                        scheduledStopRepository.findByStopId(stopId);
+
+        // Con minLeadMin = 0 la seconda condizione e' implicata dalla prima, quindi
+        // il comportamento storico resta identico: la soglia non e' un caso a parte.
+        final int earliestSec = nowSec + 60 * Math.max(0, minLeadMin);
 
         return candidates.stream()
-                .mapToInt(ScheduledStop::getArrivalSeconds)
-                .filter(sec -> sec > nowSec)            // solo corse non ancora passate
-                .map(sec -> sec - nowSec)               // secondi rimanenti
-                .min()
-                .stream()
-                .mapToObj(diff -> (int) Math.ceil(diff / 60.0))
-                .findFirst()
-                .orElse(5);   // nessuna corsa rimasta oggi → stima minima
+                .filter(ss -> ss.getArrivalSeconds() != null
+                           && ss.getArrivalSeconds() > nowSec
+                           && ss.getArrivalSeconds() >= earliestSec)
+                .min(java.util.Comparator.comparingInt(ScheduledStop::getArrivalSeconds))
+                .map(ss -> new NextRun(
+                        (int) Math.ceil((ss.getArrivalSeconds() - nowSec) / 60.0),
+                        ss.getTrip() != null ? ss.getTrip().getId() : null))
+                .orElse(null);
     }
 
 }

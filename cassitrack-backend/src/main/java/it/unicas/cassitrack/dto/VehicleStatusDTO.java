@@ -34,7 +34,20 @@ public class VehicleStatusDTO {
     /** this id is used to link the MQTT message to the relative bus in the postgres DB */
     private Integer busId;
 
+    /**
+     * Anagrafica del mezzo, copiata dalla riga buses quando il fix arriva.
+     *
+     * Le chiavi sono dichiarate a mano perche' tutto il resto del DTO parla
+     * snake_case: senza @JsonProperty Jackson pubblicava numeroPosti e
+     * wheelchairAccessible, mentre il pannello leggeva numero_posti e
+     * wheelchair_accessible. Trovava undefined, e undefined si disegna come un
+     * trattino — che e' esattamente cio' che si vedeva, con i valori pero'
+     * regolarmente presenti dietro.
+     */
+    @JsonProperty("numero_posti")
     private Integer numeroPosti;    // 🚌
+
+    @JsonProperty("wheelchair_accessible")
     private Boolean wheelchairAccessible;
 
     /** Current latitude */

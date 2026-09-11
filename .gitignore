@@ -28,6 +28,11 @@ env
 cassitrack-backend/env
 omnimove-backend/env
 
+# `*.env` matches "foo.env", not ".env_c" — the suffixed variants slipped
+# through and arrived in a merge carrying live DB, JWT, MQTT and API keys.
+.env_*
+**/.env_*
+
 # ⚠️  SECURITY NOTICE — Git history cleanup required:
 # Secrets were committed in early commits (see omnimove-backend/env, cassitrack-backend/env).
 # Run: git filter-repo --path cassitrack-backend/env --path omnimove-backend/env --invert-paths

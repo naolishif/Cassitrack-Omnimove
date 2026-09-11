@@ -56,6 +56,21 @@ public class VehiclePosition {
      *  È QUESTA, non lo stopId, a dire dove siamo lungo l'anello. */
     private Integer lastStopSequence;
 
+    /**
+     * Quante volte di fila il mezzo e' ARRETRATO lungo la sequenza della corsa
+     * che gli e' stata assegnata.
+     *
+     * Un passo indietro isolato non vuol dire niente: il GPS oscilla, e a
+     * cavallo di una fermata la posizione piu' vicina puo' alternarsi fra due
+     * indici. Tre di fila, con un movimento vero fra un fix e l'altro, non sono
+     * piu' rumore: quella corsa il mezzo la sta percorrendo al contrario, cioe'
+     * non e' la sua.
+     *
+     * Azzerato da un solo passo in avanti e a ogni cambio di corsa: e' un
+     * sospetto che si accumula, non una condanna che resta.
+     */
+    private Integer wrongWayStrikes;
+
     // ── Stato della macchina "passaggio al minimo" ──────────────
     /** Fermata verso cui il bus si sta avvicinando. */
     private Integer approachStopSequence;
@@ -79,6 +94,17 @@ public class VehiclePosition {
 
     /** The stop it is heading to — derived server-side from the trip sequence */
     private String  nextStopId;
+
+    /**
+     * Orario di TABELLA alla prossima fermata, in secondi dalla mezzanotte.
+     *
+     * Si conserva l'orario previsto, non i secondi mancanti: un ETA calcolato
+     * qui invecchierebbe fino al messaggio successivo, e su un mezzo che
+     * trasmette una volta al minuto significa mostrare "3 min" per un minuto
+     * intero. L'orario di tabella invece non invecchia, e chi legge lo
+     * trasforma in un'attesa con l'ora del momento in cui la chiede.
+     */
+    private Integer nextStopArrivalSeconds;
     private String  tripId;
 
     /**

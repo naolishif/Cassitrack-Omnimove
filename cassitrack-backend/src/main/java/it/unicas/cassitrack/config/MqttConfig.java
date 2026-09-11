@@ -262,6 +262,21 @@ public class MqttConfig {
                         obuMqttClientFactory(),
                         obuTopic
                 );
+        // I due timeout NON vanno allineati, e vale la pena dire perche'.
+        //
+        // setConnectionTimeout(30) e' quanto Paho concede al proprio tentativo, in
+        // un thread suo. Questo invece e' quanto il thread di AVVIO di Spring resta
+        // bloccato ad aspettarlo: alzarlo non rende la connessione piu' probabile,
+        // ritarda soltanto la partenza dell'applicazione della stessa cifra.
+        //
+        // Provato: portandolo a 30 s l'avvio e' passato da 12 a 75 secondi e
+        // l'errore e' comparso identico allo scadere. Se il broker non risponde in
+        // cinque secondi non risponde nemmeno in trenta — il problema e' la
+        // raggiungibilita', non la fretta.
+        //
+        // Con automaticReconnect(true) la connessione, quando il broker torna
+        // raggiungibile, si stabilisce comunque dopo: l'ERROR all'avvio e' rumore,
+        // non un guasto, e cinque secondi sono il prezzo giusto da pagare.
         adapter.setCompletionTimeout(5000);
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);

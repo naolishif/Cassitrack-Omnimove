@@ -56,6 +56,26 @@ public class ScheduleAdherenceService {
      */
     private static final long SETTLED_SECONDS = 90;
 
+    /**
+     * Quanti arretramenti di fila bastano a dichiarare sbagliata la corsa.
+     *
+     * Tre e non uno: a cavallo di una fermata l'indice piu' vicino puo'
+     * alternarsi fra due valori per il solo rumore del GPS, e un mezzo che
+     * manovra al capolinea indietreggia davvero per qualche metro. Tre passi
+     * indietro consecutivi, ciascuno con un movimento vero alle spalle, non
+     * capitano per caso su una corsa percorsa nel verso giusto.
+     */
+    public static final int WRONG_WAY_STRIKES = 3;
+
+    /**
+     * Sotto questo spostamento fra due fix non si giudica il verso.
+     *
+     * Fermo al semaforo o in sosta, la posizione oscilla di pochi metri e
+     * l'indice piu' vicino puo' cambiare senza che il mezzo si sia mosso:
+     * conterebbero passi indietro che non sono avvenuti.
+     */
+    private static final double WRONG_WAY_MIN_MOVE_M = 60.0;
+
     /** Da quanti secondi il mezzo non si sposta davvero (0 se sta viaggiando). */
     private static long stoppedFor(VehiclePosition pos) {
         if (pos.getStationarySince() == null) return 0;
@@ -116,6 +136,12 @@ public class ScheduleAdherenceService {
                 return;
             }
 
+            // ── Sta percorrendo questa corsa al contrario? ────────
+            // Prima dell'aggancio, perche' non dipende dall'ancora e perche'
+            // dev'essere valutato anche quando la macchina degli arrivi non
+            // conclude nulla — che e' proprio il caso in cui serve.
+            trackDirection(pos, nowSeconds);
+
             // ── Aggancio iniziale ────────────────────────────────
             if (pos.getLastStopSequence() == null) {
                 Integer seq = routeMatchingService.bootstrapSequence(pos.getTripId(), nowSeconds);
@@ -127,12 +153,24 @@ public class ScheduleAdherenceService {
                     return;
                 }
 
+                // SOLO l'ancora. lastStopRegisteredId resta vuoto di proposito:
+                // significa "fermata dove il mezzo e' stato visto", e qui non
+                // abbiamo visto niente — la posizione l'ha dedotta l'orologio.
+                //
+                // Scriverla faceva comparire sotto LAST STOP una fermata mai
+                // toccata, tipicamente il capolinea di partenza della corsa,
+                // mentre due righe piu' sotto il pannello ammetteva "Awaiting
+                // first arrival". Due affermazioni opposte sulla stessa scheda:
+                // quella sbagliata era la prima.
+                //
+                // Il trattino che resta e' l'informazione giusta, e dura poco:
+                // alla prima fermata davvero superata il campo si riempie.
                 pos.setLastStopSequence(seq);
-                var anchor = routeMatchingService.stopAtSequence(pos.getTripId(), seq);
-                if (anchor != null) pos.setLastStopRegisteredId(anchor.stopId());
                 resetApproach(pos);
 
-                log.info("Bus {} agganciato alla corsa {} da seq {} ({})",
+                var anchor = routeMatchingService.stopAtSequence(pos.getTripId(), seq);
+                log.info("Bus {} agganciato alla corsa {} da seq {} ({}) — per orario, "
+                       + "nessun arrivo osservato",
                         pos.getVehicleId(), pos.getTripId(), seq,
                         anchor != null ? anchor.stopId() : "?");
                 // Nessun ritardo NUOVO: quell'arrivo non l'abbiamo osservato.
@@ -186,19 +224,59 @@ public class ScheduleAdherenceService {
             boolean settled   = d <= APPROACH_GATE_METRES && stoppedFor(pos) >= SETTLED_SECONDS;
             if (!movedAway && !settled) return;
 
-            // ── Arrivo confermato: il minimo ERA la fermata ──
+            // ── Il minimo e' stato superato: era quello l'arrivo? ──
             double  minDist = pos.getApproachMinDistanceMetres();
             Instant minAt   = pos.getApproachMinTimestamp();
 
+            // TROPPO LONTANO: NON SI AVANZA, SI RI-AGGANCIA
+            //
+            // Prima l'ancora avanzava comunque di una posizione. Sembra
+            // prudente — il mezzo di li' e' passato, sia pure alla larga — ma
+            // se l'ancora si trova DIETRO al senso di marcia ogni candidata e'
+            // alle spalle del bus: la distanza puo' solo crescere, la prova di
+            // allontanamento scatta al primo confronto, e l'ancora percorre da
+            // sola tutta la sequenza fino al capolinea, una fermata ogni due
+            // messaggi. Da li' in poi la fermata successiva non esiste piu' e
+            // la macchina resta bloccata fino al cambio di corsa: e' il mezzo
+            // senza NEXT STOP, con il ritardo fermo a una fermata di parecchio
+            // precedente.
+            //
+            // Il rimedio non e' fermarsi — l'ancora ferma sarebbe altrettanto
+            // sbagliata — ma rimetterla DOVE IL MEZZO SI TROVA, chiedendolo
+            // alla geografia invece che alla sequenza. Nel caso legittimo (una
+            // fermata sfiorata a 120 m perche' il tracciato non passa sul
+            // punto) la piu' vicina e' proprio quella, e il comportamento resta
+            // quello di prima: si avanza, senza misurare.
+            if (minDist > APPROACH_GATE_METRES) {
+                Integer here = routeMatchingService.nearestSequence(
+                        pos.getTripId(), pos.getLat(), pos.getLon(), nowSeconds);
+                resetApproach(pos);
+                if (here != null && !here.equals(pos.getLastStopSequence())) {
+                    // Si sposta l'ANCORA, non la fermata dichiarata.
+                    // lastStopRegisteredId viene scritto in un punto solo di
+                    // tutta la classe — l'arrivo confermato qui sotto — e
+                    // questo non lo e': e' un recupero, la fermata piu' vicina
+                    // puo' essere a centinaia di metri. Il pannello continua a
+                    // mostrare l'ultima fermata davvero osservata, o il
+                    // trattino se non ce n'e' ancora una.
+                    var at = routeMatchingService.stopAtSequence(pos.getTripId(), here);
+                    pos.setLastStopSequence(here);
+                    log.warn("Bus {} passato a {} m da {} — troppo lontano. Ancora "
+                           + "riportata a seq {} ({}), la fermata piu' vicina al fix.",
+                            pos.getVehicleId(), Math.round(minDist), candidate.stopId(),
+                            here, at != null ? at.stopId() : "?");
+                } else {
+                    log.warn("Bus {} passato a {} m da {} — troppo lontano, arrivo non "
+                           + "registrato e ancora invariata.",
+                            pos.getVehicleId(), Math.round(minDist), candidate.stopId());
+                }
+                return;   // nessuna misura: il ritardo resta quello di prima
+            }
+
+            // ── Arrivo confermato: il minimo ERA la fermata ──
             pos.setLastStopSequence(candidate.stopSequence());
             pos.setLastStopRegisteredId(candidate.stopId());
             resetApproach(pos);
-
-            if (minDist > APPROACH_GATE_METRES) {
-                log.warn("Bus {} passato a {} m da {} — troppo lontano, arrivo non registrato",
-                        pos.getVehicleId(), Math.round(minDist), candidate.stopId());
-                return;   // l'ancora avanza, il ritardo resta quello di prima
-            }
 
             int arrivedAt    = secondsOfDay(minAt);
             int delaySeconds = arrivedAt - candidate.arrivalSeconds();
@@ -224,6 +302,64 @@ public class ScheduleAdherenceService {
             // il tratto successivo deve comunque partire da qui.
             rememberFix(pos);
         }
+    }
+
+    /**
+     * Il mezzo sta avanzando o arretrando lungo la corsa che gli e' assegnata?
+     *
+     * L'IDEA
+     * La corsa e' una sequenza ordinata di fermate. Si guarda dove cadeva il
+     * mezzo lungo quella sequenza al fix precedente e dove cade adesso: se
+     * l'indice sale sta percorrendo la corsa nel verso giusto, se scende la sta
+     * percorrendo al contrario — e allora quella corsa non e' la sua.
+     *
+     * PERCHE' L'ORDINE E NON LE FERMATE
+     * Confrontare QUALI fermate ha toccato non servirebbe: andata e ritorno
+     * hanno lo stesso insieme di fermate, e un mezzo che va al contrario le
+     * tocca tutte lo stesso. Cambia solo l'ordine, ed e' li' che si vede.
+     *
+     * PERCHE' NON SI GUARDA LO STORICO DEGLI ARRIVI
+     * Perche' con il verso sbagliato quello storico e' VUOTO, ed e' proprio il
+     * sintomo: ogni fermata candidata sta dietro al mezzo, il gate degli 80 m
+     * la rifiuta sempre, nessun arrivo viene mai registrato. Aspettare gli
+     * arrivi significherebbe aspettare una cosa che non arrivera' mai. Il
+     * movimento fra due fix invece c'e' da subito.
+     *
+     * SUGLI ANELLI FUNZIONA LO STESSO: la sequenza di una corsa e' comunque
+     * lineare, 1..N, anche quando ripassa dalle stesse fermate — e nearestSequence
+     * scioglie le ripetizioni con l'orario di tabella.
+     *
+     * Non decide niente: aggiorna solo un contatore. Chi lo legge decide.
+     */
+    private void trackDirection(VehiclePosition pos, int nowSeconds) {
+        Double pLat = pos.getPrevFixLat(), pLon = pos.getPrevFixLon();
+        if (pLat == null || pLon == null || pos.getLat() == null || pos.getLon() == null) return;
+
+        // Movimento troppo piccolo per dire qualcosa sul verso.
+        if (routeMatchingService.haversineMetres(pLat, pLon, pos.getLat(), pos.getLon())
+                < WRONG_WAY_MIN_MOVE_M) return;
+
+        Integer before = routeMatchingService.nearestSequence(pos.getTripId(), pLat, pLon, nowSeconds);
+        Integer nowAt  = routeMatchingService.nearestSequence(
+                pos.getTripId(), pos.getLat(), pos.getLon(), nowSeconds);
+        if (before == null || nowAt == null) return;
+
+        int strikes = pos.getWrongWayStrikes() == null ? 0 : pos.getWrongWayStrikes();
+        if (nowAt < before) {
+            strikes++;
+            log.debug("Bus {} arretrato lungo {} — da seq {} a seq {} ({}/{})",
+                    pos.getVehicleId(), pos.getTripId(), before, nowAt, strikes, WRONG_WAY_STRIKES);
+        } else if (nowAt > before) {
+            strikes = 0;      // un passo avanti cancella il sospetto
+        }
+        // nowAt == before: fermo lungo la sequenza, il contatore non si muove
+        pos.setWrongWayStrikes(strikes);
+    }
+
+    /** Il mezzo ha smentito la corsa assegnata percorrendola al contrario. */
+    public static boolean runsWrongWay(VehiclePosition pos) {
+        return pos != null && pos.getWrongWayStrikes() != null
+                && pos.getWrongWayStrikes() >= WRONG_WAY_STRIKES;
     }
 
     /**
@@ -255,6 +391,11 @@ public class ScheduleAdherenceService {
                 pos.setApproachStopSequence(prev.getApproachStopSequence());
                 pos.setApproachMinDistanceMetres(prev.getApproachMinDistanceMetres());
                 pos.setApproachMinTimestamp(prev.getApproachMinTimestamp());
+                // Anche il sospetto sul verso e' relativo alla CORSA: si accumula
+                // fra un messaggio e l'altro, ma cambiando corsa riparte da zero.
+                // Portarselo dietro accuserebbe la corsa nuova di cio' che ha
+                // fatto il mezzo sulla precedente.
+                pos.setWrongWayStrikes(prev.getWrongWayStrikes());
             }
             if (!adherenceStillMeaningful(prev)) return;
 

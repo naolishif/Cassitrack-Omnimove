@@ -54,4 +54,25 @@ public class JourneyLog {
     @Column(name = "created_at")
     private ZonedDateTime createdAt;
 
+    /**
+     * Com'e' finito il viaggio. TRE STATI, e per questo e' un Boolean e non un
+     * boolean:
+     *
+     *   null   in corso: cominciato, non ancora chiuso
+     *   TRUE   concluso — e' l'unico stato che vale eco points
+     *   FALSE  chiuso troppo presto: non vale punti, ma e' CHIUSO
+     *
+     * Il terzo stato non e' un lusso. La riga nasce quando il viaggio COMINCIA,
+     * quindi da sola non direbbe se sia stato fatto: senza questo campo i punti
+     * si prendevano premendo Inizia e subito Termina. E con due soli valori una
+     * corsa interrotta resterebbe indistinguibile da una in corso, cosi' la
+     * chiusura successiva ripescherebbe quella vecchia e le attribuirebbe
+     * l'esito di un altro viaggio.
+     *
+     * Per tutto cio' che non sono i punti — storico, statistiche, ricerca — una
+     * corsa interrotta resta un viaggio scelto, che e' un dato buono di per se'.
+     */
+    @Column(name = "completed")
+    private Boolean completed;
+
 }

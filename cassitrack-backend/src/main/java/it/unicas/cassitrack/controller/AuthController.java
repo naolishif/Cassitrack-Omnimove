@@ -18,7 +18,6 @@ import it.unicas.cassitrack.util.ClientIp;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -38,7 +37,8 @@ public class AuthController {
     // cookie rather than in the JSON response body, so JavaScript cannot read it.
     // The token is still included in the JSON body for backward compatibility with the
     // Spring Security filter chain and API clients that use the Authorization header.
-    private static final String JWT_COOKIE_NAME = "cassitrack_jwt";
+    private static final String JWT_COOKIE_NAME =
+            it.unicas.cassitrack.security.SessionCookie.NAME;
 
     @Autowired
     private AuthenticationManager authenticationManager;
@@ -49,10 +49,10 @@ public class AuthController {
     @Autowired
     private UserService userService;
 
-    // false = HTTP (dev + public server without TLS); true = HTTPS only
-    // Controlled via COOKIE_SECURE env var — set to true once Nginx+TLS is in place
-    @Value("${cassitrack.cookie.secure:false}")
-    private boolean cookieSecure;
+    // Gli attributi del cookie (Secure compreso, da COOKIE_SECURE) stanno tutti
+    // in SessionCookie: qui non se ne decide piu' nessuno.
+    @Autowired
+    private it.unicas.cassitrack.security.SessionCookie sessionCookie;
 
     @Autowired
     private LoginAttemptService loginAttemptService;
@@ -123,13 +123,11 @@ public class AuthController {
             // stays the proof; this is its visible echo.
             managerActivityService.recordLogin(user, request.getHeader("User-Agent"));
 
-            // V-04 FIX: Set token in httpOnly cookie — JS cannot read it
-            // cookieSecure=false allows the cookie to be sent over plain HTTP (dev + server without TLS).
-            // Set COOKIE_SECURE=true in .env once Nginx+TLS is in place.
-            String secureFlag = cookieSecure ? "; Secure" : "";
-            response.setHeader("Set-Cookie",
-                String.format("%s=%s; Path=/; Max-Age=%d; HttpOnly%s; SameSite=Strict",
-                    JWT_COOKIE_NAME, token, (int) (jwtUtil.getExpirationMs() / 1000), secureFlag));
+            // V-04 FIX: il token viaggia in un cookie httpOnly, illeggibile da JS.
+            // Il formato sta tutto in SessionCookie: da quando il filtro rinnova
+            // il token, i punti che scrivono questa intestazione sono tre, e
+            // tenerli allineati a mano non funziona.
+            sessionCookie.issue(response, token, jwtUtil.getExpirationMs());
 
             LoginResponse resp = new LoginResponse();
             resp.setToken(token);   // kept for API clients using Authorization header
@@ -175,10 +173,8 @@ public class AuthController {
             }
         }
 
-        // V-04 FIX: Clear the httpOnly JWT cookie on logout
-        String secureFlag = cookieSecure ? "; Secure" : "";
-        response.setHeader("Set-Cookie",
-            JWT_COOKIE_NAME + "=; Path=/; Max-Age=0; HttpOnly" + secureFlag + "; SameSite=Strict");
+        // V-04 FIX: il cookie scade insieme alla sessione.
+        sessionCookie.expire(response);
 
         return ResponseEntity.noContent().build();
     }
