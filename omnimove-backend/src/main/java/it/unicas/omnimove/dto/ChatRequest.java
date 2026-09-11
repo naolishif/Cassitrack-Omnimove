@@ -42,6 +42,55 @@ public class ChatRequest {
         /** The stop whose arrivals panel is open, if any. */
         private String stopId;
         private String stopName;
+
+        /**
+         * The itinerary the traveller has started, while one is running.
+         *
+         * Asked "where is the bus?" from the stop they are waiting at, the
+         * assistant had the whole network in front of it — every line, every
+         * stop, every bus on the road — and nothing saying which of it was this
+         * traveller's, so it answered with whichever line came to hand. The
+         * journey they pressed Start on is the subject of every question they
+         * ask while it runs, and this is how it gets told.
+         */
+        private ActiveJourney journey;
+    }
+
+    /**
+     * One started itinerary, as the page has it.
+     *
+     * The ids matter as much as the names: an arrival at a stop carries the trip
+     * it belongs to, so the run named here is the very bus this traveller is
+     * waiting for rather than the next one wearing the same number.
+     */
+    @Data
+    public static class ActiveJourney {
+        /** BUS, BIKE, SCOOTER or WALK — the mode of the itinerary as a whole. */
+        private String mode;
+        /** The label on the card they chose, e.g. "16 -> Ospedale". */
+        private String label;
+        private String originName;
+        private String destName;
+        /** How long it was planned to take, and what the counter on screen reads now. */
+        private Integer durationMinutes;
+        private Integer minutesLeft;
+        /** Where they board and which run they ride, for the first bus of the trip. */
+        private String boardingStopId;
+        private String boardingTripId;
+        private String alightStopId;
+        /** The interchange and the run boarded there, on a journey with a change. */
+        private String transferStopId;
+        private String transferTripId;
+        /** The bus legs in travel order. Empty on a journey with no bus. */
+        private List<BusLeg> busLegs;
+    }
+
+    /** A bus leg of the started journey: which line, between which stops. */
+    @Data
+    public static class BusLeg {
+        private String routeId;
+        private String fromStopName;
+        private String toStopName;
     }
 
     @Data

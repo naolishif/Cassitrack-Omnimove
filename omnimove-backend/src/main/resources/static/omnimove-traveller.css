@@ -2448,9 +2448,11 @@ body {
    The cards show absolute times, which never look stale even when they are, so
    this is the only thing on screen that says the list is being kept true.
    Deliberately quiet: it is reassurance, not information to act on. */
+/* It sits above the cards now: the breathing room goes under it, between the
+   line and the first option, instead of over it. */
 .routes-freshness {
     text-align: center;
-    padding: 10px 0 2px;
+    padding: 2px 0 10px;
     font-size: 10px;
     font-weight: 600;
     color: var(--text-soft);

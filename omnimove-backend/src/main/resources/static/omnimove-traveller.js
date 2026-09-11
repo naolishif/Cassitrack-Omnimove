@@ -2162,6 +2162,18 @@ async function doSearch() {
         try {
             renderRoutes(data);
             startRoutesRefresh();
+
+            // On a phone the fields have done their job the moment the results
+            // exist: they fold away and the results come up over the map. The
+            // same pill — which now reads "Search" — brings both back. Only on a
+            // phone: on a desktop the search is one row of a wide header, nothing
+            // is competing for the space, and the pill that would undo this is
+            // not even on screen.
+            if (window.matchMedia('(max-width: 768px)').matches) {
+                setSearchFolded(true);
+                if (typeof window.snapRoutesSheet === 'function')
+                    window.snapRoutesSheet('half');
+            }
         } catch (e) {
             // The plan is sound and the traveller cannot see it: say that, and
             // put the option that broke in the console for whoever looks next.
@@ -2407,6 +2419,14 @@ function closeAiStart() {
  *
  * <p>Both ends are resolved before anything is written, so a half-understood
  * instruction leaves the fields as they were instead of half-filled.
+ *
+ * <p>And nothing is written at all while a journey is running until the
+ * traveller has said so. Acting means searching, and a search is a fresh start:
+ * doSearch takes down the itinerary, the timer, the live position and the delay
+ * watch of the trip in progress. That is the right thing when somebody asks to
+ * go somewhere else, and the wrong thing when they were asking ABOUT the journey
+ * they are on and the model reached for the marker out of habit. The difference
+ * is not ours to guess.
  */
 async function applyAiAction(action) {
     if (!action) return;
@@ -2417,6 +2437,15 @@ async function applyAiAction(action) {
     if (action.from && !from) { showToast(tf('ai_place_unknown', { name: action.from }), true); return; }
     if (action.to   && !to)   { showToast(tf('ai_place_unknown', { name: action.to   }), true); return; }
 
+    // Resolved first, so an unknown stop is reported as one instead of being
+    // held behind a question about ending a journey for no reason.
+    if (_activeJourney) { askAiReplan(from, to, action); return; }
+
+    await runAiAction(from, to, action);
+}
+
+/** Fills the fields, sets the recommendation and searches. Both paths end here. */
+async function runAiAction(from, to, action) {
     if (from) setStop(document.getElementById('originSelect'), from);
     if (to)   setStop(document.getElementById('destSelect'),   to);
 
@@ -2427,6 +2456,48 @@ async function applyAiAction(action) {
     // Out of the way: what happens next happens on the map and in the list
     closeAI();
     await doSearch();
+}
+
+/** The action waiting on "this will end your journey", or null when nothing is. */
+let _aiReplanPending = null;
+
+/**
+ * Asks before a running journey is replaced by a new search.
+ *
+ * <p>The question names the destination they are travelling to, not the one the
+ * assistant proposes: what they are about to lose is the trip they are on, and
+ * that is the thing worth recognising in one glance.
+ */
+function askAiReplan(from, to, action) {
+    _aiReplanPending = { from, to, action };
+
+    const body = document.getElementById('aiReplanBody');
+    if (body) body.textContent = tf('ai_replan_body', {
+        dest: (_activeJourney && _activeJourney.destName) || t('your_destination')
+    });
+
+    const modal = document.getElementById('aiReplanModal');
+    if (modal) modal.classList.add('open');
+}
+
+function confirmAiReplan() {
+    const pending = _aiReplanPending;
+    closeAiReplan();
+    if (!pending) return;
+    runAiAction(pending.from, pending.to, pending.action);
+}
+
+function cancelAiReplan() {
+    closeAiReplan();
+    // The journey is untouched and so is the chat: refusing to be re-routed is
+    // not refusing the answer that came with it.
+    showToast(t('ai_replan_cancelled'));
+}
+
+function closeAiReplan() {
+    _aiReplanPending = null;
+    const modal = document.getElementById('aiReplanModal');
+    if (modal) modal.classList.remove('open');
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2460,6 +2531,26 @@ async function applyAiAction(action) {
 
 /** How often the open results re-plan themselves. */
 const ROUTES_REFRESH_MS = 60000;
+
+/**
+ * How often the times already on screen are re-read from the clock.
+ *
+ * <p>A different thing from the refresh above, and the reason that one is not
+ * simply set to fire more often: re-planning is a billed routing request and the
+ * account is allowed 120 an hour, so a search open on a phone cannot have one
+ * every fifteen seconds — it would spend the traveller's whole hourly budget on
+ * a screen nobody is touching, and the searches they actually ask for would come
+ * back 429.
+ *
+ * <p>This costs nothing. Most of what goes stale on a card is not a fact about
+ * the network at all — it is the clock: a plan made at 15:39 still says "15:39 →
+ * 16:39, wait 23 min" at 15:45, when the truth is "15:45 → 16:39, wait 17 min"
+ * and the bus has not moved. That much is arithmetic, and arithmetic does not
+ * need the server. What genuinely needs re-planning — a bus that has gone, a
+ * delay that has grown — is left to the minute above.
+ */
+const ROUTES_TICK_MS = 15000;
+let _routesTickTimer = null;
 
 /** Coming back to the tab re-plans only if what is on screen is older than this. */
 const ROUTES_STALE_MS = 45000;
@@ -2540,12 +2631,111 @@ function startRoutesRefresh() {
     _routesFetchedAt = Date.now();
     markRoutesFreshness();
     _routesRefreshTimer = setInterval(refreshRoutes, ROUTES_REFRESH_MS);
+    _routesTickTimer    = setInterval(tickRouteTimes, ROUTES_TICK_MS);
 }
 
 function stopRoutesRefresh() {
     if (_routesRefreshTimer) clearInterval(_routesRefreshTimer);
     _routesRefreshTimer = null;
+    if (_routesTickTimer) clearInterval(_routesTickTimer);
+    _routesTickTimer = null;
     _routesFetchedAt = 0;
+}
+
+/**
+ * What an option looks like at this moment, rather than at the moment it was planned.
+ *
+ * <p>An itinerary is fixed in absolute time from the point it starts moving: the
+ * bus leaves at 16:02 whether the card was drawn at 15:39 or read at 15:51.
+ * What is not fixed is the part in front of that — the wait — and the total,
+ * which is a distance from now. So the clock eats into the wait, the total
+ * shrinks with it, and every stop keeps the time it was given.
+ *
+ * <p>An option that starts moving straight away has no wait to spend: walking
+ * does not get shorter because the traveller stood still, it just starts later
+ * and ends later.
+ *
+ * <p>Once the wait is spent the plan really is out of date — the bus is going
+ * without them — and nothing here can mend that. The number stops at zero and
+ * the re-plan a minute later is what replaces the option.
+ */
+function optionAsOfNow(opt) {
+    const planned  = _optionStart(opt);
+    const duration = (opt && opt.duration_minutes) || 0;
+    const waitLeg  = ((opt && opt.legs) || [])
+        .find(l => l.mode === 'WAIT' && l.transfer !== true);
+    const waitMin  = waitLeg ? (waitLeg.duration_minutes || 0) : null;
+
+    // Whole minutes: the card speaks in minutes, and half of one would have the
+    // number flicking between two values on consecutive ticks.
+    const elapsed = Math.floor((Date.now() - planned.getTime()) / 60000);
+    if (!(elapsed > 0)) return { dep: planned, durationMin: duration, waitMin };
+
+    if (waitMin === null)
+        return { dep: new Date(Date.now()), durationMin: duration, waitMin: null };
+
+    const spent = Math.min(elapsed, waitMin);
+    return {
+        dep:         new Date(planned.getTime() + spent * 60000),
+        durationMin: Math.max(0, duration - spent),
+        waitMin:     waitMin - spent
+    };
+}
+
+/**
+ * Re-reads the clock into whatever is on screen. Touches text and nothing else:
+ * no card is rebuilt, so a list being scrolled and a stop list just expanded
+ * both survive it.
+ */
+function tickRouteTimes() {
+    // A tab nobody is looking at is not worth the work; coming back to it runs
+    // this immediately — see the visibility handler above.
+    if (document.hidden) return;
+
+    const opts = window._routeOptions || {};
+    Object.keys(opts).forEach(key => {
+        const card = document.getElementById('card-' + key);
+        if (!card) return;
+        const now = optionAsOfNow(opts[key]);
+        const set = (role, text) => {
+            const el = card.querySelector('[data-role="' + role + '"]');
+            if (el && el.textContent !== text) el.textContent = text;
+        };
+        set('card-dur', now.durationMin + ' min');
+        set('card-dep', _fmtHHMM(now.dep));
+        set('card-arr', _fmtHHMM(new Date(now.dep.getTime() + now.durationMin * 60000)));
+    });
+
+    tickRouteDetailTimes();
+}
+
+/**
+ * The same three numbers on the open detail sheet.
+ *
+ * <p>Only the numbers that the clock moves: the rows of the timeline are the
+ * times of actual stops and do not change because somebody is reading them.
+ */
+function tickRouteDetailTimes() {
+    const sheet = document.getElementById('routeDetailSheet');
+    if (!sheet || !sheet.classList.contains('open')) return;
+
+    const key = selectedJourney && (selectedJourney.key || selectedJourney.mode);
+    const opt = key ? (window._routeOptions || {})[key] : null;
+    if (!opt) return;
+
+    const now = optionAsOfNow(opt);
+    const arr = new Date(now.dep.getTime() + now.durationMin * 60000);
+
+    const times = document.getElementById('rdTimes');
+    if (times) times.textContent = _fmtHHMM(now.dep) + ' \u2192 ' + _fmtHHMM(arr);
+    const dur = document.getElementById('rdDur');
+    if (dur) dur.textContent = now.durationMin + ' min';
+
+    // The wait at the front of the trip — the one number on the timeline that is
+    // measured from now rather than from the timetable.
+    const wait = document.querySelector('#rdTimeline [data-role="wait-badge"]');
+    if (wait && now.waitMin != null)
+        wait.textContent = '\u{1F550} ' + t('wait_lbl') + ' \u00b7 ' + now.waitMin + ' min';
 }
 
 /**
@@ -2556,6 +2746,10 @@ function stopRoutesRefresh() {
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     if (!_routesRefreshTimer) return;
+    // The clock is the part that has certainly moved, and re-reading it needs
+    // nothing from anybody. Done first so the screen is right immediately,
+    // whether or not the request below is worth making.
+    tickRouteTimes();
     if (Date.now() - _routesFetchedAt > ROUTES_STALE_MS) refreshRoutes();
 });
 
@@ -2666,7 +2860,14 @@ function renderRoutes(data) {
     window._routeOptions = {};
     const orderedOptions = sortOptions(data.options);
 
-    list.innerHTML = noticeHtml + orderedOptions.map(opt => {
+    // Above the cards rather than under them. It is the line that says these
+    // times are being kept true, and at the foot of a scrolling list of options
+    // it sat below the fold exactly when it was wanted — after a search, on a
+    // phone, nobody scrolls past three cards to find out whether the 15:39 they
+    // are reading is still 15:39.
+    list.innerHTML = noticeHtml
+        + '<div class="routes-freshness" id="routesFreshness"></div>'
+        + orderedOptions.map(opt => {
         // Keyed by option, not by mode: a search can now return two bus
         // itineraries — the direct one and the faster one with a change — and
         // keying by mode had the second overwrite the first, so both cards
@@ -2690,9 +2891,13 @@ function renderRoutes(data) {
         // Zone check on the ride destination (Elerent operating / no-parking areas)
         const bikeWarn = opt.bike_warning
             ? `<span class="status-badge s-delay">${escHtml(opt.bike_warning)}</span>` : '';
-        // Departure / arrival time labels for the card
-        const _depDate = _optionStart(opt);
-        const _arrDate = new Date(_depDate.getTime() + (opt.duration_minutes || 0) * 60000);
+        // Departure / arrival time labels for the card, read from the clock
+        // rather than from the moment of the search: the list is re-rendered by
+        // the ranking buttons too, and a plan from five minutes ago must not
+        // come back on screen with the times it had five minutes ago.
+        const _now     = optionAsOfNow(opt);
+        const _depDate = _now.dep;
+        const _arrDate = new Date(_depDate.getTime() + _now.durationMin * 60000);
         const _depTime = _fmtHHMM(_depDate);
         const _arrTime = _fmtHHMM(_arrDate);
         const key = optionKey(opt);
@@ -2704,12 +2909,12 @@ function renderRoutes(data) {
 <div class="route-card" id="card-${escAttr(key)}">
     <div class="route-top">
         <div class="route-name">${icon} ${modeLabel}</div>
-        <div class="route-time">${opt.duration_minutes} min</div>
+        <div class="route-time" data-role="card-dur">${_now.durationMin} min</div>
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin:-4px 0 6px;font-size:12px;color:var(--text-mid);font-weight:600">
-        <span>${_depTime}</span>
+        <span data-role="card-dep">${_depTime}</span>
         <span style="color:var(--border-mid)">→</span>
-        <span>${_arrTime}</span>
+        <span data-role="card-arr">${_arrTime}</span>
     </div>
     <div class="status-row">
         ${warn || `<span class="status-badge s-ok">${t('badge_available')}</span>`}
@@ -2728,10 +2933,7 @@ function renderRoutes(data) {
         ${btn.label}
     </button>
 </div>`;
-    }).join('')
-    // Says the times are being kept true rather than leaving the traveller to
-    // wonder how old a departure at 17:42 is.
-    + '<div class="routes-freshness" id="routesFreshness"></div>';
+    }).join('');
 
     markRoutesFreshness();
     // Re-applied here, not once after the search: the list re-renders on every
@@ -2970,6 +3172,11 @@ function _openRouteDetail(key, label, greenIndex, distanceMetres, costEuros) {
     if (rdBtn) { rdBtn.disabled = false; rdBtn.textContent = t('btn_start_journey'); }
 
     document.getElementById('routeDetailSheet').classList.add('open');
+
+    // The sheet may be opened minutes after the search that filled it. Same
+    // three numbers the tick keeps true, done once here so they are right the
+    // instant it appears instead of at the next tick.
+    tickRouteDetailTimes();
 }
 
 // Everything that belongs to "a route is currently picked": the detail sheet, the card
@@ -3003,10 +3210,12 @@ function clearJourneySelection() {
     // teardown.
     if (_journeyEndReason === 'time') closeArrivalPopup();
     _activeJourneyDestName = null;
+    _activeJourney = null;
 
     // Live ETA countdown, bus polling, bus markers and the dashed preview
     clearInterval(window._etaInterval);
     window._etaInterval = null;
+    _etaDeadline = 0;
     clearRoutePreview();
 
     // Solid journey layers drawn by startJourney
@@ -3143,6 +3352,13 @@ function buildTimeline(legs, totalMin, greenIdx, opt) {
 
         } else if (leg.mode === 'WAIT') {
             // ── WAIT (no change) ─────────────────────────────────────
+            // The first one is the wait at the front of the trip, which is
+            // measured from now and shrinks while the card is being read. It is
+            // tagged so the clock tick can rewrite it without redrawing the
+            // timeline under the traveller's finger. A wait further down is
+            // slack between two buses and does not move.
+            const isLeadWait = legs.findIndex(
+                l => l.mode === 'WAIT' && l.transfer !== true) === i;
             _tick(leg.duration_minutes);
             html += `
             <div class="tl-row">
@@ -3152,7 +3368,7 @@ function buildTimeline(legs, totalMin, greenIdx, opt) {
               </div>
               <div class="tl-body">
                 <div class="tl-meta">
-                  <span class="tl-badge" style="background:${col}18;color:${col}">🕐 ${t('wait_lbl')} · ${leg.duration_minutes || 0} min</span>
+                  <span class="tl-badge"${isLeadWait ? ' data-role="wait-badge"' : ''} style="background:${col}18;color:${col}">🕐 ${t('wait_lbl')} · ${leg.duration_minutes || 0} min</span>
                 </div>
               </div>
             </div>`;
@@ -3491,7 +3707,14 @@ async function startJourney() {
         map.fitBounds(allPoints, { padding: [50, 50] });
 
         // 10) Pannello "in progress"
-        const durationMin = selectedJourney.durationMinutes
+        // What is LEFT of the itinerary, not what it was when the card was
+        // drawn: a traveller can read an option for ten minutes before tapping
+        // Start, and the counter measures a distance to an arrival that has not
+        // moved. The planned duration is a different number and went to the
+        // server above, where the dashboard wants what was offered.
+        const _startOpt = (window._routeOptions || {})[selectedJourney.key || mode];
+        const durationMin = (_startOpt ? optionAsOfNow(_startOpt).durationMin : 0)
+            || selectedJourney.durationMinutes
             || Math.ceil(distanceKm / (mode==='WALK'?5:mode==='BIKE'?15:mode==='SCOOTER'?20:25) * 60);
         const modeEmoji = MODE_ICONS[mode] || '🚗';
         const isBusMode  = mode === 'BUS' && selectedJourney.legs && selectedJourney.legs.length > 0;
@@ -3534,6 +3757,18 @@ async function startJourney() {
         // Remembered so the clock can name the destination when it runs out,
         // without reaching back into a search that may be long gone.
         _activeJourneyDestName = dest.name;
+
+        // And remembered for the assistant, which until now was asked "where is
+        // the bus?" with every line in Cassino in front of it and nothing saying
+        // which one this traveller had just started a journey on.
+        _activeJourney = {
+            mode, label,
+            originName: origin.name,
+            destName:   dest.name,
+            durationMinutes: durationMin,
+            option: (window._routeOptions || {})[selectedJourney.key || mode] || {}
+        };
+
         startEtaCountdown(durationMin);
 
         showToast(tf('toast_journey_started', { min: durationMin }));
@@ -3774,6 +4009,9 @@ function resetSearchFields() {
     // The assistant's recommendation belonged to the search being cleared
     _aiPick = null;
     if (_aiStartPending) closeAiStart();
+    // …and so did a question about replacing a journey that is being cleared
+    // from under it: answering it afterwards would search for the old thing.
+    if (_aiReplanPending) closeAiReplan();
     window._currentOrigin  = null;
     window._currentDest    = null;
     stopRoutesRefresh();
@@ -4024,6 +4262,8 @@ function openAI() {
         fab.style.top    = c.top + 'px';
         fab.style.bottom = 'auto';
         fab.style.right  = 'auto';
+        // The bubble points at this button; if it is on screen it comes along.
+        if (typeof repositionAiNudge === 'function') repositionAiNudge();
         return c;
     }
 
@@ -4160,6 +4400,32 @@ function positionNudgeBesideFab(el) {
     el.style.bottom = 'auto';
     el.style.top    = Math.round(f.top - p.top + (f.height - el.offsetHeight) / 2) + 'px';
     el.classList.toggle('ai-nudge--flipped', spaceRight < w);
+}
+
+/**
+ * Keeps the bubble beside the button after something has moved one of them.
+ *
+ * <p>It was placed once, when it appeared, at a top measured from the top of the
+ * map pane — and the pane changes height underneath it. Folding the search away
+ * grows the pane upward by the height of the rows that went, while the button,
+ * anchored to the pane's bottom, does not move at all: the bubble was left 270
+ * pixels above it, floating in the routes sheet it has nothing to do with. It
+ * belongs to the assistant button, so it is measured from that button again
+ * every time the geometry it was measured in has changed.
+ */
+function repositionAiNudge() {
+    const el = aiNudgeEl();
+    if (el && !el.hidden) positionNudgeBesideFab(el);
+}
+
+// Whatever resizes the pane — the fold, a rotation, the on-screen keyboard,
+// switching panes — moves the button relative to the coordinates the bubble was
+// written in. Watching the element itself catches all of them, including the
+// ones nothing sends an event for. Repositioning changes the bubble's own box
+// and never the pane's, so this cannot feed itself.
+if (window.ResizeObserver) {
+    const _nudgePane = document.getElementById('pane-map');
+    if (_nudgePane) new ResizeObserver(repositionAiNudge).observe(_nudgePane);
 }
 
 function startAiNudgeTimer() {
@@ -4483,7 +4749,52 @@ function aiScreenContext() {
         stopId:     _sheetCurrentStopId || null,
         stopName:   _sheetCurrentStopId
                         ? (document.getElementById('stopSheetTitle')?.textContent || null)
-                        : null
+                        : null,
+        // The fields above say what the traveller was searching for; this says
+        // what they are actually travelling, which is what they ask about while
+        // they are on it. Null whenever no journey has been started.
+        journey:    aiJourneyContext()
+    };
+}
+
+/**
+ * The started journey, as the assistant is told about it.
+ *
+ * <p>Only the ids that identify the traveller's own run, and the line and stops
+ * of each bus leg — not the drawn geometry, not the fare, not the CO2. The
+ * server has the live picture of the network already; what it cannot know is
+ * which part of it this traveller is waiting for.
+ *
+ * <p>Sent only once Start Journey has been pressed. A route merely looked at is
+ * not something anybody is on, and calling it the journey in progress would put
+ * the assistant on the wrong bus in the opposite direction.
+ */
+function aiJourneyContext() {
+    const j = _activeJourney;
+    if (!j) return null;
+
+    const opt  = j.option || {};
+    const legs = opt.legs || [];
+
+    return {
+        mode:  j.mode  || null,
+        label: j.label || null,
+        originName: j.originName || null,
+        destName:   j.destName   || null,
+        durationMinutes: j.durationMinutes ?? null,
+        // What the card is showing them at this very moment, so the assistant
+        // and the counter cannot disagree about how much is left
+        minutesLeft: _etaDeadline
+            ? Math.max(0, Math.ceil((_etaDeadline - Date.now()) / 60000))
+            : null,
+        boardingStopId: opt.boarding_stop_id || null,
+        boardingTripId: opt.boarding_trip_id || null,
+        alightStopId:   opt.alight_stop_id   || null,
+        transferStopId: opt.transfer_stop_id || null,
+        transferTripId: opt.transfer_trip_id || null,
+        busLegs: legs
+            .filter(l => l.mode === 'BUS' && l.route_id)
+            .map(l => ({ routeId: l.route_id, fromStopName: l.from, toStopName: l.to }))
     };
 }
 
@@ -4675,6 +4986,37 @@ function backToMap() { openMenu(); }
         sheet.style.height = s[target] + 'px';
         try { map.invalidateSize(); } catch (e) {}
     }
+
+    /**
+     * Moves the sheet to one of its three stops without a finger on the handle.
+     *
+     * <p>The fold and this sheet are one gesture, not two: hiding the search
+     * fields is only worth doing if what replaces them comes up to fill the
+     * screen, and bringing them back is pointless with the sheet still over
+     * them. setSearchFolded drives both, and the states live in here.
+     *
+     * <p>"peek" gives the height back to the stylesheet rather than writing 110px
+     * inline — that is the state the app opens in, and an inline pixel height
+     * would survive a rotation into a viewport it was never measured for.
+     */
+    window.snapRoutesSheet = function (stop) {
+        if (!isMobile()) return;
+        if (dragging) return;               // a finger is already deciding this
+
+        if (stop === 'peek') {
+            sheet.style.transition = 'height 0.25s ease';
+            sheet.style.height = '';
+            sheet.classList.add('sheet-peek');
+        } else {
+            var s = states();
+            releasePeek();
+            sheet.style.transition = 'height 0.25s ease';
+            sheet.style.height = (stop === 'full' ? s[2] : s[1]) + 'px';
+        }
+        // Leaflet sizes itself once; the strip the sheet gave back or took stays
+        // grey until it is told.
+        setTimeout(function () { try { map.invalidateSize(); } catch (e) {} }, 260);
+    };
 
     handle.addEventListener('mousedown', down);
     handle.addEventListener('touchstart', down, { passive: false });
@@ -5648,6 +5990,26 @@ function setSearchFolded(folded) {
         : '<svg viewBox="0 0 24 24" class="st-chevron"><path d="M5 15l7-7 7 7"/></svg>';
     if (label) label.textContent = t(folded ? 'toggle_search_open' : 'toggle_search_hide');
 
+    // Bringing the fields back takes the routes sheet down with them: they share
+    // one screen on a phone, and typing into fields with the results standing
+    // over them is the state the fold exists to avoid.
+    //
+    // Going the other way is NOT symmetrical, which is why only one half of it
+    // is here. Hiding the fields is not the same act as searching: someone who
+    // folds them away wants the map, and raising a sheet of results over it
+    // would answer a question they did not ask. The sheet goes up where the
+    // results arrive — in doSearch — and nowhere else.
+    if (!folded && typeof window.snapRoutesSheet === 'function')
+        window.snapRoutesSheet('peek');
+
+    // The rows that just went, or came back, are the height of the pane the
+    // assistant's bubble was positioned in — and the button it points at is
+    // anchored to the pane's other edge, so it has not moved. Said here rather
+    // than left to the ResizeObserver alone because this is a change we make
+    // ourselves and can act on at once, before a frame is drawn with the bubble
+    // in the wrong place.
+    repositionAiNudge();
+
     // Leaflet sizes itself once and has to be told the viewport changed, or the
     // reclaimed strip stays grey until something else nudges it.
     setTimeout(() => { if (typeof map !== 'undefined' && map) map.invalidateSize(); }, 240);
@@ -5907,6 +6269,18 @@ const RESUME_EXTRA_MIN = 10;
 let _activeJourneyDestName = null;
 
 /**
+ * The journey now running, as the assistant needs to hear about it.
+ *
+ * <p>Snapshotted at Start rather than looked up when a question is asked:
+ * window._routeOptions belongs to a search, and a search can be run again from
+ * anywhere — including the chat itself — while this trip is still under way.
+ */
+let _activeJourney = null;
+
+/** When the current estimate runs out, as a wall-clock instant. */
+let _etaDeadline = 0;
+
+/**
  * The countdown on the journey card.
  *
  * <p>Its own function because Resume needs to start it again, and re-entering
@@ -5915,22 +6289,41 @@ let _activeJourneyDestName = null;
 function startEtaCountdown(minutes) {
     clearInterval(window._etaInterval);
 
-    let remaining = Math.max(1, Math.round(minutes));
-    const el0 = document.getElementById('etaCounter');
-    // The unit belongs to the label underneath ("min left"); writing it here as
-    // well read "33 min" above "MIN LEFT".
-    if (el0) el0.textContent = remaining;
+    // A deadline, not a tally of ticks. setInterval is not a clock: a 60 s tick
+    // fires late by however long the main thread was busy — redrawing the map,
+    // polling buses every 12 s — and stops firing altogether while the tab is in
+    // the background or the phone is locked, which is most of a journey. Taking
+    // one minute off the number per tick therefore fell behind the traveller's
+    // own watch and always claimed more time left than there was. Measured from
+    // a fixed instant, a tick that is late or never comes costs nothing: every
+    // tick is a subtraction from the same deadline.
+    _etaDeadline = Date.now() + Math.max(1, Math.round(minutes)) * 60000;
+    renderEtaCounter();
 
-    window._etaInterval = setInterval(() => {
-        remaining--;
-        const el = document.getElementById('etaCounter');
-        if (el) el.textContent = Math.max(0, remaining);
-        if (remaining <= 0) {
-            clearInterval(window._etaInterval);
-            window._etaInterval = null;
-            showJourneyEndPopup('time', _activeJourneyDestName);
-        }
-    }, 60000);
+    // Once a second. The number only changes on the minute, but the tick is a
+    // subtraction and a text assignment, and at this rate the counter is right
+    // within a second of the screen coming back on.
+    window._etaInterval = setInterval(renderEtaCounter, 1000);
+}
+
+/**
+ * Paints the minutes still to run, and fires the time-up popup when there are
+ * none left.
+ */
+function renderEtaCounter() {
+    const msLeft = _etaDeadline - Date.now();
+
+    const el = document.getElementById('etaCounter');
+    // Rounded up: with 30 s to go there is still a minute of journey to sit
+    // through, and the unit belongs to the label underneath ("min left") —
+    // writing it here as well read "33 min" above "MIN LEFT".
+    if (el) el.textContent = Math.max(0, Math.ceil(msLeft / 60000));
+
+    if (msLeft > 0) return;
+
+    clearInterval(window._etaInterval);
+    window._etaInterval = null;
+    showJourneyEndPopup('time', _activeJourneyDestName);
 }
 
 /** Destination reached without End Journey being tapped: a fact, so it closes. */

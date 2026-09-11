@@ -125,7 +125,12 @@ public class AiOrchestrationService {
         String lang = detectLanguage(question, req.getLanguage());
 
         try {
-            String context = buildContext(userId, req.getContext()) + onScreenContext(req.getContext());
+            String context = buildContext(userId, req.getContext())
+                    + onScreenContext(req.getContext())
+                    // Last on purpose. Everything before it is the city; this is
+                    // the one trip the traveller is on, and it has to be read as
+                    // the subject of what they are asking.
+                    + activeJourneyContext(req.getContext());
             String system = buildSystem(lang, context);
             String raw = callModel(system, req.getHistory(), question);
 
@@ -147,7 +152,7 @@ public class AiOrchestrationService {
             log.error("AI failed: {}", e.getMessage());
             // Graceful fallback so the chat never shows a hard error in a demo
             return ChatResponse.builder()
-                    .answer(getFallbackResponse(question, lang))
+                    .answer(getFallbackResponse(question, lang, req.getContext()))
                     .success(true)              // still "success" so UI renders it nicely
                     .detectedLanguage(lang)
                     .suggestions(buildSuggestions(lang, req.getContext()))
@@ -435,14 +440,11 @@ public class AiOrchestrationService {
                 sb.append(", battery ").append(v.getBatteryPct()).append("%");
 
             // Nearest stop as the human-readable anchor for the position
-            Stop near = null;
-            double nearM = Double.MAX_VALUE;
-            for (Stop st : stops) {
-                double d = GeoUtils.haversineMetres(v.getLat(), v.getLon(), st.getLat(), st.getLon());
-                if (d < nearM) { nearM = d; near = st; }
-            }
+            Stop near = nearestStop(stops, v.getLat(), v.getLon());
             if (near != null)
-                sb.append(", parked ").append(Math.round(nearM / 10.0) * 10)
+                sb.append(", parked ")
+                  .append(Math.round(GeoUtils.haversineMetres(
+                          v.getLat(), v.getLon(), near.getLat(), near.getLon()) / 10.0) * 10)
                   .append(" m from the stop ").append(near.getName());
 
             if (haveOrigin) {
@@ -648,6 +650,13 @@ public class AiOrchestrationService {
                 - The traveller's question may be missing its context: "the next
                   bus" from which stop, "the campus" from where. Ask rather than
                   assume, unless the context section below already says.
+                - If the live data below has a section for a journey under way,
+                  that journey is what the traveller is asking about. Answer
+                  about ITS line, ITS stops and ITS run, and about no other: the
+                  rest of the data is the whole city, and only that section is
+                  their trip. Do not offer to plan or start it again — they are
+                  on it — and if it is running late or its bus is untracked, say
+                  that rather than reaching for another line.
                 - If the weather is bad, warn about bike, scooter and walking.
                 - If asked about something outside Cassino transport, steer back.
 
@@ -854,14 +863,47 @@ public class AiOrchestrationService {
     //  5. GRACEFUL FALLBACK (no credits / API down)
     // ════════════════════════════════════════════════════════════════════
 
-    private String getFallbackResponse(String message, String lang) {
+    private String getFallbackResponse(String message, String lang,
+                                       ChatRequest.ChatContext ctx) {
         String msg = message == null ? "" : message.toLowerCase();
         boolean it = "it".equals(lang);
 
+        // A journey under way answers the question before any keyword is looked
+        // at, and answers it with the traveller's own itinerary. This branch used
+        // to reply "bus 16 is active on the Cassino-UNICAS route" to anything
+        // containing the word bus — a line and a route invented here, in the
+        // code, and read out to a traveller who had started a journey on a
+        // different line entirely. A canned answer may say less than the model
+        // would; it may not say something untrue.
+        ChatRequest.ActiveJourney j = ctx == null ? null : ctx.getJourney();
+        if (j != null) {
+            String line = journeyLine(j);
+            String where = nz(j.getOriginName(), "?") + " \u2192 " + nz(j.getDestName(), "?");
+            StringBuilder sb = new StringBuilder();
+            if (it) {
+                sb.append("Ora non riesco a raggiungere l\u2019assistente. ")
+                  .append("Il viaggio che hai avviato \u00e8 ").append(where);
+                if (line != null) sb.append(", con la linea ").append(line);
+                sb.append(". La posizione del bus in tempo reale \u00e8 sulla mappa, ")
+                  .append("e la fermata di salita mostra gli arrivi.");
+            } else {
+                sb.append("I cannot reach the assistant right now. ")
+                  .append("The journey you started is ").append(where);
+                if (line != null) sb.append(", on line ").append(line);
+                sb.append(". The live position of the bus is on the map, and your ")
+                  .append("boarding stop lists its arrivals.");
+            }
+            return sb.toString();
+        }
+
         if (msg.contains("bus") || msg.contains("autobus") || msg.contains("vehicle")) {
             return it
-                    ? "L'autobus 16 è attivo sulla tratta Cassino\u2013UNICAS. Controlla la mappa per la posizione in tempo reale e gli orari di arrivo."
-                    : "Bus 16 is active on the Cassino\u2013UNICAS route. Check the Live Map tab for real-time position and ETA.";
+                    ? "Ora non riesco a raggiungere l\u2019assistente. La mappa mostra i bus in "
+                    + "circolazione in tempo reale, e ogni fermata i suoi arrivi. "
+                    + "Dimmi da quale fermata parti e dove vai, e cerco il percorso."
+                    : "I cannot reach the assistant right now. The map shows the buses running "
+                    + "live, and each stop lists its own arrivals. Tell me which stop you are at "
+                    + "and where you are going, and I will plan the journey.";
         }
         if (msg.contains("eta") || msg.contains("arriv") || msg.contains("when") || msg.contains("quando")) {
             return it
@@ -884,8 +926,19 @@ public class AiOrchestrationService {
                     : "I check Cassino's live weather to recommend the best mode. When it rains, the bus is the most comfortable choice.";
         }
         return it
-                ? "OMNIMOVE monitora l'autobus 16 in tempo reale tra Cassino e il Campus UNICAS di Folcara. Usa la scheda Flotta per le posizioni, ETA per gli arrivi e il Pianificatore per i percorsi."
-                : "OMNIMOVE monitors Bus 16 in real time between Cassino and the UNICAS Folcara campus. Use the Fleet tab for live positions, ETA tab for arrival times, and Journey Planner for routes.";
+                ? "OMNIMOVE segue in tempo reale i bus di Cassino, insieme a bici e monopattini "
+                + "Elerent. Dimmi da dove parti e dove vuoi andare, e trovo il percorso."
+                : "OMNIMOVE follows Cassino's buses in real time, along with the Elerent bikes "
+                + "and e-scooters. Tell me where you are starting from and where you want to go, "
+                + "and I will find the journey.";
+    }
+
+    /** The line of the started journey, as a passenger names it, or null. */
+    private String journeyLine(ChatRequest.ActiveJourney j) {
+        List<ChatRequest.BusLeg> legs = j.getBusLegs();
+        if (legs == null || legs.isEmpty()) return null;
+        String routeId = blankToNull(legs.get(0).getRouteId());
+        return routeId == null ? null : lineNameOf(routeId);
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -910,6 +963,245 @@ public class AiOrchestrationService {
         return "\n=== WHAT THE TRAVELLER HAS ON SCREEN ===\n" + sb;
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    //  THE JOURNEY UNDER WAY
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * The trip the traveller is actually travelling, and the runs it rides.
+     *
+     * <p>Everything above this in the prompt is the city: every line, every
+     * stop, every bus on the road. Asked "where is the bus?" while waiting at a
+     * stop, the assistant had all of it and nothing saying which part was this
+     * traveller's — so it answered with a line their itinerary did not contain.
+     * A started journey names its own line, its own boarding stop and its own
+     * run, and while it is running that is what every question is about.
+     *
+     * <p>The live figures are looked up here rather than taken from the page:
+     * the page's copy was written when the card was drawn, and a bus that has
+     * since fallen five minutes behind is exactly what the traveller is asking
+     * about.
+     */
+    private String activeJourneyContext(ChatRequest.ChatContext ctx) {
+        ChatRequest.ActiveJourney j = ctx == null ? null : ctx.getJourney();
+        if (j == null) return "";
+
+        StringBuilder sb = new StringBuilder(
+                "\n=== THE JOURNEY THIS TRAVELLER IS ON RIGHT NOW ===\n");
+        sb.append("  They have pressed Start Journey: this trip is under way.\n");
+        sb.append("  Itinerary: ").append(nz(j.getOriginName(), "?"))
+          .append(" -> ").append(nz(j.getDestName(), "?"));
+        if (j.getMode() != null && !j.getMode().isBlank())
+            sb.append(", by ").append(j.getMode());
+        if (j.getLabel() != null && !j.getLabel().isBlank())
+            sb.append(" (the card they chose reads \"").append(j.getLabel()).append("\")");
+        sb.append("\n");
+        if (j.getDurationMinutes() != null)
+            sb.append("  Planned duration: ").append(j.getDurationMinutes()).append(" min.\n");
+        if (j.getMinutesLeft() != null)
+            sb.append("  The counter on their screen reads ").append(j.getMinutesLeft())
+              .append(" min left.\n");
+
+        List<ChatRequest.BusLeg> busLegs =
+                j.getBusLegs() == null ? List.of() : j.getBusLegs();
+
+        if (busLegs.isEmpty()) {
+            sb.append("  This journey has no bus leg — there is no bus of theirs to\n")
+              .append("    report on, and no line to name.\n");
+            sb.append("""
+                      HOW TO USE THIS SECTION
+                      - This is the trip they are on, and while it runs it is what
+                        they are asking about. Asked where they are or how much
+                        longer, answer about THIS trip. It has no bus, so do not
+                        name a line at all: the lines further up belong to the city,
+                        not to them.
+                      - They are already travelling it: do not offer to plan it or
+                        start it again.
+                    """);
+            return sb.toString();
+        }
+
+        List<VehicleDTO> vehicles = cassitrackClient.getActiveVehicles();
+        List<Stop> stops = stopRepository.findAll().stream()
+                .filter(st -> st.getLat() != null && st.getLon() != null)
+                .toList();
+        for (int i = 0; i < busLegs.size(); i++) {
+            // Leg 1 is boarded at the origin stop, leg 2 at the interchange:
+            // the option carries one pair of ids for each, and they are what
+            // turn "a bus of line 16" into "the bus you are waiting for".
+            boolean first = i == 0;
+            String stopId = first ? j.getBoardingStopId() : j.getTransferStopId();
+            String tripId = first ? j.getBoardingTripId() : j.getTransferTripId();
+            sb.append("  Bus leg ").append(i + 1).append(" of ").append(busLegs.size())
+              .append(":\n");
+            appendJourneyBusLeg(sb, busLegs.get(i), stopId, tripId, vehicles, stops);
+        }
+
+        sb.append("""
+                  HOW TO USE THIS SECTION
+                  - While this journey is running it is what the traveller is
+                    talking about. "The bus", "my bus", "where is it", "how much
+                    longer", "am I late" all mean the line and the run named
+                    here — never another line, and never another vehicle from the
+                    lists further up.
+                  - A line that is not named here has nothing to do with their
+                    trip. Do not mention it, however much the live data above has
+                    to say about it.
+                  - If no live position is given for their line, say that this run
+                    is not being tracked at the moment and quote the timetable
+                    figure if one is given. Never answer with a different bus.
+                  - They are already travelling this: do not offer to plan it or
+                    start it again. Only a question about a DIFFERENT trip is
+                    something to plan.
+                """);
+        return sb.toString();
+    }
+
+    /**
+     * One bus leg of the started journey, with whatever is live about it.
+     *
+     * <p>The run is matched on its trip id first and only then on the line: a
+     * traveller already on board no longer appears in the arrivals for their own
+     * run, and the next bus of the same number is a useful second best as long
+     * as it is labelled as one rather than passed off as theirs.
+     */
+    private void appendJourneyBusLeg(StringBuilder sb,
+                                     ChatRequest.BusLeg leg,
+                                     String stopId,
+                                     String tripId,
+                                     List<VehicleDTO> vehicles,
+                                     List<Stop> stops) {
+        String routeId = blankToNull(leg.getRouteId());
+        String line = routeId == null ? null : lineNameOf(routeId);
+
+        sb.append("    LINE ").append(line != null ? line : "not resolved");
+        if (routeId != null) sb.append(" (route id ").append(routeId).append(")");
+        sb.append(" — this is the line they are travelling on.\n");
+
+        if (leg.getFromStopName() != null && !leg.getFromStopName().isBlank())
+            sb.append("    Boards at ").append(leg.getFromStopName())
+              .append(", gets off at ").append(nz(leg.getToStopName(), "?")).append("\n");
+
+        // ── Their own run, at the stop they board it ──
+        StopArrivalDTO mine = null;
+        boolean isOwnRun = false;
+        if (stopId != null) {
+            try {
+                List<StopArrivalDTO> arrivals = cassitrackClient.getArrivalsAtStop(stopId);
+                if (tripId != null)
+                    mine = arrivals.stream()
+                            .filter(a -> tripId.equals(a.getTripId()))
+                            .findFirst().orElse(null);
+                isOwnRun = mine != null;
+                if (mine == null && routeId != null)
+                    mine = arrivals.stream()
+                            .filter(a -> routeId.equals(a.getRouteId()))
+                            .findFirst().orElse(null);
+            } catch (Exception e) {
+                sb.append("    Arrivals at their boarding stop are unavailable right now.\n");
+            }
+        }
+
+        if (mine != null) {
+            long etaMin = mine.getEstimatedArrival() == null ? -1
+                    : Math.max(0, (mine.getEstimatedArrival().getEpochSecond()
+                                   - System.currentTimeMillis() / 1000) / 60);
+            sb.append(isOwnRun
+                    ? "    THEIR OWN RUN (trip " + mine.getTripId() + "): "
+                    : "    Their own run is no longer listed at that stop — they may already\n"
+                    + "      be on board. Next run of the same line: ");
+            if (etaMin >= 0)
+                sb.append("due at the boarding stop in ")
+                  .append(etaMin > 0 ? etaMin + " min" : "less than a minute");
+            else
+                sb.append("no arrival time given");
+            if (mine.getScheduleStatus() != null)
+                sb.append(", ").append(mine.getScheduleStatus());
+            if (mine.getDelayMinutes() != null && mine.getDelayMinutes() != 0)
+                sb.append(", ").append(Math.abs(mine.getDelayMinutes()))
+                  .append(mine.getDelayMinutes() > 0 ? " min late" : " min early");
+            if (mine.getCrowdingLevel() != null)
+                sb.append(", crowding ").append(mine.getCrowdingLevel());
+            sb.append("\n");
+            if (!mine.isInTransit())
+                sb.append("      That time is the timetable's, not the bus's: this run has not\n")
+                  .append("        left the terminus yet.\n");
+        } else if (stopId != null) {
+            sb.append("    No arrival for this line at their boarding stop right now.\n");
+        }
+
+        // ── Where that bus actually is ──
+        VehicleDTO bus = null;
+        String wanted = mine == null ? null : mine.getVehicleId();
+        if (wanted != null)
+            bus = vehicles.stream()
+                    .filter(v -> wanted.equals(v.getVehicleId()))
+                    .findFirst().orElse(null);
+        if (bus == null && routeId != null)
+            bus = vehicles.stream()
+                    .filter(v -> routeId.equals(v.getRouteId()))
+                    .findFirst().orElse(null);
+
+        if (bus == null || bus.getLat() == null || bus.getLon() == null) {
+            sb.append("    Where that bus is now: not tracked at the moment. Say so rather\n")
+              .append("      than naming any other bus.\n");
+            return;
+        }
+
+        sb.append("    Where that bus is now:");
+        Stop near = nearestStop(stops, bus.getLat(), bus.getLon());
+        if (near != null)
+            sb.append(" about ")
+              .append(Math.round(GeoUtils.haversineMetres(
+                      bus.getLat(), bus.getLon(), near.getLat(), near.getLon()) / 10.0) * 10)
+              .append(" m from the stop ").append(near.getName()).append(";");
+        if (bus.getNextStopName() != null && !bus.getNextStopName().isBlank())
+            sb.append(" next stop ").append(bus.getNextStopName()).append(";");
+        if (bus.getSpeedKmh() != null)
+            sb.append(String.format(java.util.Locale.ROOT, " %.0f km/h;", bus.getSpeedKmh()));
+        if (bus.getScheduleStatus() != null)
+            sb.append(" ").append(bus.getScheduleStatus()).append(";");
+        if (bus.getDelayMinutes() != null && bus.getDelayMinutes() != 0)
+            sb.append(" ").append(Math.abs(bus.getDelayMinutes()))
+              .append(bus.getDelayMinutes() > 0 ? " min late;" : " min early;");
+        if (bus.getCrowdingLevel() != null)
+            sb.append(" crowding ").append(bus.getCrowdingLevel()).append(";");
+        sb.append(" [vehicle ").append(bus.getVehicleId())
+          .append(" — the line is what the traveller cares about, not this id]\n");
+    }
+
+    /** The line as a passenger names it: its short name, or the id if it has none. */
+    private String lineNameOf(String routeId) {
+        try {
+            return routeRepository.findById(routeId)
+                    .map(r -> r.getShortName() != null && !r.getShortName().isBlank()
+                            ? r.getShortName() : r.getId())
+                    .orElse(routeId);
+        } catch (Exception e) {
+            return routeId;
+        }
+    }
+
+    /**
+     * The nearest stop to a coordinate: the landmark a position is described by,
+     * because "41.49, 13.83" is not somewhere either the traveller or the model
+     * can picture.
+     */
+    private static Stop nearestStop(List<Stop> stops, double lat, double lon) {
+        Stop near = null;
+        double nearM = Double.MAX_VALUE;
+        for (Stop st : stops) {
+            if (st.getLat() == null || st.getLon() == null) continue;
+            double d = GeoUtils.haversineMetres(lat, lon, st.getLat(), st.getLon());
+            if (d < nearM) { nearM = d; near = st; }
+        }
+        return near;
+    }
+
+    private static String nz(String v, String dflt) {
+        return (v == null || v.isBlank()) ? dflt : v;
+    }
+
     /**
      * Follow-up chips, written around what is actually on screen.
      *
@@ -922,6 +1214,27 @@ public class AiOrchestrationService {
     private List<String> buildSuggestions(String lang, ChatRequest.ChatContext ctx) {
         boolean it = "it".equals(lang);
         List<String> out = new ArrayList<>();
+
+        // A journey under way takes the chips over, and the search ones go: "how
+        // do I get from A to B" is not a question somebody already on their way
+        // from A to B has.
+        ChatRequest.ActiveJourney j = ctx == null ? null : ctx.getJourney();
+        if (j != null) {
+            String line  = journeyLine(j);
+            String jDest = blankToNull(j.getDestName());
+            if (line != null) {
+                out.add(it ? "Dov'\u00e8 il bus della linea " + line + "?"
+                           : "Where is the line " + line + " bus?");
+                out.add(it ? "La linea " + line + " \u00e8 in ritardo?"
+                           : "Is line " + line + " running late?");
+            }
+            if (jDest != null)
+                out.add(it ? "Quanto manca per arrivare a " + jDest + "?"
+                           : "How much longer to " + jDest + "?");
+            if (out.isEmpty())
+                out.add(it ? "Quanto manca all'arrivo?" : "How much longer to go?");
+            return out.size() > 3 ? out.subList(0, 3) : out;
+        }
 
         String stop   = ctx == null ? null : blankToNull(ctx.getStopName());
         String origin = ctx == null ? null : blankToNull(ctx.getOriginName());

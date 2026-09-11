@@ -879,6 +879,21 @@
     </div>
 </div>
 
+<!-- The assistant has been asked to plan something while a journey is running.
+     A search is a fresh start and takes the running trip down with it, so the
+     traveller decides whether that is what they meant. -->
+<div id="aiReplanModal" class="confirm-modal" onclick="if (event.target === this) cancelAiReplan()">
+    <div class="confirm-card" onclick="event.stopPropagation()" role="dialog" aria-modal="true" aria-labelledby="aiReplanTitle">
+        <div class="confirm-icon" style="color:#f59e0b">⚠️</div>
+        <div class="confirm-title" id="aiReplanTitle" data-i18n="ai_replan_title">End the journey you are on?</div>
+        <p class="confirm-body" id="aiReplanBody"></p>
+        <div class="confirm-actions">
+            <button class="confirm-no" onclick="cancelAiReplan()" data-i18n="btn_cancel">Cancel</button>
+            <button class="confirm-yes" onclick="confirmAiReplan()" data-i18n="ai_replan_yes">Plan the new one</button>
+        </div>
+    </div>
+</div>
+
 <!-- The end of a journey that nobody tapped End Journey for: either the
      destination was reached, or the estimate ran out. The second is a question,
      not an announcement — the traveller may still be on the bus — so it offers
