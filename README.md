@@ -550,7 +550,7 @@ docker compose -f cassitrack-backend/docker-compose.yml down -v
 ## What Is Next
 
 - Real OBU hardware on more vehicles (`BUS4` still needs reflashing from `BUS2L`)
-- An Elerent service token (or a GBFS feed) for real vehicle positions: the App-Public-Key opens the zones only
+- The id of an Elerent rider (or a GBFS feed) for real vehicle positions: the public and secret keys are in place, `/get-vehicles` still wants a `user_id`
 - A service calendar: trips currently run every day, with no weekday/Saturday distinction
 - Official timetable data from the network operator, replacing the interpolated intermediate times
 - DPIA completion and DPO sign-off before the research pipeline is enabled anywhere real

@@ -64,15 +64,16 @@ across every Elerent city — 29 of them in Cassino.
 ELERENT_API_MOCK=false
 ELERENT_PUBLIC_KEY=<key provided by Elerent>
 # optional:
-ELERENT_USER_TOKEN=                                             # see §1.1
+ELERENT_SECRET_KEY=<secret key>                                 # see §1.1
+ELERENT_USER_ID=                                                # see §1.1
 ELERENT_VEHICLES_FALLBACK_MOCK=true                             # default
 ELERENT_API_URL=https://app.rideatom.com/openapi/v1.0/sharing   # default
 ```
 
 The matching configuration lives in
 `omnimove-backend/src/main/resources/application.yml`, block `elerent.api`
-(base-url, public-key, user-token, mock, vehicles-fallback-mock, centre-lat,
-centre-lon, radius-km).
+(base-url, public-key, secret-key, user-id, mock, vehicles-fallback-mock,
+centre-lat, centre-lon, radius-km).
 
 ### Step 3 — Restart omnimove-backend
 
@@ -80,40 +81,73 @@ At startup the log tells you which provider is active:
 
 - `MockElerentClient ready — N simulated vehicles in Cassino …` → the mock is
   loaded (as the provider when `mock=true`, as the vehicle fallback otherwise)
-- `RideAtomClient → https://… (key configured, user token absent, vehicle
-  fallback on)` → real API
+- `RideAtomClient → https://… (public key configured, secret key configured,
+  user id absent, vehicle fallback on)` → real API
 
 Nothing else is needed: frontend, REST endpoints and service are identical in
 both cases.
 
-### 1.1 What the public key actually opens
+### 1.1 Credentials: what opens what
 
-The documentation page presents the whole *Sharing* tag as one family, but the
-spec declares a different security requirement per operation, and the server
-enforces it:
+The documentation page presents the whole *Sharing* tag as one family, but each
+operation declares its own security requirement and the server enforces it:
 
-| Endpoint | Declared auth | Reality with our key |
+| Endpoint | Auth required | State |
 |---|---|---|
-| `POST /get-zones` | `App-Public-Key` | **200** — real Elerent zones |
-| `POST /get-vehicles` — body `{user_latitude, user_longitude, radius_in_km}` | `App-Public-Key` **+** `Authorization` | **401 `Unauthorized Access`** |
+| `POST /get-zones` | public key | **working** — real Elerent zones |
+| `POST /get-vehicles` | public key **+** secret key **+** `user_id` | **blocked** — no rider id yet |
 
-`/get-vehicles` returns positions, plate (`nr`), battery and type, but only for
-a signed-in rider: the bearer token is issued by the ATOM account system
-(phone-number verification), and the alternative documented route — the
-`user_id` parameter — "works with secret key only", which is a credential an
-operator does not hand to a third-party planner.
+Elerent confirmed the rule and issued the **secret key** (account 264,
+`secret_key_authentication` flow). It travels as `Authorization: Bearer …`
+alongside the public key, and the server accepts it — the call now fails one
+step later, on the body:
 
-So there are two ways to get real vehicle positions, and both are a question for
-Elerent, not a code change:
+```
+400 {"message": "Validation failed", "errors": [{"error_info":
+     "Value error, user_id is required when using secret key authentication"}]}
+```
 
-1. a **service token** for OMNIMOVE, set in `ELERENT_USER_TOKEN`; the client
-   already sends it as `Authorization: Bearer …` when present;
-2. a **GBFS feed**, which needs no credentials at all — see §4.1.
+Secret-key authentication acts **on behalf of a rider**, so `/get-vehicles`
+wants the id of an Elerent user. The account id 264 is not one (`User not
+found.`). That id is the single missing piece; `ELERENT_USER_ID` is wired and
+waiting for it.
 
-Until then `RideAtomClient` catches the 401, warns once, and delegates
-`getVehicles()` to `MockElerentClient` (`elerent.api.vehicles-fallback-mock`,
-default `true`). The map therefore shows a simulated fleet inside real Elerent
-zones; set the flag to `false` to show no vehicles at all instead.
+There are two ways to obtain one, and both are Elerent's call, not ours:
+
+1. **Elerent gives us the id** of an existing account — ideally one they create
+   as a service account for OMNIMOVE;
+2. `POST /openapi/v1.0/user/register` creates one with the secret key (email,
+   name, phone). This has **not** been called: it creates a real rider in
+   Elerent's production system, tied to a real phone number, and that is a
+   decision for Elerent and the team, not something to do while exploring an
+   API.
+
+A **GBFS feed** (§4.1) would still be the cleanest answer: no credentials, no
+rider identity, exactly the data the map needs.
+
+Worth being explicit about what is being asked for here, because the API's shape
+invites a misunderstanding: OMNIMOVE wants vehicle positions for the map, not
+anything about Elerent's customers. The rider id is ATOM's way of authorising the
+availability query, not data we are after — a dummy service account serves the
+purpose exactly as well as a real one. Since the call runs *as* that rider, the
+response also carries their own business (`selected_payment_method`, active
+rides, running fares); the client reads none of it, only id, coordinates, plate,
+battery and type.
+
+Until the id arrives, `RideAtomClient` treats any 4xx on `/get-vehicles` as a
+standing credential problem: it logs the server's own message once, then
+delegates `getVehicles()` to `MockElerentClient`
+(`elerent.api.vehicles-fallback-mock`, default `true`). A 5xx or a timeout is
+treated as an outage instead and yields no vehicles, so a real failure is never
+disguised as data. The map therefore shows a simulated fleet inside real Elerent
+zones; set the flag to `false` to show no vehicles at all.
+
+> **The secret key is a privileged credential.** The same key is what the
+> platform's account and admin endpoints authenticate with — user lists, blocking
+> riders, crediting wallets. OMNIMOVE sends it to `/get-vehicles` and nowhere
+> else, it lives only in `omnimove-backend/.env` (gitignored), and it must never
+> reach the frontend, the repository or a write endpoint. If it leaks, ask
+> Elerent to rotate it.
 
 ### 1.2 What comes back for Cassino
 
@@ -182,8 +216,9 @@ so a bike ride there ends ~440 m away.
 ### Endpoints deliberately not used
 
 `start-ride`, `end-ride`, `pause`, `send-vehicle-commands`, `purchase`: write
-operations, they require a user token, and they belong to a future phase
-(deep-link handoff to the Elerent app — §4.3).
+operations that unlock vehicles and move money. The secret key would now open
+them, which is exactly why it is never sent anywhere but `/get-vehicles` —
+renting belongs to Elerent's own app (deep-link handoff, §4.3).
 
 ---
 

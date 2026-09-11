@@ -64,13 +64,14 @@ Cassino.
 ELERENT_API_MOCK=false
 ELERENT_PUBLIC_KEY=<chiave fornita da Elerent>
 # opzionali:
-ELERENT_USER_TOKEN=                                             # vedi §1.1
+ELERENT_SECRET_KEY=<secret key>                                 # vedi §1.1
+ELERENT_USER_ID=                                                # vedi §1.1
 ELERENT_VEHICLES_FALLBACK_MOCK=true                             # default
 ELERENT_API_URL=https://app.rideatom.com/openapi/v1.0/sharing   # default
 ```
 
 La configurazione corrispondente è in `omnimove-backend/src/main/resources/application.yml`,
-blocco `elerent.api` (base-url, public-key, user-token, mock,
+blocco `elerent.api` (base-url, public-key, secret-key, user-id, mock,
 vehicles-fallback-mock, centre-lat, centre-lon, radius-km).
 
 ### Passo 3 — Riavviare omnimove-backend
@@ -79,40 +80,73 @@ All'avvio il log indica quale provider è attivo:
 
 - `MockElerentClient ready — N simulated vehicles in Cassino …` → il mock è
   caricato (come provider se `mock=true`, altrimenti come fallback dei mezzi)
-- `RideAtomClient → https://… (key configured, user token absent, vehicle
-  fallback on)` → API reale
+- `RideAtomClient → https://… (public key configured, secret key configured,
+  user id absent, vehicle fallback on)` → API reale
 
 Non serve altro: frontend, endpoint REST e service sono identici nei due casi.
 
-### 1.1 Cosa apre davvero la public key
+### 1.1 Credenziali: cosa apre cosa
 
 La pagina di documentazione presenta l'intero tag *Sharing* come una famiglia
-sola, ma la specifica dichiara un requisito di sicurezza diverso per operazione,
-e il server lo applica:
+sola, ma ogni operazione dichiara il proprio requisito di sicurezza e il server
+lo applica:
 
-| Endpoint | Auth dichiarata | Realtà con la nostra chiave |
+| Endpoint | Auth richiesta | Stato |
 |---|---|---|
-| `POST /get-zones` | `App-Public-Key` | **200** — zone Elerent reali |
-| `POST /get-vehicles` — body `{user_latitude, user_longitude, radius_in_km}` | `App-Public-Key` **+** `Authorization` | **401 `Unauthorized Access`** |
+| `POST /get-zones` | public key | **funziona** — zone Elerent reali |
+| `POST /get-vehicles` | public key **+** secret key **+** `user_id` | **bloccato** — manca l'id del rider |
 
-`/get-vehicles` restituisce posizioni, targa (`nr`), batteria e tipo, ma solo per
-un utente autenticato: il token bearer lo emette il sistema account di ATOM
-(verifica del numero di telefono), e l'unica alternativa documentata — il
-parametro `user_id` — "works with secret key only", cioè una credenziale che un
-operatore non consegna a un planner di terze parti.
+Elerent ha confermato la regola e ci ha dato la **secret key** (account 264,
+flusso `secret_key_authentication`). Viaggia come `Authorization: Bearer …`
+accanto alla public key, e il server la accetta — la chiamata ora fallisce un
+passo più avanti, sul body:
 
-Ci sono quindi due strade per avere le posizioni reali, ed entrambe sono una
-domanda da fare a Elerent, non una modifica al codice:
+```
+400 {"message": "Validation failed", "errors": [{"error_info":
+     "Value error, user_id is required when using secret key authentication"}]}
+```
 
-1. un **token di servizio** per OMNIMOVE, da mettere in `ELERENT_USER_TOKEN`; il
-   client lo invia già come `Authorization: Bearer …` quando è valorizzato;
-2. un **feed GBFS**, che non richiede alcuna credenziale — vedi §4.1.
+L'autenticazione con secret key agisce **per conto di un utente**, quindi
+`/get-vehicles` vuole l'id di un rider Elerent. L'account id 264 non lo è
+(`User not found.`). Quell'id è l'unico pezzo mancante; `ELERENT_USER_ID` è già
+cablato e lo aspetta.
 
-Nel frattempo `RideAtomClient` intercetta il 401, logga un warning una volta sola
+Ci sono due modi per ottenerlo, ed entrambi sono una decisione di Elerent, non
+nostra:
+
+1. **Elerent ci comunica l'id** di un account esistente — idealmente uno creato
+   apposta come account di servizio per OMNIMOVE;
+2. `POST /openapi/v1.0/user/register` ne crea uno con la secret key (email,
+   nome, telefono). **Non** è stato chiamato: crea un rider reale nel sistema di
+   produzione di Elerent, legato a un numero di telefono vero, ed è una scelta
+   di Elerent e del gruppo, non qualcosa da fare esplorando un'API.
+
+Un **feed GBFS** (§4.1) resterebbe comunque la risposta più pulita: nessuna
+credenziale, nessuna identità di rider, esattamente il dato che serve alla mappa.
+
+Vale la pena essere espliciti su cosa si sta chiedendo, perché la forma dell'API
+si presta a un equivoco: a OMNIMOVE servono le posizioni dei mezzi per la mappa,
+non qualcosa sui clienti di Elerent. L'id del rider è il modo in cui ATOM
+autorizza la query di disponibilità, non un dato che ci interessa — un account
+fittizio di servizio va bene esattamente quanto uno reale. Poiché la chiamata
+viene fatta *come* quel rider, la risposta porta con sé anche le sue cose
+(`selected_payment_method`, corse in atto, importi in corso): il client non ne
+legge nulla, solo id, coordinate, targa, batteria e tipo.
+
+Finché l'id non arriva, `RideAtomClient` tratta qualunque 4xx su `/get-vehicles`
+come un problema di credenziali stabile: logga una volta il messaggio del server
 e delega `getVehicles()` a `MockElerentClient`
-(`elerent.api.vehicles-fallback-mock`, default `true`). La mappa mostra quindi una
-flotta simulata dentro zone Elerent reali; mettendo il flag a `false` non si
-mostra alcun mezzo.
+(`elerent.api.vehicles-fallback-mock`, default `true`). Un 5xx o un timeout viene
+invece trattato come un disservizio e non restituisce mezzi, così un guasto vero
+non viene mai mascherato da dati. La mappa mostra quindi una flotta simulata
+dentro zone Elerent reali; mettendo il flag a `false` non si mostra alcun mezzo.
+
+> **La secret key è una credenziale privilegiata.** È la stessa con cui si
+> autenticano gli endpoint account e admin della piattaforma — elenco utenti,
+> blocco di un rider, accredito sul portafoglio. OMNIMOVE la invia a
+> `/get-vehicles` e a nient'altro, vive solo in `omnimove-backend/.env`
+> (gitignored), e non deve mai finire nel frontend, nel repository o su un
+> endpoint di scrittura. Se trapela, chiedere a Elerent di ruotarla.
 
 ### 1.2 Cosa arriva per Cassino
 
@@ -183,8 +217,10 @@ dentro la no-go zone 4411, quindi una corsa in bici finisce a ~440 m.
 ### Endpoint volutamente non usati
 
 `start-ride`, `end-ride`, `pause`, `send-vehicle-commands`, `purchase`: sono
-operazioni di scrittura, richiedono un token utente e appartengono a una fase
-futura (handoff con deep-link verso l'app Elerent — §4.3).
+operazioni di scrittura che sbloccano mezzi e muovono denaro. La secret key ora
+le aprirebbe, ed è esattamente il motivo per cui non viene inviata a nulla che
+non sia `/get-vehicles` — il noleggio resta nell'app di Elerent (handoff con
+deep-link, §4.3).
 
 ---
 

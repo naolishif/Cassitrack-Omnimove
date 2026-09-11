@@ -130,9 +130,11 @@ elerent:
   api:
     base-url: ${ELERENT_API_URL:https://app.rideatom.com/openapi/v1.0/sharing}
     public-key: ${ELERENT_PUBLIC_KEY:}
-    # /get-vehicles also requires a per-user bearer token; the public key alone
-    # opens /get-zones only. Empty until Elerent issues a service account.
-    user-token: ${ELERENT_USER_TOKEN:}
+    # /get-vehicles also requires Elerent's secret key (sent as a bearer token)
+    # and the id of an Elerent rider to query on behalf of. The public key alone
+    # opens /get-zones only. Never send the secret key to a write endpoint.
+    secret-key: ${ELERENT_SECRET_KEY:}
+    user-id: ${ELERENT_USER_ID:}
     mock: ${ELERENT_API_MOCK:true}
     # While /get-vehicles answers 401, serve the simulated fleet rather than an
     # empty map (the real zones are drawn around it either way).
