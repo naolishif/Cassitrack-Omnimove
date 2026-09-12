@@ -275,6 +275,13 @@ omnimove:
     security-days:    ${RETENTION_SECURITY_DAYS:365}
     consent-days:     ${RETENTION_CONSENT_DAYS:730}
     unverified-hours: ${RETENTION_UNVERIFIED_HOURS:24}
+    # Dormant accounts. The warning is not cosmetic: the deletion pass refuses to
+    # touch an account whose warning is younger than inactive-warning-days, so
+    # this value is also the minimum notice actually honoured. Shortening it
+    # cannot cut short a notice already sent — each account is measured against
+    # its own recorded warning date, not against today's.
+    inactive-months:       ${RETENTION_INACTIVE_MONTHS:24}
+    inactive-warning-days: ${RETENTION_INACTIVE_WARNING_DAYS:7}
   research:
     # Three-tier research lifecycle — see docs/privacy/DPIA-omnimove-cassitrack.md.
     # OFF by default: it moves personal data between tiers and deletes it, so it
@@ -296,4 +303,4 @@ omnimove:
     # Bump it whenever the text materially changes: consents recorded under an
     # older version stop counting and are asked again. Keep it in sync with the
     # "Ultimo aggiornamento" date shown in privacy.html and cookie-policy.html.
-    policy-version: ${PRIVACY_POLICY_VERSION:2026-08-31}
+    policy-version: ${PRIVACY_POLICY_VERSION:2026-09-12}

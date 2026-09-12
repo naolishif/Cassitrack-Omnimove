@@ -111,6 +111,11 @@ public class AuthController {
                 .verificationToken(verificationToken)
                 .verificationTokenExpiry(LocalDateTime.now().plusHours(VERIFY_EXPIRY_HOURS))
                 .failedLoginAttempts(0)
+                // The language the sign-up form was filled in. It matters from the
+                // very first minute: an account abandoned here is deleted 24 hours
+                // later, and the notice that says so is the only message this
+                // address will ever get from us.
+                .language(langFrom(request))
                 .build();
         userRepo.save(user);
 
@@ -217,7 +222,7 @@ public class AuthController {
 
         user.setFailedLoginAttempts(0);
         // Persists the counter reset together with the new last-login stamp
-        loginHistoryService.recordLogin(user, httpReq.getHeader("User-Agent"));
+        loginHistoryService.recordLogin(user, httpReq.getHeader("User-Agent"), langFrom(httpReq));
 
         String token = jwtUtil.generateToken(user.getEmail());
         long expiresInMs = jwtUtil.getExpirationMs();
@@ -329,7 +334,7 @@ public class AuthController {
         }
 
         if (user.getFailedLoginAttempts() != 0) user.setFailedLoginAttempts(0);
-        loginHistoryService.recordLogin(user, httpReq.getHeader("User-Agent"));
+        loginHistoryService.recordLogin(user, httpReq.getHeader("User-Agent"), langFrom(httpReq));
 
         String token = jwtUtil.generateToken(user.getEmail());
         long expiresInMs = jwtUtil.getExpirationMs();
@@ -395,6 +400,7 @@ public class AuthController {
                 .googleSub(identity.subject())
                 .authProvider("GOOGLE")
                 .failedLoginAttempts(0)
+                .language(lang)
                 .build();
         userRepo.save(user);
         securityAuditService.googleRegistration(user.getEmail(), ip);
@@ -593,6 +599,50 @@ public class AuthController {
             .orElse(ResponseEntity.notFound().build());
     }
 
+    // ── LANGUAGE ──────────────────────────────────────────────────────
+
+    /**
+     * Records the language the traveller just picked.
+     *
+     * <p>The selector writes to localStorage, which never leaves the browser. That
+     * is enough while they are looking at the page — every call carries
+     * X-Omnimove-Lang — and no use at all for the messages that matter most,
+     * which are sent when nobody is looking: an operator closing the account, or
+     * the nightly sweep retiring a dormant one.
+     *
+     * <p>FIRE AND FORGET on the caller's side. Not in the permit-all list, so a
+     * request without a session is turned away by Spring Security before it gets
+     * here — which is the right answer, since there is no account to attribute a
+     * preference to. The language selector also lives on the login page, so that
+     * 401 is an ordinary outcome and the page ignores it: switching language must
+     * never look like it failed, and it has already taken effect locally.
+     *
+     * <p>The null check below is therefore belt-and-braces rather than the normal
+     * path, and the write is skipped when the value has not actually changed —
+     * this fires on every toggle of the selector, including back and forth.
+     */
+    @PutMapping("/language")
+    @Operation(summary = "Store the signed-in user's language for e-mails sent later")
+    public ResponseEntity<Void> setLanguage(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal
+            org.springframework.security.core.userdetails.UserDetails userDetails,
+            HttpServletRequest request) {
+
+        if (userDetails != null) {
+            // Read from the header the page already sends, not from a body: the
+            // value is then the same one every other request is answered in, and
+            // there is no second format that could disagree with it.
+            String lang = langFrom(request);
+            userRepo.findByEmail(userDetails.getUsername()).ifPresent(u -> {
+                if (!lang.equalsIgnoreCase(u.getLanguage())) {
+                    u.setLanguage(lang);
+                    userRepo.save(u);
+                }
+            });
+        }
+        return ResponseEntity.noContent().build();
+    }
+
     // ── DELETE ACCOUNT ────────────────────────────────────────────────
 
     @DeleteMapping("/account")
@@ -610,10 +660,28 @@ public class AuthController {
         // counting as signed in until its token expired.
         sessionService.terminate(request, response);
 
+        String fromRequest = langFrom(request);
+
         return userRepo.findByEmail(userDetails.getUsername())
                 .map(u -> {
+                    // Read off the row before it goes: after the delete there is
+                    // nothing left to address the message to.
+                    String email = u.getEmail();
+                    String name  = u.getName();
+                    // Their stored choice wins over this request's header: the
+                    // two agree in a browser, and where they do not it is the
+                    // stored one that reflects a decision rather than a guess
+                    // from Accept-Language.
+                    String lang  = EmailService.langOf(u.getLanguage(), fromRequest);
+
                     userRepo.delete(u);
-                    securityAuditService.accountDeleted(u.getEmail());
+                    securityAuditService.accountDeleted(email);
+
+                    // Only once the row is actually gone. Sent the other way round,
+                    // a delete that failed would still have told the person their
+                    // account no longer exists.
+                    emailService.sendAccountDeletedEmail(email, name, lang);
+
                     return ResponseEntity.ok(AuthResponse.builder()
                             .message("Account deleted successfully.").build());
                 })

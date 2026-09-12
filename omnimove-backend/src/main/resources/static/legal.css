@@ -107,3 +107,44 @@ code {
     display: flex; gap: 20px; flex-wrap: wrap;
     font-family: var(--mono); font-size: 12px;
 }
+
+/* ── Language switch on the legal documents ──────────────────────────────
+   The notice and the cookie policy carry both their texts and show one; this
+   is the control that chooses. It sits under the tagline, before the title,
+   because a reader who cannot read the page has to find it without reading
+   the page. */
+.lang-switch {
+    display: flex;
+    gap: 6px;
+    margin: 18px 0 26px;
+}
+.lang-switch button {
+    font: inherit;
+    font-size: 13px;
+    line-height: 1;
+    padding: 7px 14px;
+    border: 1px solid var(--border-mid, #cbd5e1);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-mid, #475569);
+    cursor: pointer;
+}
+.lang-switch button:hover { border-color: var(--brand, #3B82F6); }
+.lang-switch button.is-on {
+    background: var(--brand, #3B82F6);
+    border-color: var(--brand, #3B82F6);
+    color: #fff;
+    font-weight: 600;
+}
+.lang-switch button:focus-visible {
+    outline: 2px solid var(--brand, #3B82F6);
+    outline-offset: 2px;
+}
+
+/* `hidden` has to actually hide.
+   The attribute works through a user-agent rule of `display: none`, which ANY
+   class setting `display` outranks — .footer-nav is `display: flex`, so the
+   hidden translation of the footer went on showing underneath the visible one.
+   Stated here once, with the weight to win, so hiding a block never depends on
+   whether that block happens to carry a display of its own. */
+[hidden] { display: none !important; }

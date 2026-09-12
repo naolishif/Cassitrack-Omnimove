@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-    <title>OMNIMOVE — Cookie policy</title>
+    <title data-doc-title-it="OMNIMOVE — Cookie policy"
+           data-doc-title-en="OMNIMOVE — Cookie policy">OMNIMOVE — Cookie policy</title>
     <link href="legal.css" rel="stylesheet"/>
     <link href="omnimove-consent.css" rel="stylesheet"/>
 </head>
@@ -18,10 +19,10 @@
   Stato attuale: solo strumenti tecnici, nessuno strumento di profilazione.
   Font e librerie sono self-hosted in /vendor. Tre servizi di terze parti
   restano contattati dal browser: le mappe OpenStreetMap e, sulla pagina di
-  accesso, Google Sign-In e reCAPTCHA (§ 4). I due script Google NON stanno
+  accesso, Google Sign-In e reCAPTCHA (paragrafo 4). I due script Google NON stanno
   nell'HTML: omnimove-login.js li inietta solo se la funzione e' attiva lato
   server e solo dopo la prima interazione dell'utente. Se qualcuno li rimette
-  come <script src> nella pagina, questo paragrafo e il § 4 diventano falsi.
+  come <script src> nella pagina, questo paragrafo e il paragrafo 4 diventano falsi.
   ════════════════════════════════════════════════════════════════════════
 -->
 <body>
@@ -29,11 +30,19 @@
     <div class="logo">OMNI<span>MOVE</span></div>
     <div class="tagline">Smart mobility for Cassino — UNICAS 2025/2026</div>
 
+    <!-- Reads and writes the same localStorage key the application uses, so the
+         language chosen here is the language the app opens in, and vice versa. -->
+    <div class="lang-switch" role="group" aria-label="Language / Lingua">
+        <button type="button" data-set-lang="it" lang="it">Italiano</button>
+        <button type="button" data-set-lang="en" lang="en">English</button>
+    </div>
+
+    <div data-doc-lang="it">
     <h1>Cookie policy</h1>
     <div class="updated">
         Redatta ai sensi dell'art. 122 del D.lgs. 196/2003 e delle Linee guida del Garante
         per la protezione dei dati personali del 10 giugno 2021 —
-        Ultimo aggiornamento: 31 agosto 2026 — Versione: 2026-08-31
+        Ultimo aggiornamento: 12 settembre 2026 — Versione: 2026-09-12
     </div>
 
     <p>
@@ -58,7 +67,7 @@
             all'autenticazione e alla sicurezza &mdash; l'accesso con account Google e il
             controllo reCAPTCHA &mdash; che installano propri cookie tecnici sul dominio di
             Google. Vengono caricati solo se attivi e solo quando cominci a usare la pagina:
-            se ti limiti ad aprirla, non viene installato nulla. Sono descritti al § 4.
+            se ti limiti ad aprirla, non viene installato nulla. Sono descritti al paragrafo 4.
         </p>
         <p>
             Per gli strumenti tecnici la normativa <strong>non richiede il consenso</strong>
@@ -225,14 +234,222 @@
         verrà aggiornata e ti sarà mostrato un banner che ti consentirà di accettarli o
         rifiutarli, con pari facilità e senza che il rifiuto limiti l'uso del servizio.
     </p>
+    </div>
 
-    <div class="footer-nav">
+    <div data-doc-lang="en" hidden>
+    <h1>Cookie policy</h1>
+    <div class="updated">
+        Drawn up pursuant to Article 122 of Legislative Decree 196/2003 and to the Guidelines of
+        the Italian Data Protection Authority of 10 June 2021 &mdash;
+        Last updated: 12 September 2026 &mdash; Version: 2026-09-12
+    </div>
+
+    <div class="box">
+        <p>
+            This English text is provided for the convenience of readers who do not speak
+            Italian. <strong>The Italian version is the authoritative one</strong>: in the
+            event of any discrepancy, the Italian text prevails.
+        </p>
+    </div>
+
+    <p>
+        Data Controller: <strong>University of Cassino and Southern Lazio</strong>. Full contact
+        details and information on the processing of personal data are set out in the
+        <a href="privacy.html">Privacy notice</a>.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>1. In short</h2>
+    <div class="box">
+        <p>
+            OMNIMOVE uses <strong>technical tools only</strong>, necessary to let you sign in to
+            the service and to remember the settings you have chosen.
+        </p>
+        <p>
+            <strong>We use no profiling cookies, no advertising cookies, no third-party
+            analytics and no cross-site tracking cookies.</strong>
+        </p>
+        <p>
+            The sign-in page may use two Google services needed for authentication and security
+            &mdash; sign-in with a Google account and the reCAPTCHA check &mdash; which install
+            their own technical cookies on Google&apos;s domain. They are loaded only if enabled
+            and only once you begin using the page: if you merely open it, nothing is installed.
+            They are described in paragraph 4.
+        </p>
+        <p>
+            For technical tools the law <strong>does not require consent</strong>
+            (Article 122(1) of Legislative Decree 196/2003): that is why you will not find a
+            banner asking you to accept or refuse, but only a short notice.
+        </p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>2. What they are</h2>
+    <p>
+        Cookies are small text files that websites save on a visitor&apos;s device. The same rules
+        apply to other storage technologies, such as <code>localStorage</code> and
+        <code>sessionStorage</code>: those are listed below as well, for completeness.
+    </p>
+    <p>
+        <strong>Technical</strong> tools are those indispensable to delivering the service you
+        asked for: without them the application does not work. <strong>Profiling</strong> tools,
+        by contrast, serve to reconstruct a visitor&apos;s habits and require freely given,
+        specific and withdrawable consent: <strong>OMNIMOVE uses none</strong>.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>3. Complete list of the tools used</h2>
+    <div class="table-scroll">
+        <table>
+            <thead>
+            <tr>
+                <th>Name</th><th>Type</th><th>Purpose</th><th>Duration</th><th>Consent</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td><code>omnimove_jwt</code></td>
+                <td>Technical cookie<br>(<code>HttpOnly</code>, <code>SameSite=Strict</code>)</td>
+                <td>Keeps you signed in after authentication. It is marked
+                    <code>HttpOnly</code>: the page&apos;s JavaScript cannot read it</td>
+                <td>1 hour</td>
+                <td>Not required</td>
+            </tr>
+            <tr>
+                <td><code>omnimove_user</code></td>
+                <td><code>sessionStorage</code></td>
+                <td>Holds your name and role so they can be shown in the interface without
+                    asking the server for them on every page</td>
+                <td>Until the tab is closed</td>
+                <td>Not required</td>
+            </tr>
+            <tr>
+                <td><code>omnimove_lang</code></td>
+                <td><code>localStorage</code></td>
+                <td>Remembers the language you selected (Italian or English)</td>
+                <td>Persistent, until you clear your browser data</td>
+                <td>Not required</td>
+            </tr>
+            <tr>
+                <td><code>omnimove_consent</code></td>
+                <td><code>sessionStorage</code></td>
+                <td>Records that you have read this notice, so that it is not shown again on
+                    every page. Until you have an account it stays in the browser alone and is
+                    not transmitted to our servers; if you register, the acknowledgement is
+                    saved to your account and from then on applies on any device</td>
+                <td>Until the tab is closed</td>
+                <td>Not required</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>4. Third-party content</h2>
+    <p>
+        The typefaces and software libraries used by the application are <strong>hosted on our own
+        servers</strong>. Your browser does not contact external content delivery networks, and
+        your IP address is therefore not disclosed to such parties.
+    </p>
+    <p>
+        The following services are the exception, each one indispensable to the function it is
+        attached to:
+    </p>
+    <div class="table-scroll">
+        <table>
+            <thead>
+            <tr><th>Service</th><th>Purpose</th><th>Data disclosed</th><th>Consent</th></tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>OpenStreetMap Foundation<br><code>tile.openstreetmap.org</code></td>
+                <td>Supplies the map images you see in the application</td>
+                <td>Your IP address, browser type and the map tiles requested</td>
+                <td>Not required: the map is part of the service you asked for. OpenStreetMap
+                    installs no profiling cookies</td>
+            </tr>
+            <tr>
+                <td>Google Sign-In<br><code>accounts.google.com</code></td>
+                <td>Lets you sign in with your Google account instead of a dedicated
+                    password</td>
+                <td>Your IP address and browser type. The script is loaded only if this method
+                    is enabled and only once you have begun using the page. If you use it,
+                    Google discloses to us your name, e-mail address and an identifier of your
+                    account</td>
+                <td>Not required: a technical tool necessary for the authentication method you
+                    chose to use</td>
+            </tr>
+            <tr>
+                <td>Google reCAPTCHA<br><code>google.com/recaptcha</code>,
+                    <code>gstatic.com/recaptcha</code></td>
+                <td>Distinguishes people from automated systems, to protect the sign-in page
+                    against mass sign-in attempts</td>
+                <td>Your IP address, browser type and information about your interaction with
+                    the page. It installs a technical cookie of its own
+                    (<code>_GRECAPTCHA</code>) on Google&apos;s domain. It is loaded only if the
+                    check is enabled and only once you have begun using the page</td>
+                <td>Not required: a technical security tool, necessary to protect access to your
+                    account</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    <p>
+        Suppliers&apos; notices:
+        <a href="https://osmfoundation.org/wiki/Privacy_Policy" target="_blank"
+           rel="noopener noreferrer">osmfoundation.org/wiki/Privacy_Policy</a> &middot;
+        <a href="https://policies.google.com/privacy" target="_blank"
+           rel="noopener noreferrer">policies.google.com/privacy</a>.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>5. Geolocation</h2>
+    <p>
+        If you choose to use your location as a starting point, the browser will ask you for
+        explicit permission. This is not a cookie: the permission is managed by the browser and
+        you can withdraw it at any time from its settings. The location is used to calculate the
+        route and is <strong>not stored</strong> on our systems.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>6. Managing these tools from your browser</h2>
+    <p>
+        You can block or delete cookies from your browser settings. Please note that blocking
+        technical cookies will make it <strong>impossible to sign in</strong> to OMNIMOVE.
+        Instructions for the most common browsers:
+    </p>
+    <ul>
+        <li><a href="https://support.google.com/chrome/answer/95647" target="_blank"
+               rel="noopener noreferrer">Google Chrome</a></li>
+        <li><a href="https://support.mozilla.org/en-US/kb/enhanced-tracking-protection-firefox-desktop"
+               target="_blank" rel="noopener noreferrer">Mozilla Firefox</a></li>
+        <li><a href="https://support.apple.com/en-gb/guide/safari/sfri11471/mac" target="_blank"
+               rel="noopener noreferrer">Apple Safari</a></li>
+        <li><a href="https://support.microsoft.com/en-us/microsoft-edge" target="_blank"
+               rel="noopener noreferrer">Microsoft Edge</a></li>
+    </ul>
+
+    <h2>7. Updates</h2>
+    <p>
+        Should we introduce tools requiring consent in future, this page will be updated and you
+        will be shown a banner allowing you to accept or refuse them, with equal ease and without
+        refusal limiting your use of the service.
+    </p>
+    </div>
+
+    <div class="footer-nav" data-doc-lang="it">
         <a href="privacy.html">Informativa privacy</a>
         <a href="omnimove-login.html" data-omni-back>← Torna a OMNIMOVE</a>
         <a href="#" onclick="OmniConsent.open(); return false;">Preferenze cookie</a>
     </div>
+    <div class="footer-nav" data-doc-lang="en" hidden>
+        <a href="privacy.html">Privacy notice</a>
+        <a href="omnimove-login.html" data-omni-back>← Back to OMNIMOVE</a>
+        <a href="#" onclick="OmniConsent.open(); return false;">Cookie preferences</a>
+    </div>
 </div>
 
+<script src="legal-lang.js"></script>
 <script src="omnimove-consent.js"></script>
 </body>
 </html>

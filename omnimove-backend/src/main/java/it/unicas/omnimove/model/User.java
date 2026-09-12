@@ -65,8 +65,35 @@ public class User {
     private LocalDateTime createdAt;
 
     /** Most recent successful access — mirror of the newest login_events row. */
+    /**
+     * The language this person reads the app in, for the e-mails we send when
+     * they are not in front of it.
+     *
+     * <p>Written at sign-up, refreshed at every login, and updated the moment the
+     * language selector is touched — so it follows the choice rather than
+     * recording the one made once, long ago.
+     *
+     * <p>Null means nobody ever told us, and the service default applies. Kept
+     * distinct from a stored "en" on purpose: one is an absence of information,
+     * the other is a decision.
+     */
+    @Column(name = "language", length = 5)
+    private String language;
+
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
+
+    /**
+     * When the inactivity notice was sent, if it was.
+     *
+     * <p>Read against {@link #lastLoginAt}: later than it means the warning still
+     * stands and the person has not been back since; earlier or equal means they
+     * returned afterwards and the warning lapsed. Nothing clears it on login —
+     * the comparison already says what happened, and a flag someone has to
+     * remember to reset is a flag that will one day delete the wrong account.
+     */
+    @Column(name = "inactivity_warned_at")
+    private LocalDateTime inactivityWarnedAt;
 
     @PrePersist
     void onCreate() {

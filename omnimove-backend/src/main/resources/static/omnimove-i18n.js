@@ -1062,4 +1062,33 @@ function setLanguage(lang) {
   applyTranslations();
   // Allow pages to re-render dynamic content after language change
   if (typeof window._onLangChange === 'function') window._onLangChange(lang);
+  rememberLanguageOnServer(lang);
+}
+
+/**
+ * Tells the server which language to write to this person in.
+ *
+ * localStorage is enough for everything drawn on screen, and no use at all for
+ * the e-mails sent when the screen is closed — an operator deleting the account,
+ * or the nightly retention sweep. Those read the language off the user row, so
+ * it has to get there, and the only moment we know it changed is this one.
+ *
+ * NOTHING IS AWAITED AND NOTHING IS REPORTED. The language has already changed
+ * as far as the reader is concerned; a failure here costs the wording of a
+ * message that may never be sent, which is not worth an error in front of
+ * somebody who just clicked a flag. A 401 is the ordinary outcome on the login
+ * page — there is no account yet — and is discarded like any other failure.
+ *
+ * Deliberately a bare fetch rather than the pages' apiFetch helper: that one
+ * redirects to the login page on 401, which would turn a language toggle on a
+ * lapsed session into an eviction.
+ */
+function rememberLanguageOnServer(lang) {
+  try {
+    fetch('/omnimove/api/v1/auth/language', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'X-Omnimove-Lang': lang }
+    }).catch(function () { /* offline, signed out, or gone — nothing to do */ });
+  } catch (e) { /* fetch unavailable: the page still works */ }
 }

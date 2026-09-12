@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-    <title>OMNIMOVE — Informativa sul trattamento dei dati personali</title>
+    <!-- Both titles live here; legal-lang.js picks one. The tab, the bookmark
+         and the browser history then read in the language on screen. -->
+    <title data-doc-title-it="OMNIMOVE — Informativa sul trattamento dei dati personali"
+           data-doc-title-en="OMNIMOVE — Privacy notice">OMNIMOVE — Informativa sul trattamento dei dati personali</title>
     <link href="legal.css" rel="stylesheet"/>
     <link href="omnimove-consent.css" rel="stylesheet"/>
 </head>
@@ -11,19 +14,23 @@
   ════════════════════════════════════════════════════════════════════════
   PRIMA DELLA PUBBLICAZIONE — da completare a cura dell'Ateneo:
 
-  1. FATTO — i recapiti del titolare (§ 1) e dell'RPD (§ 2) sono quelli
+  1. FATTO — i recapiti del titolare (paragrafo 1) e dell'RPD (paragrafo 2) sono quelli
      pubblicati dall'Ateneo. La classe .todo non è più usata in questa
      pagina; se serve un nuovo segnaposto, riusarla e rimettere questa voce.
-     Da rivedere prima della pubblicazione: il fornitore di posta al § 5 è
+     Da rivedere prima della pubblicazione: il fornitore di posta al paragrafo 5 è
      dichiarato come Gmail perché è ciò che spring.mail.host configura oggi.
      Se si passa all'SMTP di Ateneo, quella riga va corretta.
   2. Far validare il testo dall'RPD e inserire il trattamento nel registro
      ex art. 30 GDPR.
-  3. Verificare le tempistiche di conservazione dichiarate al § 7: la
-     cancellazione automatica dello storico viaggi dopo 12 mesi NON è
-     ancora implementata nel codice. O si implementa il job di purge, o
-     si corregge questo paragrafo. Non lasciare il testo in disallineamento
-     con il comportamento reale del sistema.
+  3. Le tempistiche dichiarate al paragrafo 7 sono tutte applicate da
+     DataRetentionService, che registra ogni esecuzione in retention_run; la
+     console di amministrazione ne mostra ultima esecuzione e totale rimosso.
+     Chi cambia un periodo QUI deve cambiare anche la configurazione
+     corrispondente (omnimove.retention.*), altrimenti il testo torna a
+     divergere dal comportamento reale del sistema.
+     La chiusura per inattività al paragrafo 7 è preceduta da un preavviso e-mail: se
+     si cambia il periodo, cambiarlo anche nel preavviso non serve — il testo
+     dell'e-mail legge la stessa configurazione.
   4. Aggiornare la data di "Ultimo aggiornamento" e, contestualmente, la
      property omnimove.privacy.policy-version in application.yml e la
      costante POLICY_VERSION in omnimove-consent.js.
@@ -34,10 +41,18 @@
     <div class="logo">OMNI<span>MOVE</span></div>
     <div class="tagline">Smart mobility for Cassino — UNICAS 2025/2026</div>
 
+    <!-- Reads and writes the same localStorage key the application uses, so the
+         language chosen here is the language the app opens in, and vice versa. -->
+    <div class="lang-switch" role="group" aria-label="Language / Lingua">
+        <button type="button" data-set-lang="it" lang="it">Italiano</button>
+        <button type="button" data-set-lang="en" lang="en">English</button>
+    </div>
+
+    <div data-doc-lang="it">
     <h1>Informativa sul trattamento dei dati personali</h1>
     <div class="updated">
         Resa ai sensi degli artt. 13 e 14 del Regolamento (UE) 2016/679 (GDPR) —
-        Ultimo aggiornamento: 31 agosto 2026 — Versione: 2026-08-31
+        Ultimo aggiornamento: 12 settembre 2026 — Versione: 2026-09-12
     </div>
 
     <p>
@@ -62,7 +77,7 @@
     <p>
         L'Ateneo ha designato un Responsabile della Protezione dei Dati, contattabile per
         ogni questione relativa al trattamento dei dati personali e all'esercizio dei
-        diritti descritti al § 8:
+        diritti descritti al paragrafo 8:
     </p>
     <div class="box">
         <p>Dott.ssa Elide Di Duca &mdash; designata con D.R. n. 373 del 15 maggio 2018</p>
@@ -95,7 +110,7 @@
         <li><strong>Storico dei viaggi pianificati</strong>: punto di partenza, destinazione,
             modalità, distanza, costo stimato, CO₂ stimata, indice ambientale e data/ora.
             <strong>Si tratta di dati di localizzazione</strong>: li trattiamo con particolare
-            cautela, come indicato al § 6.</li>
+            cautela, come indicato al paragrafo 6.</li>
         <li><strong>Posizione geografica</strong>: solo se la autorizzi espressamente tramite il
             browser e solo nel momento in cui la richiedi (ad esempio per impostare il punto di
             partenza). La posizione puntuale <strong>non viene conservata</strong> sui nostri
@@ -269,7 +284,7 @@
         sulla base della decisione di adeguatezza della Commissione europea del 10 luglio 2023
         relativa all'EU-U.S. Data Privacy Framework e/o delle Clausole Contrattuali Standard
         adottate dalla Commissione europea ai sensi dell'art. 46 GDPR. Puoi richiedere copia delle
-        garanzie adottate scrivendo ai recapiti indicati al § 1.
+        garanzie adottate scrivendo ai recapiti indicati al paragrafo 1.
     </p>
     <p>
         Per ridurre al minimo le comunicazioni non necessarie, <strong>i caratteri tipografici e le
@@ -278,7 +293,7 @@
         tuo indirizzo IP non viene quindi comunicato a tali soggetti.
     </p>
     <p>
-        Restano tre eccezioni, indicate nella tabella al § 5 e non eliminabili senza rinunciare
+        Restano tre eccezioni, indicate nella tabella al paragrafo 5 e non eliminabili senza rinunciare
         alla funzione corrispondente: le <strong>immagini della mappa</strong>, richieste dal tuo
         browser a OpenStreetMap mentre navighi, e i due servizi Google impiegati nella pagina di
         accesso &mdash; l'<strong>accesso con account Google</strong> e il controllo
@@ -322,7 +337,10 @@
             <tr>
                 <td>Dati dell'account, preferenze e preferiti</td>
                 <td>Fino alla cancellazione dell'account. Gli account non verificati entro
-                    24 ore vengono eliminati</td>
+                    24 ore vengono eliminati. Gli account rimasti <strong>24 mesi consecutivi
+                    senza alcun accesso</strong> vengono chiusi ed eliminati: sette giorni prima
+                    ti avvisiamo via e-mail all'indirizzo associato all'account, e un solo
+                    accesso entro quella data annulla la cancellazione</td>
             </tr>
             <tr>
                 <td>Storico dei viaggi</td>
@@ -371,7 +389,7 @@
             sull'utilizzo del servizio.</li>
     </ul>
     <p>
-        Per esercitare tali diritti puoi scrivere ai recapiti indicati ai §§ 1 e 2. Riceverai
+        Per esercitare tali diritti puoi scrivere ai recapiti indicati ai paragrafi 1 e 2. Riceverai
         riscontro entro un mese dalla richiesta.
     </p>
     <div class="box">
@@ -407,14 +425,410 @@
         ripresentata all'interno dell'applicazione e ti sarà chiesto nuovamente, ove necessario,
         di esprimere le tue scelte. La versione corrente è indicata in testa a questa pagina.
     </p>
+    </div>
 
-    <div class="footer-nav">
+    <div data-doc-lang="en" hidden>
+    <h1>Privacy notice</h1>
+    <div class="updated">
+        Provided pursuant to Articles 13 and 14 of Regulation (EU) 2016/679 (GDPR) &mdash;
+        Last updated: 12 September 2026 &mdash; Version: 2026-09-12
+    </div>
+
+    <div class="box">
+        <p>
+            This English text is provided for the convenience of readers who do not speak
+            Italian. <strong>The Italian version is the authoritative one</strong>: in the
+            event of any discrepancy, the Italian text prevails.
+        </p>
+    </div>
+
+    <p>
+        This notice describes how the personal data of users of the <strong>OMNIMOVE</strong>
+        application &mdash; the urban mobility planning service for the city of Cassino &mdash;
+        are processed.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>1. Data Controller</h2>
+    <div class="box">
+        <p><strong>University of Cassino and Southern Lazio</strong>
+           (Universit&agrave; degli Studi di Cassino e del Lazio Meridionale)</p>
+        <p>Registered office: Viale dell'Universit&agrave; &mdash; Rettorato, Campus Universitario,
+           localit&agrave; Folcara, 03043 Cassino (FR), Italy</p>
+        <p>Tax code: 81006500607 &middot; VAT number: 01730470604</p>
+        <p>Certified e-mail (PEC):
+           <a href="mailto:protocollo@pec.unicas.it">protocollo@pec.unicas.it</a></p>
+        <p>E-mail for data protection matters:
+           <a href="mailto:rpd@unicas.it">rpd@unicas.it</a></p>
+    </div>
+
+    <h2>2. Data Protection Officer (DPO)</h2>
+    <p>
+        The University has appointed a Data Protection Officer, who may be contacted on any
+        matter relating to the processing of personal data and to the exercise of the rights
+        described in paragraph 8:
+    </p>
+    <div class="box">
+        <p>Dr Elide Di Duca &mdash; appointed by Rectoral Decree no. 373 of 15 May 2018</p>
+        <p>E-mail: <a href="mailto:rpd@unicas.it">rpd@unicas.it</a></p>
+        <p>Certified e-mail (PEC): <a href="mailto:dpo@pec.unicas.it">dpo@pec.unicas.it</a></p>
+        <p>Telephone: <a href="tel:+3907762993440">+39 0776 299 3440</a></p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>3. What data we process</h2>
+
+    <h3>3.1 Data you provide to us directly</h3>
+    <ul>
+        <li><strong>Account data</strong>: first name, surname, e-mail address, password (stored
+            exclusively in encrypted form using the bcrypt algorithm, never in plain text),
+            e-mail verification status, date of registration.</li>
+        <li><strong>Travel preferences</strong>: preferred mode of transport, notification
+            choices, walking distance thresholds and similar settings.</li>
+        <li><strong>Favourites</strong>: stops and routes you choose to save.</li>
+        <li><strong>The content of your requests to the virtual assistant</strong>, if you
+            choose to use it.</li>
+        <li><strong>Messages you send us</strong> from the &ldquo;Contact us&rdquo; section: the
+            text you write and the date it was sent. You compose that text yourself, so it may
+            contain whatever information you decide to put in it: we ask you not to include
+            other people&apos;s data and to limit yourself to what is needed to explain the
+            report.</li>
+    </ul>
+
+    <h3>3.2 Data generated by your use of the service</h3>
+    <ul>
+        <li><strong>History of planned journeys</strong>: origin, destination, mode, distance,
+            estimated cost, estimated CO&#8322;, environmental index and date/time.
+            <strong>These are location data</strong>: we treat them with particular care, as set
+            out in paragraph 6.</li>
+        <li><strong>Geographic location</strong>: only if you expressly authorise it through your
+            browser, and only at the moment you request it (for example, to set your starting
+            point). Your precise location is <strong>not stored</strong> on our systems: it is
+            used to calculate the route and then discarded. You may withdraw the authorisation at
+            any time from your browser settings.</li>
+        <li><strong>Security logs</strong>: events such as sign-in, sign-out, failed sign-in
+            attempts and password changes, with IP address and date/time. They serve to protect
+            your account and to detect abuse.</li>
+        <li><strong>Record of staff access and data extractions</strong>: when an administrator
+            opens a user&apos;s record or downloads a list, the operation is logged with their
+            name, the date and the scope of what was extracted. This makes it possible to
+            establish who viewed or copied what.</li>
+        <li><strong>Consent ledger</strong>: which choice you expressed, on what date, against
+            which version of this notice, with IP address and browser type. It serves to
+            demonstrate consent, as required by Article 7(1) GDPR.</li>
+    </ul>
+
+    <div class="box">
+        <p>
+            <strong>We do not process</strong> data belonging to special categories (Article 9
+            GDPR), and we do not carry out advertising or marketing, nor do we transfer data to
+            third parties for commercial purposes. The service is not intended for children
+            under 14.
+        </p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>4. Purposes of processing and legal basis</h2>
+    <div class="table-scroll">
+        <table>
+            <thead>
+            <tr><th>Purpose</th><th>Data</th><th>Legal basis</th></tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>Creating and managing your account, authenticating you, allowing you to
+                    recover your password</td>
+                <td>Account data</td>
+                <td>Performance of a contract &mdash; Article 6(1)(b) GDPR</td>
+            </tr>
+            <tr>
+                <td>Planning routes, showing timetables, stops and vehicle availability</td>
+                <td>Origin, destination, preferences</td>
+                <td>Performance of a contract &mdash; Article 6(1)(b) GDPR</td>
+            </tr>
+            <tr>
+                <td>Saving favourites and travel preferences</td>
+                <td>Favourites, preferences</td>
+                <td>Performance of a contract &mdash; Article 6(1)(b) GDPR</td>
+            </tr>
+            <tr>
+                <td>Ensuring the security of the service and preventing unauthorised access</td>
+                <td>Security logs, IP address</td>
+                <td>Legitimate interest &mdash; Article 6(1)(f) GDPR</td>
+            </tr>
+            <tr>
+                <td>Improving the service through <strong>aggregate</strong> statistics (number
+                    of journeys per route, modal split, average environmental index)</td>
+                <td>Aggregate data, not attributable to an individual user</td>
+                <td>Legitimate interest &mdash; Article 6(1)(f) GDPR</td>
+            </tr>
+            <tr>
+                <td><strong>Personalised suggestions</strong> based on your travel habits and on
+                    your answers to the profiling questionnaire</td>
+                <td>Journey history, questionnaire answers</td>
+                <td><strong>Consent</strong> &mdash; Article 6(1)(a) GDPR.
+                    Optional and withdrawable at any time</td>
+            </tr>
+            <tr>
+                <td><strong>Responding to the reports</strong> you send us from the application
+                    and taking them into account to correct errors and improve the service</td>
+                <td>Message text, account e-mail address</td>
+                <td>Performance of a contract and legitimate interest in keeping the service
+                    working &mdash; Article 6(1)(b) and (f) GDPR</td>
+            </tr>
+            <tr>
+                <td><strong>Logging access and extractions</strong> carried out by authorised
+                    staff, so that it can be established who consulted or copied the data</td>
+                <td>Operator&apos;s name, date, scope of the operation</td>
+                <td>Legal obligation and accountability &mdash; Articles 5(2) and 32 GDPR</td>
+            </tr>
+            <tr>
+                <td>Demonstrating the consents collected</td>
+                <td>Consent ledger</td>
+                <td>Legal obligation &mdash; Article 7(1) GDPR</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="box">
+        <p>
+            Providing your account data is <strong>necessary</strong>: without it, no profile can
+            be created and the service cannot be used. Consent to personalised suggestions, by
+            contrast, is <strong>entirely optional</strong>: if you do not give it, or if you
+            withdraw it, <strong>you will continue to use OMNIMOVE without any
+            limitation</strong>; you will simply receive suggestions that are not personalised.
+        </p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>5. Who we disclose data to</h2>
+    <p>
+        The data are accessible to authorised University staff and to members of the development
+        team, within the limits of their respective duties. Two types of file can be extracted
+        from the administration console: an <strong>aggregate statistical report</strong>, which
+        contains no personal data, and a <strong>list of accounts</strong> with names and e-mail
+        addresses. Both extractions are logged with the name of the person who carried them out
+        and the date, and are visible on that operator&apos;s own record. We also rely on the
+        following suppliers, acting as <strong>data processors</strong> within the meaning of
+        Article 28 GDPR:
+    </p>
+    <div class="table-scroll">
+        <table>
+            <thead>
+            <tr><th>Supplier</th><th>Purpose</th><th>Data disclosed</th></tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>Google Ireland Ltd. / Google LLC</td>
+                <td>Calculating travel times and distances (Distance Matrix API)</td>
+                <td>Origin and destination coordinates. The request is made from our servers:
+                    your IP address is not disclosed to Google</td>
+            </tr>
+            <tr>
+                <td>Seeweb S.r.l. &mdash; Regolo.ai platform (Italy)</td>
+                <td>Virtual assistant, only if you use it</td>
+                <td>The text of the question you ask and the context of the journey in progress.
+                    The request is made from our servers: your IP address is not disclosed to the
+                    supplier. Processing takes place in Italy</td>
+            </tr>
+            <tr>
+                <td>OpenWeather Ltd.</td>
+                <td>Weather conditions used to suggest a mode of travel</td>
+                <td>Approximate coordinates of the area. No user identifier</td>
+            </tr>
+            <tr>
+                <td>Google Ireland Ltd. / Google LLC &mdash; Gmail SMTP</td>
+                <td>Sending account verification and password reset e-mails</td>
+                <td>E-mail address and message content</td>
+            </tr>
+            <tr>
+                <td>Google Ireland Ltd. / Google LLC</td>
+                <td>Sign-in with a Google account, if you choose to use it</td>
+                <td>Your IP address and browser type, disclosed directly by your browser. Contact
+                    occurs only if this method is enabled on this installation, and only from the
+                    moment you interact with the sign-in page: if you merely open it, Google is
+                    not contacted. If you use this method, Google discloses to us your name, your
+                    e-mail address and an identifier of your account</td>
+            </tr>
+            <tr>
+                <td>Google Ireland Ltd. / Google LLC</td>
+                <td>Protecting the sign-in page against automated access (reCAPTCHA)</td>
+                <td>Your IP address, browser type and information about your interaction with the
+                    page, disclosed directly by your browser. The check is loaded only if it is
+                    enabled on this installation, and only from the moment you interact with the
+                    sign-in page</td>
+            </tr>
+            <tr>
+                <td>OpenStreetMap Foundation</td>
+                <td>Supplying the maps displayed in the application</td>
+                <td>Your IP address and the map tiles requested, disclosed directly by your
+                    browser</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h3>5.1 Transfers to third countries</h3>
+    <p>
+        Some of the suppliers listed above are established in the United States. Transfers take
+        place on the basis of the European Commission&apos;s adequacy decision of 10 July 2023
+        concerning the EU-U.S. Data Privacy Framework and/or the Standard Contractual Clauses
+        adopted by the European Commission pursuant to Article 46 GDPR. You may request a copy of
+        the safeguards in place by writing to the contact details in paragraph 1.
+    </p>
+    <p>
+        To keep unnecessary disclosures to a minimum, <strong>the typefaces and software libraries
+        used by the application are hosted on our own servers</strong>: your browser does not
+        contact any third-party content delivery network, and your IP address is therefore not
+        disclosed to such parties.
+    </p>
+    <p>
+        Three exceptions remain, listed in the table in paragraph 5 and not removable without
+        giving up the corresponding function: the <strong>map tiles</strong>, requested by your
+        browser from OpenStreetMap as you navigate, and the two Google services used on the
+        sign-in page &mdash; <strong>sign-in with a Google account</strong> and the
+        <strong>reCAPTCHA</strong> check.
+    </p>
+    <p>
+        The latter two are not loaded when the page opens. They are requested from the supplier
+        only if the corresponding function is enabled on this installation, and only from the
+        moment you interact with the sign-in page. Anyone who opens the application and merely
+        reads it &mdash; to consult this notice, for instance &mdash; discloses no data to Google.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>6. Location data and access by administrators</h2>
+    <p>
+        Journey history can reveal habits and places frequented. For this reason we apply specific
+        measures:
+    </p>
+    <ul>
+        <li>the administration console shows in its lists <strong>only</strong> account management
+            data (first name, surname, e-mail, role, status, registration date and last
+            sign-in);</li>
+        <li>an individual user&apos;s journey history does <strong>not</strong> appear in those
+            lists: it can be consulted only by opening that person&apos;s record, where this is
+            necessary in order to provide support;</li>
+        <li>every access by an administrator to a user&apos;s personal data is
+            <strong>logged</strong> in a security log that can be reviewed afterwards;</li>
+        <li>the statistics used to improve the service are processed in <strong>aggregate</strong>
+            form and do not allow an individual to be identified.</li>
+    </ul>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>7. How long we keep the data</h2>
+    <div class="table-scroll">
+        <table>
+            <thead>
+            <tr><th>Category</th><th>Retention</th></tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>Account data, preferences and favourites</td>
+                <td>Until the account is deleted. Accounts not verified within 24 hours are
+                    deleted. Accounts left <strong>24 consecutive months without any
+                    sign-in</strong> are closed and deleted: seven days beforehand we notify you
+                    by e-mail at the address associated with the account, and a single sign-in
+                    before that date cancels the deletion</td>
+            </tr>
+            <tr>
+                <td>Journey history</td>
+                <td>12 months from the date the journey was recorded; thereafter the data are
+                    anonymised and kept only in aggregate form</td>
+            </tr>
+            <tr>
+                <td>Security and extraction logs</td>
+                <td>12 months</td>
+            </tr>
+            <tr>
+                <td>Messages sent from the application</td>
+                <td>Until the account is deleted, along with which they are removed</td>
+            </tr>
+            <tr>
+                <td>Consent ledger</td>
+                <td>24 months from withdrawal or from deletion of the account, in order to
+                    demonstrate the consent collected at the time</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    <p>
+        When an account is deleted, all linked data (preferences, favourites, journey history) are
+        removed automatically, except for the consent ledger on the terms set out above.
+    </p>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>8. Your rights</h2>
+    <p>As a data subject you may exercise the following rights at any time:</p>
+    <ul>
+        <li><strong>Access</strong> (Article 15): to obtain confirmation of processing and a copy
+            of your data. You can download them yourself in JSON format from the Privacy section
+            of your profile.</li>
+        <li><strong>Rectification</strong> (Article 16): to correct inaccurate data, including
+            directly from your profile.</li>
+        <li><strong>Erasure</strong> (Article 17): to obtain the removal of your data.</li>
+        <li><strong>Restriction</strong> (Article 18) and <strong>objection</strong> (Article 21)
+            to processing based on legitimate interest.</li>
+        <li><strong>Portability</strong> (Article 20): to receive the data in a structured,
+            commonly used format, or to request their transmission to another controller.</li>
+        <li><strong>Withdrawal of consent</strong> (Article 7(3)): you may withdraw your consent
+            to personalised suggestions at any time, without affecting the lawfulness of
+            processing carried out before the withdrawal and with no consequence whatsoever for
+            your use of the service.</li>
+    </ul>
+    <p>
+        To exercise these rights you may write to the contact details given in paragraphs 1 and 2.
+        You will receive a reply within one month of your request.
+    </p>
+    <div class="box">
+        <p>
+            <strong>Right to lodge a complaint.</strong> If you consider that the processing
+            infringes the law, you may lodge a complaint with the Italian Data Protection
+            Authority, the <strong>Garante per la protezione dei dati personali</strong>
+            (Piazza Venezia 11, 00187 Rome &mdash; <a href="https://www.garanteprivacy.it"
+            rel="noopener noreferrer" target="_blank">www.garanteprivacy.it</a>), or bring
+            proceedings before the courts.
+        </p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <h2>9. Automated decision-making</h2>
+    <p>
+        If you consent to personalised suggestions, the system processes your travel habits in
+        order to propose routes and modes that may be more useful to you. These are
+        <strong>suggestions</strong>: they produce no legal effects and do not similarly
+        significantly affect you, and you may always ignore them and freely choose any route. No
+        solely automated decision-making within the meaning of Article 22 GDPR takes place.
+    </p>
+
+    <h2>10. Cookies</h2>
+    <p>
+        Information about the cookies and storage mechanisms used is set out in the
+        <a href="cookie-policy.html">Cookie policy</a>.
+    </p>
+
+    <h2>11. Changes to this notice</h2>
+    <p>
+        Should the text be materially changed, the new version will be presented to you again
+        within the application and you will be asked, where necessary, to express your choices
+        once more. The current version is shown at the top of this page.
+    </p>
+    </div>
+
+    <div class="footer-nav" data-doc-lang="it">
         <a href="cookie-policy.html">Cookie policy</a>
         <a href="omnimove-login.html" data-omni-back>← Torna a OMNIMOVE</a>
         <a href="#" onclick="OmniConsent.open(); return false;">Preferenze cookie</a>
     </div>
+    <div class="footer-nav" data-doc-lang="en" hidden>
+        <a href="cookie-policy.html">Cookie policy</a>
+        <a href="omnimove-login.html" data-omni-back>← Back to OMNIMOVE</a>
+        <a href="#" onclick="OmniConsent.open(); return false;">Cookie preferences</a>
+    </div>
 </div>
 
+<script src="legal-lang.js"></script>
 <script src="omnimove-consent.js"></script>
 </body>
 </html>

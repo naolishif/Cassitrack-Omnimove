@@ -396,9 +396,11 @@
         <div class="settings-card settings-card--table">
             <h2 class="settings-h">Data retention</h2>
             <p class="settings-note">
-                The retention periods the privacy notice states, and what each rule
-                removed the last time it ran. Shown so the promise can be checked
-                against the system rather than taken on trust (GDPR art. 5(2)).
+                The retention periods the privacy notice states, with what each rule
+                removed on its last run and what it has removed in total. Shown so the
+                promise can be checked against the system rather than taken on trust
+                (GDPR art. 5(2)). The last run says whether the rule is working now;
+                the total is the evidence it has been working all along.
             </p>
             <div id="retentionState"></div>
             <table class="user-table" id="retentionTable">
@@ -407,7 +409,8 @@
                     <th>What</th>
                     <th>Kept for</th>
                     <th>Last run</th>
-                    <th>Removed</th>
+                    <th>Removed<br><span class="sub">last run</span></th>
+                    <th>Removed<br><span class="sub">total</span></th>
                     <th>Outcome</th>
                 </tr>
                 </thead>

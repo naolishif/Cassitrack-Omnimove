@@ -16,6 +16,7 @@ import it.unicas.omnimove.service.AnalyticsExportService;
 import it.unicas.omnimove.service.AnalyticsService;
 import it.unicas.omnimove.service.ConsentService;
 import it.unicas.omnimove.service.DataRetentionService;
+import it.unicas.omnimove.service.EmailService;
 import it.unicas.omnimove.service.UiSettingsService;
 import it.unicas.omnimove.service.GoogleApiSettingsService;
 import it.unicas.omnimove.service.LoginHistoryService;
@@ -64,6 +65,7 @@ public class AdminController {
     private final RecaptchaService recaptchaService;
     private final ConsentService consentService;
     private final DataRetentionService dataRetentionService;
+    private final EmailService emailService;
     private final UiSettingsService uiSettingsService;
     private final UserMessageRepository messageRepository;
     private final AdminExportRepository exportRepository;
@@ -205,8 +207,22 @@ public class AdminController {
                 return ResponseEntity.status(403)
                         .<Object>body(Map.of("message", "Cannot delete another admin"));
 
+            // Captured before the delete: afterwards there is no row to read.
+            String email = target.getEmail();
+            String name  = target.getName();
+            // THEIR language, not the operator's. This request carries whatever
+            // the admin console is being read in, which says nothing about the
+            // person the message is going to.
+            String lang  = EmailService.langOf(target.getLanguage());
+
             userRepo.delete(target);
-            securityAuditService.adminUserDeleted(principal.getUsername(), id, target.getEmail());
+            securityAuditService.adminUserDeleted(principal.getUsername(), id, email);
+
+            // The traveller is not at a screen when this happens — an operator is.
+            // Without this the account simply stops working on their next visit,
+            // with nothing anywhere saying why.
+            emailService.sendAccountDeletedEmail(email, name, lang);
+
             return ResponseEntity.ok().<Object>body(Map.of("message", "User deleted", "id", id));
         }).orElse(ResponseEntity.notFound().<Object>build());
     }

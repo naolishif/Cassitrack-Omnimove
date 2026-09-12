@@ -45,9 +45,21 @@ public class LoginHistoryService {
      * without it. Each repository call commits on its own.
      */
     public void recordLogin(User user, String userAgent) {
+        recordLogin(user, userAgent, null);
+    }
+
+    /**
+     * @param lang what this sign-in says about the language they read the app in,
+     *             or null when the caller has nothing to offer. Refreshed here
+     *             because this is already the one write that touches the user row
+     *             on a login, and because a preference set on another device
+     *             would otherwise never reach the server.
+     */
+    public void recordLogin(User user, String userAgent, String lang) {
         LocalDateTime now = LocalDateTime.now();
 
         user.setLastLoginAt(now);
+        if (lang != null && !lang.isBlank()) user.setLanguage(lang);
         userRepo.save(user);
 
         try {

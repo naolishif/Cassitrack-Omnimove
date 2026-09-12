@@ -124,6 +124,17 @@ function fmtDateTime(v) {
          + ' ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 }
 
+/**
+ * Date alone, for a value where the time of day carries no meaning — the start of
+ * a running total, say. Built on the same toDate() as everything else, so an
+ * array-shaped timestamp from Jackson is read the same way here as anywhere.
+ */
+function fmtDate(v) {
+    const d = toDate(v);
+    if (!d) return '—';
+    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 /** "3 hours ago" style hint next to an absolute timestamp. */
 function relativeTime(v) {
     const d = toDate(v);
@@ -1913,6 +1924,25 @@ async function loadRetention() {
                 else                              outcome = '<span class="text-red">failed</span>';
                 if (x.detail) outcome += '<br><span class="sub">' + escHtml(x.detail) + '</span>';
             }
+            // The running total stands apart from the figure above: that one is
+            // last night's, this one is every night since the ledger began. It
+            // carries its starting point, because a bare total invites the reading
+            // that it covers the whole life of the service — it covers only as far
+            // back as retention_run goes.
+            // A rule that has never fired shows a dash here too. Its total really
+            // is zero, but printing 0 next to "never run" reads as "ran and found
+            // nothing" — the very confusion the neverRun state exists to prevent.
+            var total, totalSub = '';
+            if (x.neverRun || x.totalRemoved === null || x.totalRemoved === undefined) {
+                total = '—';
+            } else {
+                total = String(x.totalRemoved);
+                if (x.totalSince) {
+                    totalSub = '<br><span class="sub">since '
+                             + escHtml(fmtDate(x.totalSince)) + '</span>';
+                }
+            }
+
             return '<tr>'
                  + '<td>' + escHtml(x.label)
                  + (x.note ? '<br><span class="sub">' + escHtml(x.note) + '</span>' : '')
@@ -1920,6 +1950,7 @@ async function loadRetention() {
                  + '<td class="text-mono">' + escHtml(x.period) + '</td>'
                  + '<td class="text-mono" style="font-size:11px">' + escHtml(when) + '</td>'
                  + '<td class="text-mono">' + escHtml(removed) + '</td>'
+                 + '<td class="text-mono">' + escHtml(total) + totalSub + '</td>'
                  + '<td>' + outcome + '</td>'
                  + '</tr>';
         }).join('');

@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import java.sql.Timestamp;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,10 +40,21 @@ public class DataRetentionService {
     private static final Logger log = LoggerFactory.getLogger(DataRetentionService.class);
     private static final ZoneId ROME = ZoneId.of("Europe/Rome");
 
+    /**
+     * The deletion date as it appears in the warning e-mail. Rendered in the
+     * locale the notice is written in, and in Europe/Rome — the reader is in
+     * Cassino, and a date shifted by a UTC server would name the wrong day for
+     * anything sent late in the evening.
+     */
+    private static final DateTimeFormatter DATE_IN_NOTICE =
+            DateTimeFormatter.ofPattern("d MMMM yyyy",
+                    Locale.forLanguageTag(EmailService.DEFAULT_LANG));
+
     public static final String RULE_JOURNEY   = "JOURNEY_LOG";
     public static final String RULE_SECURITY  = "SECURITY_EVENTS";
     public static final String RULE_CONSENT   = "CONSENT_LEDGER";
     public static final String RULE_ACCOUNTS  = "UNVERIFIED_ACCOUNTS";
+    public static final String RULE_INACTIVE  = "INACTIVE_ACCOUNTS";
 
     private final JdbcTemplate jdbc;
 
@@ -64,6 +77,20 @@ public class DataRetentionService {
     @Value("${omnimove.retention.unverified-hours:24}")
     private int unverifiedHours;
 
+    /** privacy.html § 7: "24 mesi senza alcun accesso". */
+    @Value("${omnimove.retention.inactive-months:24}")
+    private int inactiveMonths;
+
+    /**
+     * How long before the deletion the warning goes out.
+     *
+     * <p>Also the minimum notice the deletion pass will accept: an account is
+     * removed only once its warning is at least this old, so shortening this
+     * cannot retroactively cut short a notice already sent.
+     */
+    @Value("${omnimove.retention.inactive-warning-days:7}")
+    private int inactiveWarningDays;
+
     /**
      * When the research pipeline is on it owns journey_log: it promotes rows to
      * tier 2 and only then purges them. Deleting underneath it would destroy the
@@ -72,8 +99,11 @@ public class DataRetentionService {
     @Value("${omnimove.research.enabled:false}")
     private boolean researchEnabled;
 
-    public DataRetentionService(JdbcTemplate jdbc) {
+    private final EmailService email;
+
+    public DataRetentionService(JdbcTemplate jdbc, EmailService email) {
         this.jdbc = jdbc;
+        this.email = email;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -96,6 +126,7 @@ public class DataRetentionService {
         purgeSecurityEvents();
         purgeConsentLedger();
         purgeUnverifiedAccounts();
+        purgeInactiveAccounts();
     }
 
     // ── 1. Journey history ──────────────────────────────────────────
@@ -179,13 +210,206 @@ public class DataRetentionService {
     void purgeUnverifiedAccounts() {
         if (!windowIsSane(RULE_ACCOUNTS, unverifiedHours, "hours")) return;
         ZonedDateTime cutoff = ZonedDateTime.now(ROME).minusHours(unverifiedHours);
-        run(RULE_ACCOUNTS, cutoff, () -> jdbc.update("""
-                DELETE FROM users
-                 WHERE verified = FALSE
-                   AND verification_token IS NOT NULL
+        run(RULE_ACCOUNTS, cutoff, () -> {
+            // DELETE ... RETURNING, not SELECT-then-DELETE.
+            //
+            // The two-statement version has a gap: somebody can click the link in
+            // the seconds between the read and the write, and then we either
+            // delete a freshly verified account or tell a perfectly valid account
+            // holder that their sign-up was cancelled. RETURNING hands back the
+            // rows this statement actually removed, so the list and the deletion
+            // cannot disagree.
+            List<Map<String, Object>> deleted = jdbc.queryForList("""
+                    DELETE FROM users
+                     WHERE verified = FALSE
+                       AND verification_token IS NOT NULL
+                       AND UPPER(COALESCE(role, '')) <> 'ADMIN'
+                       AND created_at < ?
+                    RETURNING email, name, language
+                    """, Timestamp.from(cutoff.toInstant()));
+
+            notifyUnverified(deleted);
+            return deleted.size();
+        });
+    }
+
+    /**
+     * Tells the addresses whose sign-up just lapsed, once the rows are gone.
+     *
+     * <p>Runs after the statement has committed, so nobody is told their account
+     * was removed before it actually was.
+     *
+     * <p>WRAPPED INDIVIDUALLY. EmailService already swallows its own failures, but
+     * a burst of messages goes through an SMTP server that can refuse mid-way, and
+     * an exception escaping here would land in {@code run()} and record the whole
+     * sweep as FAILED — a rule that did its job would be reported as broken, and
+     * the console would show the retention period unenforced when it was enforced.
+     * The deletion is the obligation; the message is a courtesy, and a courtesy
+     * must not be able to discredit the record of the obligation.
+     */
+    private void notifyUnverified(List<Map<String, Object>> deleted) {
+        for (Map<String, Object> row : deleted) {
+            Object address = row.get("email");
+            if (address == null) continue;
+            try {
+                email.sendUnverifiedAccountDeletedEmail(
+                        address.toString(),
+                        str(row.get("name")),
+                        unverifiedHours,
+                        EmailService.langOf(str(row.get("language"))));
+            } catch (Exception e) {
+                log.warn("Unverified-account notice could not be sent to {}: {}",
+                         address, e.getMessage());
+            }
+        }
+    }
+
+    // ── 5. Dormant accounts ─────────────────────────────────────────
+    /**
+     * Closes accounts nobody has signed in to for {@code inactiveMonths}, a week
+     * after telling their owner it is about to happen.
+     *
+     * <p>TWO PASSES, IN THIS ORDER, AND THE ORDER IS THE SAFETY. The warning pass
+     * stamps today's date on everyone newly approaching the limit; the deletion
+     * pass will only touch an account whose stamp is already {@code
+     * inactiveWarningDays} old. Nobody can therefore be warned and deleted by the
+     * same sweep, however far past the limit they were when the rule first ran.
+     *
+     * <p>WHY NOT COUNT THE DAYS FROM THE LAST LOGIN INSTEAD. Because that assumes
+     * this job ran on the day it should have. Let it stop for a month — a server
+     * off, a failed deploy — and on the next run every dormant account would be
+     * past 24 months with no e-mail ever sent, and all of them would go at once.
+     * Reading the recorded warning date instead makes the notice a fact that
+     * happened rather than a date we assume was reached, which is what the
+     * promise in § 7 actually is.
+     *
+     * <p>SIGNING IN CANCELS IT, with nothing to reset. The predicate requires the
+     * warning to be more recent than the last sign-in; come back after being
+     * warned and that stops being true, so the deletion simply never matches. Go
+     * quiet again later and the warning pass, reading the same comparison, sends
+     * a fresh notice. No flag to clear on login, and therefore no flag anyone can
+     * forget to clear.
+     *
+     * <p>Unverified and operator-created accounts are excluded: the first belong
+     * to the 24-hour rule above, and the second were made deliberately by someone
+     * who is still the right person to decide their fate.
+     */
+    void purgeInactiveAccounts() {
+        if (!windowIsSane(RULE_INACTIVE, inactiveMonths, "months")) return;
+        if (!windowIsSane(RULE_INACTIVE, inactiveWarningDays, "warning days")) return;
+
+        ZonedDateTime now       = ZonedDateTime.now(ROME);
+        ZonedDateTime dormant   = now.minusMonths(inactiveMonths);
+        ZonedDateTime approaching = dormant.plusDays(inactiveWarningDays);
+        ZonedDateTime noticeGiven = now.minusDays(inactiveWarningDays);
+
+        runDetailed(RULE_INACTIVE, dormant, () -> {
+            int warned  = warnDormant(approaching, now);
+            int deleted = deleteDormant(dormant, noticeGiven);
+            return new Result(deleted, warned == 0
+                    ? null
+                    : warned + " account(s) warned; they are deleted no sooner than "
+                      + inactiveWarningDays + " days from now unless they sign in.");
+        });
+    }
+
+    /**
+     * Sends the notice and records that it went, in one statement.
+     *
+     * <p>The UPDATE ... RETURNING is what makes "warn exactly once" true: the row
+     * is stamped and handed back together, so a second pass cannot pick the same
+     * person up again, and the e-mail list cannot contain anyone whose stamp
+     * failed to save.
+     */
+    private int warnDormant(ZonedDateTime approaching, ZonedDateTime now) {
+        List<Map<String, Object>> warned = jdbc.queryForList("""
+                UPDATE users
+                   SET inactivity_warned_at = ?
+                 WHERE verified = TRUE
                    AND UPPER(COALESCE(role, '')) <> 'ADMIN'
-                   AND created_at < ?
-                """, Timestamp.from(cutoff.toInstant())));
+                   AND COALESCE(last_login_at, created_at) < ?
+                   AND (inactivity_warned_at IS NULL
+                        OR inactivity_warned_at <= COALESCE(last_login_at, created_at))
+                RETURNING email, name, language,
+                          COALESCE(last_login_at, created_at) AS inactive_since
+                """,
+                Timestamp.from(now.toInstant()),
+                Timestamp.from(approaching.toInstant()));
+
+        for (Map<String, Object> row : warned) {
+            Object address = row.get("email");
+            if (address == null) continue;
+            try {
+                email.sendInactivityWarningEmail(
+                        address.toString(),
+                        str(row.get("name")),
+                        inactiveMonths,
+                        deletionDate(row.get("inactive_since"), now),
+                        EmailService.langOf(str(row.get("language"))));
+            } catch (Exception e) {
+                log.warn("Inactivity warning could not be sent to {}: {}", address, e.getMessage());
+            }
+        }
+        return warned.size();
+    }
+
+    /**
+     * The date the notice must state: whichever of the two conditions is satisfied
+     * LAST.
+     *
+     * <p>Normally both land on the same day. They come apart when the rule meets
+     * an account that was already long dormant when it first ran — its 24 months
+     * elapsed months ago, so the date that governs is the end of the seven days
+     * starting today. Naming the earlier of the two would promise a deletion on a
+     * date when nothing will happen, and the message would be wrong about the
+     * only thing it exists to say.
+     */
+    private String deletionDate(Object inactiveSince, ZonedDateTime now) {
+        ZonedDateTime byNotice = now.plusDays(inactiveWarningDays);
+        ZonedDateTime when = byNotice;
+
+        if (inactiveSince instanceof Timestamp ts) {
+            ZonedDateTime byDormancy = ts.toInstant().atZone(ROME).plusMonths(inactiveMonths);
+            if (byDormancy.isAfter(byNotice)) when = byDormancy;
+        }
+        return when.format(DATE_IN_NOTICE);
+    }
+
+    /**
+     * Removes only accounts that were warned, have stayed away since, and whose
+     * notice period has genuinely elapsed. Each of the three is checked against a
+     * stored timestamp; none of them is inferred from the fact that the job is
+     * running today.
+     */
+    private int deleteDormant(ZonedDateTime dormant, ZonedDateTime noticeGiven) {
+        List<Map<String, Object>> deleted = jdbc.queryForList("""
+                DELETE FROM users
+                 WHERE verified = TRUE
+                   AND UPPER(COALESCE(role, '')) <> 'ADMIN'
+                   AND COALESCE(last_login_at, created_at) < ?
+                   AND inactivity_warned_at IS NOT NULL
+                   AND inactivity_warned_at > COALESCE(last_login_at, created_at)
+                   AND inactivity_warned_at <= ?
+                RETURNING email, name, language
+                """,
+                Timestamp.from(dormant.toInstant()),
+                Timestamp.from(noticeGiven.toInstant()));
+
+        for (Map<String, Object> row : deleted) {
+            Object address = row.get("email");
+            if (address == null) continue;
+            try {
+                email.sendInactiveAccountDeletedEmail(
+                        address.toString(),
+                        str(row.get("name")),
+                        inactiveMonths,
+                        EmailService.langOf(str(row.get("language"))));
+            } catch (Exception e) {
+                log.warn("Inactive-account notice could not be sent to {}: {}",
+                         address, e.getMessage());
+            }
+        }
+        return deleted.size();
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -194,6 +418,11 @@ public class DataRetentionService {
 
     @FunctionalInterface
     private interface Purge { int run(); }
+
+    /** A nullable column as a String, since every one of these may be absent. */
+    private static String str(Object v) {
+        return v == null ? null : v.toString();
+    }
 
     /**
      * Refuses a window that would empty the table.
@@ -213,6 +442,31 @@ public class DataRetentionService {
              + "Fix the configuration; nothing was touched.");
         log.error("Retention {} NOT run: window of {} {} would delete everything", rule, window, unit);
         return false;
+    }
+
+    /** What a rule did: rows removed, plus anything worth saying about it. */
+    private record Result(int rows, String detail) {}
+
+    @FunctionalInterface
+    private interface Sweep { Result run(); }
+
+    /**
+     * As {@link #run}, for a rule that has something to report beyond a count.
+     *
+     * <p>Separate name rather than an overload: a lambda could not be told apart
+     * between the two functional interfaces, and the compiler error that produces
+     * is far less obvious than the extra word here.
+     */
+    private void runDetailed(String rule, ZonedDateTime cutoff, Sweep sweep) {
+        try {
+            Result r = sweep.run();
+            record(rule, cutoff, r.rows(), "OK", r.detail());
+            log.info("Retention {}: removed {} rows older than {}{}",
+                     rule, r.rows(), cutoff, r.detail() == null ? "" : " — " + r.detail());
+        } catch (Exception e) {
+            record(rule, cutoff, 0, "FAILED", e.getMessage());
+            log.error("Retention {} FAILED — the period is not being enforced", rule, e);
+        }
     }
 
     /** Runs one rule and records the outcome, whatever it is. */
@@ -248,11 +502,23 @@ public class DataRetentionService {
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * Every rule with the period it enforces and what its last run did.
+     * Every rule with the period it enforces, what its last run did, and what
+     * every run has removed in total.
      *
      * <p>{@code neverRun} is reported as its own state rather than folded into
      * "0 rows removed": a job that has never fired and a job that found nothing
      * to delete look identical in a count, and only one of them is a problem.
+     *
+     * <p>THE TWO COUNTS ANSWER DIFFERENT QUESTIONS. {@code rows_removed} is last
+     * night's figure and says whether the rule is working now; a sudden zero on a
+     * rule that usually removes hundreds is a symptom. {@code totalRemoved} is the
+     * running total and is what art. 5(2) actually asks for — evidence that the
+     * period has been enforced all along, not merely once.
+     *
+     * <p>It travels with {@code totalSince}, the first run on record, because a
+     * total with no starting point invites the reading that it covers the whole
+     * life of the service. It does not: the ledger begins when retention_run was
+     * created, and anything deleted before that was never counted here.
      */
     public Map<String, Object> status() {
         List<Map<String, Object>> rules = new ArrayList<>();
@@ -263,6 +529,8 @@ public class DataRetentionService {
                        "Superseded entries and orphaned anonymous ones"));
         rules.add(rule(RULE_ACCOUNTS, "Unverified accounts", unverifiedHours + " hours",
                        "Only sign-ups that never confirmed their e-mail"));
+        rules.add(rule(RULE_INACTIVE, "Dormant accounts",    inactiveMonths + " months",
+                       "Warned " + inactiveWarningDays + " days first; signing in cancels it"));
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("enabled", enabled);
@@ -288,6 +556,16 @@ public class DataRetentionService {
             m.put("neverRun", false);
             m.putAll(last.get(0));
         }
+
+        // Summed over every run, not just the successful ones — a FAILED or
+        // SKIPPED run records zero rows, so they contribute nothing and the
+        // total stays a count of rows actually deleted.
+        Map<String, Object> agg = jdbc.queryForMap("""
+                SELECT COALESCE(SUM(rows_removed), 0) AS total, MIN(ran_at) AS since
+                  FROM retention_run WHERE rule = ?
+                """, key);
+        m.put("totalRemoved", agg.get("total"));
+        m.put("totalSince",   agg.get("since"));
         return m;
     }
 }

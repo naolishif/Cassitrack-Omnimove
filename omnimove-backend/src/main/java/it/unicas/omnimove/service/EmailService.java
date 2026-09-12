@@ -17,6 +17,62 @@ public class EmailService {
     @SuppressWarnings("SpringJavaInjectionPointsAutowiringInspection")
     private final JavaMailSender mailSender;
 
+    /**
+     * What is used when nobody ever told us which language to write in.
+     *
+     * <p>Italian, not English: the service is Cassino's, the privacy notice
+     * exists only in Italian, and the pages themselves already fall back to
+     * Italian for an Italian browser. This is the last resort behind a stored
+     * preference and behind the request's own header, so it is reached only for
+     * someone we know nothing about at a moment when they are not here to ask.
+     */
+    public static final String DEFAULT_LANG = "it";
+
+    /**
+     * The language to write to someone in, from whatever is known about them.
+     *
+     * <p>ONE PLACE, because the fallback order is a decision and not an
+     * implementation detail: the person's own stored choice first, then whatever
+     * the current request suggests, then the service default. Spelled out at each
+     * call site instead, the order would eventually differ between two of them
+     * and nobody would notice until a traveller got a form letter in the wrong
+     * language.
+     *
+     * <p>Anything that is not Italian is treated as English, the same rule
+     * {@code RequestLang} applies, so a stale or malformed value in the column
+     * cannot produce a message in no language at all.
+     */
+    public static String langOf(String stored, String fromRequest) {
+        String chosen = recognised(stored);
+        if (chosen == null) chosen = recognised(fromRequest);
+        return chosen == null ? DEFAULT_LANG : chosen;
+    }
+
+    /** As {@link #langOf(String, String)} where there is no request to fall back on. */
+    public static String langOf(String stored) {
+        return langOf(stored, null);
+    }
+
+    /**
+     * A language we can actually write in, or null if this value is not one.
+     *
+     * <p>Matched on the prefix, like {@code RequestLang} does with
+     * Accept-Language, so a full locale tag such as "it-IT" is Italian rather
+     * than something unrecognised.
+     *
+     * <p>ANYTHING ELSE FALLS THROUGH rather than being forced to English. A value
+     * we do not recognise carries no information, and treating it as a preference
+     * would let one stray row outrank the request header — which does carry
+     * information — and answer a reader in a language nobody chose.
+     */
+    private static String recognised(String v) {
+        if (v == null) return null;
+        String t = v.trim().toLowerCase();
+        if (t.startsWith("it")) return "it";
+        if (t.startsWith("en")) return "en";
+        return null;
+    }
+
     @Value("${omnimove.mail.from:OMNIMOVE <noreply@omnimove.it>}")
     private String from;
 
@@ -105,6 +161,93 @@ public class EmailService {
         String subject = it ? "Abbiamo ricevuto il tuo messaggio" : "We have received your message";
         sendHtml(to, subject, buildMessageReceivedHtml(name, messageBody, it));
         log.info("[EMAIL] Message acknowledgement ({}) sent to {}", lang, to);
+    }
+
+    /**
+     * The account is gone, and this is the last thing we send to that address.
+     *
+     * <p>Covers the deletions that are somebody's DECISION: the traveller pressing
+     * delete on their own profile, and an operator removing the account from the
+     * admin console. Both leave the person with nothing in the app to read a
+     * confirmation in — the session is torn down in the same breath — so the
+     * mailbox is the only place left to say it happened.
+     *
+     * <p>The invitation to come back is not a pleasantry: erasure under art. 17
+     * removes the data, not the right to use the service, and someone who deleted
+     * an account by mistake would otherwise be left assuming the door is shut.
+     *
+     * <p>Deliberately says nothing about WHO deleted it. The operator path is
+     * reached from a console the traveller cannot see, and "an administrator
+     * removed your account" raises a question this message cannot answer.
+     */
+    /**
+     * Seven days' notice that an account is about to lapse for inactivity.
+     *
+     * <p>THE ONLY E-MAIL HERE THAT ASKS FOR SOMETHING BACK. The others report
+     * what has already happened; this one is sent while the outcome can still be
+     * changed, and the thing that changes it — signing in — is also the thing
+     * that proves the address still reaches someone who wants the account.
+     *
+     * <p>{@code deletionDate} is computed from the account's own timestamps and
+     * passed in already formatted, rather than written here as "in 7 days".
+     * A reader opening the message three days late would take "7 days" to mean
+     * three days more than it does, and the one date that matters would be the
+     * one detail the notice got wrong.
+     */
+    public void sendInactivityWarningEmail(String to, String name, int months,
+                                           String deletionDate, String lang) {
+        boolean it = "it".equalsIgnoreCase(lang);
+        String subject = it ? "OMNIMOVE — Il tuo account sta per essere eliminato"
+                            : "OMNIMOVE — Your account is about to be deleted";
+        sendHtml(to, subject, buildInactivityWarningHtml(name, months, deletionDate, it));
+        log.info("[EMAIL] Inactivity warning ({}) sent to {}, deletion on {}", lang, to, deletionDate);
+    }
+
+    /**
+     * The notice above went unanswered and the account has now gone.
+     *
+     * <p>Still a thank-you: this person did use the service, unlike the lapsed
+     * sign-ups, and the fact that they stopped is not a reason to see them off
+     * curtly. What it adds is the REASON — without it the message would read as
+     * an account deleted out of nowhere, and the warning sent a week earlier
+     * would look unrelated to anyone who had already forgotten it.
+     */
+    public void sendInactiveAccountDeletedEmail(String to, String name, int months, String lang) {
+        boolean it = "it".equalsIgnoreCase(lang);
+        String subject = it ? "Il tuo account OMNIMOVE è stato eliminato"
+                            : "Your OMNIMOVE account has been deleted";
+        sendHtml(to, subject, buildAccountDeletedHtml(name, it, months));
+        log.info("[EMAIL] Inactive-account deletion notice ({}) sent to {}", lang, to);
+    }
+
+    public void sendAccountDeletedEmail(String to, String name, String lang) {
+        boolean it = "it".equalsIgnoreCase(lang);
+        String subject = it ? "Il tuo account OMNIMOVE è stato eliminato"
+                            : "Your OMNIMOVE account has been deleted";
+        sendHtml(to, subject, buildAccountDeletedHtml(name, it));
+        log.info("[EMAIL] Account deletion notice ({}) sent to {}", lang, to);
+    }
+
+    /**
+     * The sign-up was never confirmed and the window has run out.
+     *
+     * <p>A SEPARATE MESSAGE, not a variant of the one above, because there is
+     * nothing to thank anybody for: this account was never used. Thanking someone
+     * for a service they never reached reads as a form letter, and it would also
+     * misdescribe what happened — worse here than elsewhere, since the recipient
+     * may well be a person whose address somebody else typed in by mistake.
+     *
+     * <p>{@code hours} is passed in rather than written into the text so the
+     * message always states the window actually enforced. Hard-coding "24 hours"
+     * would put the mail out of step with the configuration the moment anyone
+     * changed it — the same drift this whole area exists to prevent.
+     */
+    public void sendUnverifiedAccountDeletedEmail(String to, String name, int hours, String lang) {
+        boolean it = "it".equalsIgnoreCase(lang);
+        String subject = it ? "OMNIMOVE — Account non verificato, registrazione annullata"
+                            : "OMNIMOVE — Unverified account, sign-up cancelled";
+        sendHtml(to, subject, buildUnverifiedDeletedHtml(name, hours, it));
+        log.info("[EMAIL] Unverified-account deletion notice ({}) sent to {}", lang, to);
     }
 
     // ── Internal helpers ────────────────────────────────────────────
@@ -208,6 +351,177 @@ public class EmailService {
             """.formatted(title, hi, body, quotedLabel, escapeHtml(messageBody), sign);
 
         return shell(content, footer);
+    }
+
+    private String buildAccountDeletedHtml(String name, boolean it) {
+        return buildAccountDeletedHtml(name, it, 0);
+    }
+
+    /**
+     * @param inactiveMonths 0 when somebody chose to delete the account, otherwise
+     *                       the inactivity period that caused it to lapse. The one
+     *                       sentence that differs is worth more than a second
+     *                       template that would drift out of step with this one.
+     */
+    private String buildAccountDeletedHtml(String name, boolean it, int inactiveMonths) {
+        String title = it ? "Grazie per aver viaggiato con noi" : "Thank you for travelling with us";
+        String hi    = greeting(name, it);
+        // Only the opening sentence differs. Prefixing the reason instead would
+        // close the account and then delete it two clauses later, which reads as
+        // two separate events happening to the same person.
+        //
+        // "as we told you by e-mail" rather than "a week ago": the notice period
+        // is configurable, and a sentence that names a length this text cannot
+        // see is a sentence that will eventually be wrong.
+        String opening = it
+            ? (inactiveMonths <= 0
+                ? "Il tuo account OMNIMOVE &egrave; stato eliminato"
+                : "Non usavi OMNIMOVE da " + inactiveMonths + " mesi e, come ti avevamo "
+                + "anticipato via e-mail, il tuo account &egrave; stato eliminato")
+            : (inactiveMonths <= 0
+                ? "Your OMNIMOVE account has been deleted"
+                : "You had not used OMNIMOVE for " + inactiveMonths + " months and, as we told "
+                + "you by e-mail, your account has now been deleted");
+
+        String body  = it
+            ? opening
+            + ", e con esso tutti i dati collegati: preferenze, preferiti e storico dei viaggi. "
+            + "Non conserviamo pi&ugrave; nulla che ti riguardi, salvo il registro dei consensi, "
+            + "che la normativa ci impone di tenere ancora per un periodo limitato proprio per "
+            + "poter dimostrare le scelte che avevi fatto."
+            : opening
+            + ", and with it everything attached to it: preferences, favourites and journey "
+            + "history. We no longer hold anything about you, apart from the consent ledger, "
+            + "which the law requires us to keep for a limited period precisely so that the "
+            + "choices you made can be evidenced.";
+        String back  = it
+            ? "Grazie per aver usato OMNIMOVE. Se un giorno ti servisse di nuovo, puoi creare un "
+            + "nuovo account quando vuoi: ripartirai semplicemente da zero."
+            : "Thank you for using OMNIMOVE. If you ever need it again, you can create a new "
+            + "account whenever you like — you will simply be starting fresh.";
+        String cta   = it ? "Crea un nuovo account" : "Create a new account";
+        String sign  = it ? "Buon viaggio,<br><strong>Il team OMNIMOVE</strong>"
+                          : "Safe travels,<br><strong>The OMNIMOVE team</strong>";
+        String footer = it
+            ? "Hai ricevuto questo messaggio perch&eacute; il tuo account era associato a questo "
+            + "indirizzo. &Egrave; l'ultima e-mail che ti inviamo."
+            + "<br>OMNIMOVE – Universit&agrave; di Cassino, UNICAS 2025/2026"
+            : "You received this message because your account was registered to this address. "
+            + "This is the last e-mail we will send you."
+            + "<br>OMNIMOVE – University of Cassino, UNICAS 2025/2026";
+
+        return shell(closingContent(title, hi, body, back, cta, sign), footer);
+    }
+
+    private String buildInactivityWarningHtml(String name, int months, String deletionDate, boolean it) {
+        String title = it ? "Il tuo account sta per essere eliminato"
+                          : "Your account is about to be deleted";
+        String hi    = greeting(name, it);
+        String body  = it
+            ? "Non accedi a OMNIMOVE da " + months + " mesi. La nostra informativa privacy prevede "
+            + "che gli account rimasti inattivi cos&igrave; a lungo vengano chiusi, quindi il "
+            + "<strong>" + deletionDate + "</strong> il tuo account e tutti i dati collegati "
+            + "&mdash; preferenze, preferiti e storico dei viaggi &mdash; verranno eliminati."
+            : "You have not signed in to OMNIMOVE for " + months + " months. Our privacy notice "
+            + "provides for accounts left inactive this long to be closed, so on "
+            + "<strong>" + deletionDate + "</strong> your account and everything attached to it "
+            + "&mdash; preferences, favourites and journey history &mdash; will be deleted.";
+        String back  = it
+            ? "<strong>Se vuoi tenerlo, ti basta accedere.</strong> Un solo accesso prima di quella "
+            + "data annulla la cancellazione, e non devi fare nient'altro. Se invece non ti serve "
+            + "pi&ugrave;, puoi ignorare questo messaggio: alla data indicata faremo tutto noi."
+            : "<strong>If you want to keep it, just sign in.</strong> A single sign-in before that "
+            + "date calls the deletion off, and there is nothing else to do. If you no longer need "
+            + "it, you can ignore this message: we will take care of it on the date above.";
+        String cta   = it ? "Accedi e tieni il mio account" : "Sign in and keep my account";
+        String sign  = it ? "A presto,<br><strong>Il team OMNIMOVE</strong>"
+                          : "Hope to see you soon,<br><strong>The OMNIMOVE team</strong>";
+        String footer = it
+            ? "Hai ricevuto questo messaggio perch&eacute; il tuo account &egrave; associato a "
+            + "questo indirizzo.<br>OMNIMOVE – Universit&agrave; di Cassino, UNICAS 2025/2026"
+            : "You received this message because your account is registered to this address."
+            + "<br>OMNIMOVE – University of Cassino, UNICAS 2025/2026";
+
+        return shell(closingContent(title, hi, body, back, cta, sign), footer);
+    }
+
+    private String buildUnverifiedDeletedHtml(String name, int hours, boolean it) {
+        String window = it ? humanWindowIt(hours) : humanWindowEn(hours);
+        String title = it ? "Account non verificato" : "Account not verified";
+        String hi    = greeting(name, it);
+        String body  = it
+            ? "Un account OMNIMOVE era stato creato con questo indirizzo e-mail, ma l'indirizzo non "
+            + "&egrave; mai stato confermato entro " + window + ". Come indicato nella nostra "
+            + "informativa privacy, la registrazione &egrave; quindi stata annullata e i dati "
+            + "inseriti sono stati eliminati."
+            : "An OMNIMOVE account was created with this e-mail address, but the address was never "
+            + "confirmed within " + window + ". As stated in our privacy notice, the sign-up has "
+            + "therefore been cancelled and the details entered were deleted.";
+        String back  = it
+            ? "Se eri tu e vuoi ancora usare OMNIMOVE, puoi registrarti di nuovo quando preferisci: "
+            + "richiede meno di un minuto. Se invece non hai mai creato questo account, non devi "
+            + "fare nulla — non resta traccia di nulla a tuo nome."
+            : "If this was you and you still want to use OMNIMOVE, you can sign up again whenever "
+            + "you like — it takes under a minute. If you never created this account, there is "
+            + "nothing to do: nothing remains in your name.";
+        String cta   = it ? "Registrati di nuovo" : "Sign up again";
+        String sign  = it ? "<strong>Il team OMNIMOVE</strong>" : "<strong>The OMNIMOVE team</strong>";
+        String footer = it
+            ? "Hai ricevuto questo messaggio perch&eacute; questo indirizzo era stato usato per una "
+            + "registrazione mai confermata."
+            + "<br>OMNIMOVE – Universit&agrave; di Cassino, UNICAS 2025/2026"
+            : "You received this message because this address was used for a sign-up that was never "
+            + "confirmed."
+            + "<br>OMNIMOVE – University of Cassino, UNICAS 2025/2026";
+
+        return shell(closingContent(title, hi, body, back, cta, sign), footer);
+    }
+
+    /**
+     * Shared body for the two closing messages: heading, greeting, what happened,
+     * what can still be done, and the one button that acts on it.
+     */
+    private String closingContent(String title, String hi, String body, String back,
+                                  String cta, String sign) {
+        return """
+              <p style="font-size:20px;font-weight:bold;margin:0 0 16px;color:#0f172a;">%s</p>
+              <p style="font-size:14px;margin:0 0 8px;">%s</p>
+              <p style="font-size:14px;line-height:1.6;margin:0 0 16px;">%s</p>
+              <p style="font-size:14px;line-height:1.6;margin:0 0 24px;">%s</p>
+              <p style="margin:0 0 28px;">
+                <a href="%s" style="display:inline-block;background:#3B82F6;color:#ffffff;text-decoration:none;
+                   font-size:14px;font-weight:bold;padding:12px 22px;border-radius:6px;">%s</a>
+              </p>
+              <p style="font-size:14px;line-height:1.6;margin:0 0 24px;">%s</p>
+            """.formatted(title, hi, body, back, url("/omnimove-login.html"), cta, sign);
+    }
+
+    /**
+     * An account can be deleted without a name on it — an operator-created row, or
+     * a sign-up abandoned before the field was filled — and "Ciao ," is worse than
+     * no name at all. The name is escaped: it is user-supplied text.
+     */
+    private static String greeting(String name, boolean it) {
+        boolean has = name != null && !name.isBlank();
+        if (it) return has ? "Ciao " + escapeHtml(name.trim()) + "," : "Ciao,";
+        return has ? "Hi " + escapeHtml(name.trim()) + "," : "Hi,";
+    }
+
+    /** "24 ore" reads better than "24 ore" when it is really a day, and vice versa. */
+    private static String humanWindowIt(int hours) {
+        if (hours % 24 == 0 && hours >= 24) {
+            int d = hours / 24;
+            return d == 1 ? "24 ore" : d + " giorni";
+        }
+        return hours == 1 ? "un'ora" : hours + " ore";
+    }
+
+    private static String humanWindowEn(int hours) {
+        if (hours % 24 == 0 && hours >= 24) {
+            int d = hours / 24;
+            return d == 1 ? "24 hours" : d + " days";
+        }
+        return hours == 1 ? "one hour" : hours + " hours";
     }
 
     /** The message is the sender's own text: it goes into the mail as text. */
