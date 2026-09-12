@@ -1,5 +1,6 @@
 package it.unicas.omnimove.security;
 
+import it.unicas.omnimove.service.SessionService;
 import it.unicas.omnimove.service.TokenBlacklistService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.Cookie;
@@ -34,6 +35,7 @@ class JwtFilterBlacklistTest {
     private JwtUtil jwtUtil;
     private UserDetailsService userDetailsService;
     private TokenBlacklistService blacklist;
+    private SessionService sessionService;
     private JwtFilter filter;
     private FilterChain chain;
 
@@ -43,7 +45,11 @@ class JwtFilterBlacklistTest {
         userDetailsService = mock(UserDetailsService.class);
         blacklist = mock(TokenBlacklistService.class);
         chain = mock(FilterChain.class);
-        filter = new JwtFilter(jwtUtil, userDetailsService, blacklist);
+        // Il filtro lo usa solo per rinnovare la sessione, e il rinnovo e'
+        // protetto da jwtUtil.shouldRenew(), che su un mock e' false: qui non
+        // viene mai chiamato. Serve al costruttore, non a questo test.
+        sessionService = mock(SessionService.class);
+        filter = new JwtFilter(jwtUtil, userDetailsService, blacklist, sessionService);
 
         when(jwtUtil.isValid(TOKEN)).thenReturn(true);
         when(jwtUtil.extractEmail(TOKEN)).thenReturn(EMAIL);
