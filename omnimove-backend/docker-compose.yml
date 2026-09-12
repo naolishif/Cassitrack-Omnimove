@@ -94,8 +94,13 @@ services:
 
       # External APIs
       AI_API_KEY: ${AI_API_KEY:-}
-      AI_API_URL: ${AI_API_URL:-}
-      AI_API_MODEL: ${AI_API_MODEL:-}
+      # ATTENZIONE AL DEFAULT VUOTO. `${VAR:-}` consegna al container una
+      # variabile PRESENTE E VUOTA, e Spring allora non applica piu' il default
+      # di application.yml: `${AI_API_URL:https://...}` diventa stringa vuota,
+      # non l'indirizzo. WebClient riceve un baseUrl vuoto e ogni chiamata al
+      # modello fallisce. Il default va quindi ripetuto QUI.
+      AI_API_URL: ${AI_API_URL:-https://api.regolo.ai/v1/chat/completions}
+      AI_API_MODEL: ${AI_API_MODEL:-mistral-small-4-119b}
       WEATHER_API_KEY: ${WEATHER_API_KEY}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
       # Leave empty in an environment whose origin is not registered with Google:
@@ -119,7 +124,9 @@ services:
       # /get-vehicles risponde 401 e il fallback serve la flotta simulata
       # dentro le zone vere.
       ELERENT_API_MOCK: ${ELERENT_API_MOCK:-true}
-      ELERENT_API_URL: ${ELERENT_API_URL:-}
+      # Stesso motivo di AI_API_URL sopra: un default vuoto qui annullerebbe
+      # quello di application.yml e lascerebbe il client senza indirizzo.
+      ELERENT_API_URL: ${ELERENT_API_URL:-https://app.rideatom.com/openapi/v1.0/sharing}
       ELERENT_PUBLIC_KEY: ${ELERENT_PUBLIC_KEY:-}
       ELERENT_SECRET_KEY: ${ELERENT_SECRET_KEY:-}
       ELERENT_USER_ID: ${ELERENT_USER_ID:-}
