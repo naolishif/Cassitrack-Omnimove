@@ -53,7 +53,14 @@ public class SecurityConfig {
                                 "/omnimove-consent.js", "/omnimove-consent.css",
                                 // Privacy notice and cookie policy must be readable without an
                                 // account: they have to be consultable before signing up.
+                                //
+                                // legal-lang.js belongs to that list for the same reason: it is
+                                // what shows the English text. Left out, the script 401s, the
+                                // English block keeps the `hidden` it loads with, and a reader
+                                // without an account is shown Italian only — the notice is still
+                                // reachable, but not in the language they asked for.
                                 "/privacy.html", "/cookie-policy.html", "/legal.css",
+                                "/legal-lang.js",
                                 // Self-hosted fonts and libraries (replaces Google Fonts / jsDelivr)
                                 "/vendor/**"
                         ).permitAll()
