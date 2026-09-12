@@ -209,14 +209,58 @@ public class ETAService {
         int targetIdx = indexOfStop(seq, routeId, targetStopId, anchorIdx + 1);
         if (targetIdx < 0) return null;
 
-        long eta = (long) seq.get(targetIdx).getArrivalSeconds()
-                - seq.get(anchorIdx).getArrivalSeconds();
-        return eta > 0
-                ? new SeqEta(eta, seq.get(targetIdx).getArrivalSeconds(), true)
-                : null;
+        // L'attesa e' la distanza fra ADESSO e l'orario previsto a quella
+        // fermata, non il tempo che l'orario assegna al tratto ancora->fermata.
+        //
+        // La differenza fra le due non e' sottile. L'ancora non si sposta finche'
+        // il mezzo non aggancia la fermata successiva, quindi la seconda formula
+        // restituiva lo stesso numero per tutto il tratto: il conto alla rovescia
+        // non scorreva e calava a scatti solo a ogni aggancio. Il tempo gia'
+        // percorso dall'ancora non veniva mai sottratto, e l'errore era sempre in
+        // eccesso, fino all'intero divario fra due fermate (5 minuti sul primo
+        // tratto della 09). Un mezzo puntuale risultava cosi' piu' lontano di
+        // quanto fosse, e chi pianificava un viaggio partiva con qualche minuto
+        // di troppo in mano.
+        //
+        // Il ramo pre-partenza qui sopra faceva gia' il calcolo in questa forma:
+        // adesso le due meta' del metodo rispondono alla stessa domanda.
+        int scheduledAtTarget = seq.get(targetIdx).getArrivalSeconds();
+        long eta = scheduledAtTarget + measuredDelaySeconds(bus, seq) - nowSeconds;
+        // Un mezzo piu' in ritardo della sua stessa previsione non ha un arrivo
+        // negativo: ha un arrivo imminente. Scartarlo (era un return null) toglieva
+        // dalla fermata proprio il bus che stava per arrivarci.
+        return new SeqEta(Math.max(0L, eta), scheduledAtTarget, true);
     }
 
 
+
+    /**
+     * Di quanti secondi il mezzo e' indietro rispetto alla tabella (negativo se
+     * e' in anticipo), secondo l'ultima misura fatta a una fermata.
+     *
+     * Si preferisce l'istante della misura al valore in minuti perche' quello e'
+     * arrotondato al minuto, e mezzo minuto basta a far scattare l'arrotondamento
+     * dell'attesa mostrata all'utente. La misura appartiene alla fermata dove e'
+     * stata presa, che non sempre coincide con l'ancora: quando un passaggio viene
+     * riconosciuto troppo lontano dalla fermata, l'ancora avanza ma il ritardo
+     * resta quello di prima, ed e' giusto continuare a usare quello.
+     */
+    private long measuredDelaySeconds(VehiclePosition bus, List<ScheduledStop> seq) {
+        Instant measuredAt = bus.getDelayMeasuredAt();
+        Integer measuredSeq = bus.getDelayStopSequence();
+        if (measuredAt != null && measuredSeq != null) {
+            for (ScheduledStop s : seq) {
+                if (measuredSeq.equals(s.getStopSequence())) {
+                    return LocalTime.ofInstant(measuredAt, ITALY_TZ).toSecondOfDay()
+                            - (long) s.getArrivalSeconds();
+                }
+            }
+        }
+        // Nessuna misura utilizzabile: meglio l'orario di tabella nudo che una
+        // previsione ferma. Il mezzo risultera' puntuale, che e' l'ipotesi
+        // ragionevole quando non si sa altro.
+        return bus.getDelayMinutes() != null ? bus.getDelayMinutes() * 60L : 0L;
+    }
 
     private int indexOfStop(List<ScheduledStop> seq, String routeId, String stopId, int from) {
         if (stopId == null) return -1;
