@@ -104,6 +104,26 @@ services:
       # Without both, the login reCAPTCHA stays off whatever the dashboard says
       RECAPTCHA_SITE_KEY: ${RECAPTCHA_SITE_KEY:-}
       RECAPTCHA_SECRET_KEY: ${RECAPTCHA_SECRET_KEY:-}
+      # Elerent (ATOM Mobility / RideAtom)
+      #
+      # QUESTE RIGHE SERVONO. Senza, metterle nel .env non ha alcun effetto:
+      # docker compose legge il .env per SOSTITUIRE le variabili qui sotto, non
+      # per passarle al container. Ciò che non è elencato qui non arriva, e
+      # l'applicazione ripiega sul default di application.yml — per mock è
+      # `true`, quindi la mappa torna a essere quella simulata anche con
+      # ELERENT_API_MOCK=false scritto nel .env. È la stessa trappola annotata
+      # sotto per COOKIE_SECURE.
+      #
+      # Con mock=false serve almeno la chiave pubblica, che apre /get-zones. I
+      # mezzi richiedono anche la chiave segreta e un rider id: finché manca,
+      # /get-vehicles risponde 401 e il fallback serve la flotta simulata
+      # dentro le zone vere.
+      ELERENT_API_MOCK: ${ELERENT_API_MOCK:-true}
+      ELERENT_API_URL: ${ELERENT_API_URL:-}
+      ELERENT_PUBLIC_KEY: ${ELERENT_PUBLIC_KEY:-}
+      ELERENT_SECRET_KEY: ${ELERENT_SECRET_KEY:-}
+      ELERENT_USER_ID: ${ELERENT_USER_ID:-}
+      ELERENT_VEHICLES_FALLBACK_MOCK: ${ELERENT_VEHICLES_FALLBACK_MOCK:-true}
       # CORS
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       APP_BASE_URL: ${APP_BASE_URL}
