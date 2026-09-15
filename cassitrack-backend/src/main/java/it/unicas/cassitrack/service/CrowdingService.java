@@ -7,7 +7,7 @@ package it.unicas.cassitrack.service;
  * diversi per lo stesso rapporto passeggeri/capienza. Derivano entrambi da
  * ratio(), così non possono divergere.
  *
- * Metodi statici: SiriMapper è una classe di utilità e non riceve iniezioni.
+ * Metodi statici: usati anche da SiriService, che li chiama senza iniezione.
  */
 public final class CrowdingService {
 

@@ -70,7 +70,7 @@ document.querySelectorAll('.tab').forEach(t=>{
         document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
         t.classList.add('active');
         document.getElementById('pane-'+t.dataset.tab).classList.add('active');
-        if (t.dataset.tab === 'settings') { loadGoogleSettings(); loadRetention(); loadAiNudge(); }
+        if (t.dataset.tab === 'settings') { loadGoogleSettings(); loadRetention(); loadAiNudge(); loadApiKeys(); }
     });
 });
 
@@ -2061,3 +2061,127 @@ document.addEventListener('click', e => {
     const sw = e.target.closest('.switch');
     if (sw) toggleSetting(sw);
 });
+
+// ── Partner API keys (Settings tab) ──────────────────────────────────
+// The list never contains a key, only its prefix: the server keeps a hash.
+// The plaintext exists in exactly one response, the one that creates it, and
+// is shown in the reveal box until the admin dismisses it or leaves the tab.
+async function loadApiKeys() {
+    const state = document.getElementById('apiKeysState');
+    const tbody = document.getElementById('apiKeysTbody');
+    if (!state || !tbody) return;
+
+    try {
+        const r = await apiFetch('/admin/api-keys');
+        if (!r.ok) throw new Error('api-keys ' + r.status);
+        const rows = await r.json();
+
+        state.innerHTML = rows.length
+            ? ''
+            : '<div class="settings-note">No keys yet — generate one to give a partner system access.</div>';
+
+        tbody.innerHTML = rows.map(function (k) {
+            let status;
+            if (k.status === 'ACTIVE')       status = '<span class="text-green">active</span>';
+            else if (k.status === 'EXPIRED') status = '<span class="text-amber">expired</span>';
+            else                             status = '<span class="text-red">revoked</span>';
+
+            // Only a live key can be revoked; a dead one shows when it died.
+            let action = '';
+            if (k.status === 'ACTIVE') {
+                action = '<button class="btn btn-danger" onclick="revokeApiKey('
+                       + Number(k.id) + ', this)">REVOKE</button>';
+            } else if (k.revokedAt) {
+                action = '<span class="sub">' + escHtml(fmtDate(k.revokedAt)) + '</span>';
+            }
+
+            return '<tr>'
+                 + '<td>' + escHtml(k.label)
+                 + (k.createdBy ? '<br><span class="sub">by ' + escHtml(k.createdBy) + '</span>' : '')
+                 + '</td>'
+                 + '<td class="text-mono">' + escHtml(k.prefix) + '…</td>'
+                 + '<td class="text-mono" style="font-size:11px">' + escHtml(fmtDateTime(k.createdAt)) + '</td>'
+                 + '<td class="text-mono" style="font-size:11px">' + (k.expiresAt ? escHtml(fmtDateTime(k.expiresAt)) : 'never') + '</td>'
+                 + '<td class="text-mono" style="font-size:11px">' + (k.lastUsedAt ? escHtml(relativeTime(k.lastUsedAt)) : '<span class="sub">never</span>') + '</td>'
+                 + '<td>' + status + '</td>'
+                 + '<td style="text-align:right">' + action + '</td>'
+                 + '</tr>';
+        }).join('');
+    } catch (e) {
+        console.warn('Could not load API keys:', e);
+        state.innerHTML = '<div class="settings-note text-red">Could not read the API keys.</div>';
+        tbody.innerHTML = '';
+    }
+}
+
+async function generateApiKey() {
+    const labelEl  = document.getElementById('apiKeyLabel');
+    const expiryEl = document.getElementById('apiKeyExpiry');
+    const btn      = document.getElementById('apiKeyGenerate');
+    const label    = labelEl.value.trim();
+    if (!label) { toast('Give the key a label — who is it for?', true); labelEl.focus(); return; }
+
+    btn.disabled = true;
+    try {
+        const r = await apiFetch('/admin/api-keys', {
+            method: 'POST',
+            body: JSON.stringify({ label: label, expiresInDays: parseInt(expiryEl.value, 10) })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { toast(data.message || 'Could not generate the key.', true); return; }
+
+        const box = document.getElementById('apiKeyReveal');
+        box.innerHTML =
+              '<div class="api-key-reveal">'
+            + '<strong>Key for ' + escHtml(data.label) + '</strong> — copy it now, it will not be shown again.'
+            + '<code id="apiKeyPlain">' + escHtml(data.key) + '</code>'
+            + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+            + '<button class="btn btn-ghost" onclick="copyApiKey()">COPY</button>'
+            + '<button class="btn btn-ghost" onclick="dismissApiKey()">DONE</button>'
+            + '<span class="sub">Expires: ' + (data.expiresAt ? escHtml(fmtDateTime(data.expiresAt)) : 'never') + '</span>'
+            + '</div></div>';
+        box.hidden = false;
+
+        labelEl.value = '';
+        toast('Key generated.');
+        loadApiKeys();
+    } catch (e) {
+        toast('Connection error.', true);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function copyApiKey() {
+    const el = document.getElementById('apiKeyPlain');
+    if (!el) return;
+    try {
+        await navigator.clipboard.writeText(el.textContent);
+        toast('Key copied.');
+    } catch (e) {
+        // Clipboard needs a secure context; the box is select-all so a manual copy still works
+        toast('Select the key and copy it manually.', true);
+    }
+}
+
+function dismissApiKey() {
+    const box = document.getElementById('apiKeyReveal');
+    box.innerHTML = '';
+    box.hidden = true;
+}
+
+async function revokeApiKey(id, btn) {
+    if (!confirm('Revoke this key? The partner system using it will stop working immediately.')) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await apiFetch('/admin/api-keys/' + id, { method: 'DELETE' });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { toast(data.message || 'Could not revoke the key.', true); return; }
+        toast('Key revoked.');
+        loadApiKeys();
+    } catch (e) {
+        toast('Connection error.', true);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}

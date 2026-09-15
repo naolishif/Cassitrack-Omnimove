@@ -259,6 +259,11 @@ omnimove:
     journey-search-per-hour: ${RATELIMIT_JOURNEY_SEARCH:120}
     # Cheap by comparison: answered from our own cache of the CassiTrack feed.
     stop-arrivals-per-hour:  ${RATELIMIT_STOP_ARRIVALS:300}
+    # Per partner API key, per hour (/api/partner/**). Reachability is a
+    # journey plan and can bill Google like a search does; the rest is
+    # arithmetic and in-memory lookups.
+    partner-reachability-per-hour: ${RATELIMIT_PARTNER_REACHABILITY:120}
+    partner-per-hour:              ${RATELIMIT_PARTNER:1000}
   retention:
     # Enforces the periods privacy.html § 7 states. ON by default and it should
     # stay on: with it off the published notice promises deletions that never

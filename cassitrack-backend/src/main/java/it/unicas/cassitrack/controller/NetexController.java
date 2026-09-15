@@ -5,14 +5,12 @@ import it.unicas.cassitrack.model.*;
 import it.unicas.cassitrack.model.Route;
 import it.unicas.cassitrack.model.Stop;
 import it.unicas.cassitrack.repository.*;
+import it.unicas.cassitrack.service.ApiClientService;
 import it.unicas.cassitrack.service.RoutePatternService;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -23,8 +21,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/static")
 public class NetexController {
 
-    @Value("${sse.api-token}")
-    private String expectedToken;
+    private final ApiClientService apiClientService;
 
     private final StopRepository stopRepository;
     private final RouteRepository routeRepository;
@@ -51,7 +48,8 @@ public class NetexController {
                            BusRepository busRepository,
                            RouteShapeRepository routeShapeRepository,
                            DataVersionRepository dataVersionRepository,
-                           RoutePatternService routePatternService) {
+                           RoutePatternService routePatternService,
+                           ApiClientService apiClientService) {
         this.stopRepository = stopRepository;
         this.routeRepository = routeRepository;
         this.tripRepository = tripRepository;
@@ -60,6 +58,7 @@ public class NetexController {
         this.routeShapeRepository = routeShapeRepository;
         this.dataVersionRepository = dataVersionRepository;
         this.routePatternService = routePatternService;
+        this.apiClientService = apiClientService;
     }
 
     // ── helper: converti secondi in formato NeTEx HH:mm:ss ──────────────────
@@ -98,9 +97,7 @@ public class NetexController {
             @RequestHeader(value = "X-Api-Key", required = false) String receivedToken,
             HttpServletResponse response) {
 
-        if (!MessageDigest.isEqual(
-                expectedToken.getBytes(StandardCharsets.UTF_8),
-                (receivedToken != null ? receivedToken : "").getBytes(StandardCharsets.UTF_8))) {
+        if (apiClientService.authorizeFeed(receivedToken).isEmpty()) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             return null;
         }
@@ -117,9 +114,7 @@ public class NetexController {
             @RequestHeader(value = "X-Api-Key", required = false) String receivedToken,
             HttpServletResponse response) {
 
-        if (!MessageDigest.isEqual(
-                expectedToken.getBytes(StandardCharsets.UTF_8),
-                (receivedToken != null ? receivedToken : "").getBytes(StandardCharsets.UTF_8))) {
+        if (apiClientService.authorizeFeed(receivedToken).isEmpty()) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             return null;
         }

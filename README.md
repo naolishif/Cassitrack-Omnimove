@@ -106,7 +106,7 @@ ESP32 / OBU units                    gps_simulator3.py  ·  tools/simulate_bus*.
 | Admin panel | Users, roles, login/activity audit |
 | NeTEx feed | Full static network as a NeTEx `PublicationDelivery` document |
 | Version counters | Cheap change-detection endpoint backed by DB triggers, so consumers poll it instead of the whole document |
-| SIRI Vehicle Monitoring | XML feed of live vehicle activity, optionally filtered by route |
+| SIRI 2.1 (SIRI Lite) | VehicleMonitoring (line, direction, origin/destination, next and onward calls with aimed/expected times), StopMonitoring per stop, CheckStatus |
 | SSE telemetry stream | Push feed consumed by OMNIMOVE |
 | AI assistant | Fleet-side chat over Anthropic Claude |
 | Security | JWT, role-based access, security audit log, token blacklist, login-attempt throttling |
@@ -142,7 +142,7 @@ ESP32 / OBU units                    gps_simulator3.py  ·  tools/simulate_bus*.
 | Standard | Where | Endpoint |
 |---|---|---|
 | **NeTEx** | Static network export (stops, lines, patterns, trips, calendars, geometry) | `GET /cassitrack/api/static/netex` |
-| **SIRI** Vehicle Monitoring | Live vehicle activity | `GET /cassitrack/api/v1/siri/vehicle-monitoring` |
+| **SIRI 2.1** VehicleMonitoring · StopMonitoring · CheckStatus | Live vehicles, arrivals at a stop, producer health | `GET /cassitrack/api/v1/siri/vehicle-monitoring` · `/stop-monitoring?MonitoringRef=` · `/check-status` |
 | **MQTT** | Telemetry ingestion — full schema locally, compact OBU schema over TLS | `cassitrack/{id}/position`, `cassitrack/obu/{id}/pos` |
 | **SSE** | Live telemetry push to OMNIMOVE (`X-Api-Key`) | `GET /cassitrack/api/v1/telemetry/stream` |
 | **OpenAPI 3** | Both backends | `/api/swagger-ui` (authentication required) |
@@ -215,6 +215,7 @@ cassitrack_&_omnimove/
 │   ├── crea_path.html                  # manual route-drawing editor
 │   ├── bridge.py                       # MQTT/TLS → WebSocket bridge for browsers
 │   ├── netex_element_order.py          # resolve the child order NeTEx XSDs impose
+│   ├── siri-xsd-2.1/                   # official CEN SIRI 2.1 schemas, for validate_siri.py
 │   └── vendor_fonts.py                 # self-host Google Fonts (no user IP leaves the server)
 │
 ├── docs/privacy/                       # DPIA (draft) + privacy change summary
@@ -371,7 +372,7 @@ Interactive docs (authentication required — no free reconnaissance):
 | GET | `/api/v1/vehicles` · `/{id}` · `/count` · `/fleet-size` | public |
 | GET | `/api/v1/stops` · `/{id}/arrivals` · `/{id}/schedule` | public |
 | GET | `/api/v1/routes` · `/{id}/shape` | public |
-| GET | `/api/v1/siri/vehicle-monitoring` | public |
+| GET | `/api/v1/siri/vehicle-monitoring?LineRef=&VehicleRef=` · `/stop-monitoring?MonitoringRef=&MaximumStopVisits=` · `/check-status` | public |
 | GET | `/api/v1/telemetry/latest` (deprecated) | public |
 | GET | `/api/v1/telemetry/stream` (SSE) | `X-Api-Key` |
 | GET | `/api/static/netex` · `/api/static/version` | `X-Api-Key` |
@@ -505,7 +506,7 @@ approved by the University.
 | `tools/build_route_shapes_osrm.py` | Same output, generated automatically from a routing engine. |
 | `tools/bridge.py` | Bridge the TLS MQTT broker to a WebSocket a browser can read. |
 | `tools/vendor_fonts.py` | Re-download and re-vendor the self-hosted fonts. |
-| `validate_siri.py` | Validate a SIRI document against the official XSD (`pip install lxml`). |
+| `validate_siri.py` | Validate a SIRI document against the official XSD (`pip install lxml`); the 2.1 schemas are in `tools/siri-xsd-2.1/`. |
 | `tools/netex_element_order.py` | Resolve the child order a NeTEx type requires across its inheritance chain. |
 
 ---

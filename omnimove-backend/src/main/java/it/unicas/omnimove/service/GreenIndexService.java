@@ -116,6 +116,26 @@ public class GreenIndexService {
     }
 
     /**
+     * The factors themselves, gCO₂ per passenger-km, in the order the notice
+     * lists them. Published on the partner API so another system can quote
+     * the same numbers it is being scored with.
+     */
+    public java.util.Map<String, Double> emissionFactors() {
+        java.util.Map<String, Double> m = new java.util.LinkedHashMap<>();
+        m.put("WALK",    CO2_WALK);
+        m.put("BIKE",    CO2_BIKE);
+        m.put("SCOOTER", CO2_SCOOTER);
+        m.put("BUS",     CO2_BUS);
+        m.put("CAR",     CO2_CAR);
+        return m;
+    }
+
+    /** The private-car figure every Green Index is measured against, gCO₂/km. */
+    public double carBaselineGramsPerKm() {
+        return CO2_CAR;
+    }
+
+    /**
      * Get a human readable label for the Green Index.
      */
     public String getGreenLabel(int index) {

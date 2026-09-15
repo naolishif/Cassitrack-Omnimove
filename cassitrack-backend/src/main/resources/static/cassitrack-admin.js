@@ -773,3 +773,139 @@ document.getElementById('activityModal').addEventListener('click', e => {
 loadUsers();
 startUsersRefresh();
 
+
+// ─────────────────────────────
+// PARTNER API KEYS
+// ─────────────────────────────
+// The list never contains a key, only its prefix: the server keeps a hash.
+// The plaintext exists in exactly one response, the one that creates it, and
+// stays in the reveal box until the admin dismisses it or reloads the page.
+// No inline handlers (CSP): the panel's buttons are wired by delegation below.
+
+function apiKeysMessage(text, isError) {
+    const el = document.getElementById('apiKeysState');
+    el.textContent = text || '';
+    el.style.color = isError ? 'var(--red)' : '';
+    el.style.marginBottom = text ? '12px' : '';
+}
+
+async function loadApiKeys() {
+    const tbody = document.getElementById('apiKeysTable');
+    try {
+        const r = await fetch('/cassitrack/api/v1/admin/api-keys');
+        if (!r.ok) throw new Error('api-keys ' + r.status);
+        const rows = await r.json();
+
+        apiKeysMessage(rows.length ? '' : 'No keys yet — generate one to give a partner system access to the feeds.');
+
+        tbody.innerHTML = rows.map(k => {
+            const status = String(k.status || '').toLowerCase();
+            // Only a live key can be revoked; a dead one shows when it died.
+            let action = '';
+            if (k.status === 'ACTIVE') {
+                action = `<button class="btn btn-secondary btn-revoke-key" data-id="${Number(k.id)}">Revoke</button>`;
+            } else if (k.revokedAt) {
+                action = `<span class="muted">${plainWhen(k.revokedAt)}</span>`;
+            }
+            return `<tr>
+                <td><b>${escHtml(k.label)}</b>${k.createdBy ? `<br><span class="muted">by ${escHtml(k.createdBy)}</span>` : ''}</td>
+                <td>${escHtml(k.prefix)}…</td>
+                <td>${fmtWhen(k.createdAt)}</td>
+                <td>${k.expiresAt ? fmtWhen(k.expiresAt) : '<span class="muted">never</span>'}</td>
+                <td>${fmtWhen(k.lastUsedAt)}</td>
+                <td><span class="key-status ${escHtml(status)}">${escHtml(status.toUpperCase())}</span></td>
+                <td class="actions-cell">${action}</td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        console.error('Could not load API keys:', e);
+        apiKeysMessage('Could not read the API keys.', true);
+        tbody.innerHTML = '';
+    }
+}
+
+async function generateApiKey() {
+    const labelEl  = document.getElementById('apiKeyLabel');
+    const expiryEl = document.getElementById('apiKeyExpiry');
+    const btn      = document.getElementById('apiKeyGenerateBtn');
+    const label    = labelEl.value.trim();
+    if (!label) { apiKeysMessage('Give the key a label — who is it for?', true); labelEl.focus(); return; }
+
+    btn.disabled = true;
+    try {
+        const r = await fetch('/cassitrack/api/v1/admin/api-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ label, expiresInDays: parseInt(expiryEl.value, 10) })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { apiKeysMessage(data.message || 'Could not generate the key.', true); return; }
+
+        const box = document.getElementById('apiKeyReveal');
+        box.innerHTML = `<div class="api-key-reveal">
+            <b>Key for ${escHtml(data.label)}</b> — copy it now, it will not be shown again.
+            <code id="apiKeyPlain">${escHtml(data.key)}</code>
+            <div class="reveal-actions">
+                <button class="btn btn-secondary" id="apiKeyCopyBtn">Copy</button>
+                <button class="btn btn-secondary" id="apiKeyDoneBtn">Done</button>
+                <span class="muted">Expires: ${data.expiresAt ? plainWhen(data.expiresAt) : 'never'}</span>
+            </div>
+        </div>`;
+        box.hidden = false;
+
+        labelEl.value = '';
+        apiKeysMessage('');
+        loadApiKeys();
+    } catch (e) {
+        apiKeysMessage('Connection error.', true);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function copyApiKey() {
+    const el = document.getElementById('apiKeyPlain');
+    if (!el) return;
+    try {
+        await navigator.clipboard.writeText(el.textContent);
+        apiKeysMessage('Key copied.');
+    } catch (e) {
+        // Clipboard needs a secure context; the box is select-all so a manual copy still works
+        apiKeysMessage('Select the key and copy it manually.', true);
+    }
+}
+
+function dismissApiKey() {
+    const box = document.getElementById('apiKeyReveal');
+    box.innerHTML = '';
+    box.hidden = true;
+}
+
+async function revokeApiKey(id, btn) {
+    if (!confirm('Revoke this key? The partner system using it will lose access to the feeds immediately.')) return;
+    btn.disabled = true;
+    try {
+        const r = await fetch('/cassitrack/api/v1/admin/api-keys/' + encodeURIComponent(id), { method: 'DELETE' });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { apiKeysMessage(data.message || 'Could not revoke the key.', true); return; }
+        apiKeysMessage('Key revoked.');
+        loadApiKeys();
+    } catch (e) {
+        apiKeysMessage('Connection error.', true);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+document.getElementById('apiKeyGenerateBtn').addEventListener('click', generateApiKey);
+document.getElementById('apiKeyLabel').addEventListener('keydown', e => {
+    if (e.key === 'Enter') generateApiKey();
+});
+document.querySelector('.api-keys-panel').addEventListener('click', e => {
+    const revoke = e.target.closest('.btn-revoke-key');
+    if (revoke) { revokeApiKey(revoke.dataset.id, revoke); return; }
+    if (e.target.id === 'apiKeyCopyBtn') copyApiKey();
+    if (e.target.id === 'apiKeyDoneBtn') dismissApiKey();
+});
+
+loadApiKeys();
