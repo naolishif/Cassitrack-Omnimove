@@ -1009,6 +1009,10 @@ let NETWORK_ROUTES = [];        // [{route_id, short_name, long_name, points}]
 window._networkLayers = {};     // routeId → polyline on the main map
 let _focusedRouteId  = null;
 let _networkHidden   = false;   // true while a journey preview owns the map
+// What the legend lets the traveller switch off, by kind of thing drawn on the
+// map. false means "not now", whoever else would have drawn it: a journey that
+// gives the background back, a poll that redraws the bikes.
+const _layerOn = { lines: true, stops: true, bikes: true, scooters: true };
 
 // Urban lines share whole streets. Drawn at equal width they would hide one
 // another, so each successive line is thinner than the one before: on a shared
@@ -1075,6 +1079,70 @@ function drawNetworkLines() {
 
         window._networkLayers[route.route_id] = line;
     });
+    syncNetworkLayers();
+}
+
+// Two switches say whether the lines belong on the map: a journey (or a map
+// pick) taking the background away, and the traveller's own legend toggle. A
+// line is drawn only when neither says no, so every path that changes either
+// one ends here instead of adding the layers back on its own.
+function syncNetworkLayers() {
+    const show = !_networkHidden && _layerOn.lines;
+    Object.values(window._networkLayers).forEach(l => {
+        try { show ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
+    });
+}
+
+// The generic stop markers, back on the map — unless the legend says no. Every
+// restore path (journey cleared, map pick over, line highlight closed) used to
+// add them straight back, which would have undone the toggle each time.
+function showStopMarkers() {
+    if (!_layerOn.stops) return;
+    (window._stopMarkers || []).forEach(m => { try { m.addTo(map); } catch(_) {} });
+}
+
+// The Elerent zones follow the vehicles they bind: with both bikes and
+// scooters switched off, dashed circles around nothing are just clutter.
+function syncBikeZones() {
+    const show = !_networkHidden && (_layerOn.bikes || _layerOn.scooters);
+    (window._bikeZoneLayers || []).forEach(l => {
+        try { show ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
+    });
+}
+
+// One legend toggle. Each kind of thing has its own way of leaving the map,
+// and the legend row it belongs to is redrawn so it reads as switched off.
+function setLayer(key, on) {
+    if (!(key in _layerOn)) return;
+    _layerOn[key] = !!on;
+    switch (key) {
+        case 'lines':
+            // Where the buses stop is the question, and twenty coloured ribbons
+            // on top of the dots are noise while it is being answered. A
+            // highlighted line counts as a line, so it goes too. The chips stay
+            // live: tapping one draws that single line over the stops.
+            if (!on) clearBusRoute();
+            syncNetworkLayers();
+            document.querySelectorAll('.nl-chip[data-route-id]')
+                .forEach(c => c.classList.toggle('nl-chip--dim', !on));
+            break;
+        case 'stops':
+            // Only while the generic markers are the ones on screen: a
+            // highlighted line draws its own dots, and a journey has already
+            // put the markers away. Both restore through showStopMarkers().
+            if (!_networkHidden && _busRouteLayers.length === 0) {
+                if (on) showStopMarkers();
+                else (window._stopMarkers || []).forEach(m => { try { map.removeLayer(m); } catch(_) {} });
+            }
+            break;
+        case 'bikes':
+        case 'scooters':
+            renderBikeMarkers(window._lastBikeList);
+            syncBikeZones();
+            break;
+    }
+    const row = document.querySelector(`.nl-row[data-layer="${key}"]`);
+    if (row) row.setAttribute('aria-pressed', String(!!on));
 }
 
 // Highlight one line without removing the rest: dimming instead of hiding keeps
@@ -1112,9 +1180,7 @@ function clearNetworkFocus() {
 // the map into noise, so it steps aside until the journey is cleared.
 function setNetworkLinesVisible(visible) {
     _networkHidden = !visible;
-    Object.values(window._networkLayers).forEach(l => {
-        try { visible ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
-    });
+    syncNetworkLayers();
     // The parked vehicles and their zones belong to the same background as the
     // lines: once a journey owns the map they are scenery on top of the very
     // legs the traveller is reading. Removing them once was not enough — the
@@ -1123,9 +1189,7 @@ function setNetworkLinesVisible(visible) {
         const keep = !visible && l._bikeId && l._bikeId === window._keepBikeId;
         try { (visible || keep) ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
     });
-    (window._bikeZoneLayers || []).forEach(l => {
-        try { visible ? l.addTo(map) : map.removeLayer(l); } catch(_) {}
-    });
+    syncBikeZones();
     const legend = document.getElementById('networkLegend');
     if (legend) legend.classList.toggle('network-legend--hidden', !visible);
 }
@@ -1162,13 +1226,27 @@ function renderNetworkLegend() {
     if (_legendCollapsed === null) _legendCollapsed = _mqPhone.matches;
     legend.classList.toggle('network-legend--collapsed', _legendCollapsed);
 
+    // One row per kind of thing on the map, each a switch: what the symbol
+    // means and whether it is drawn are the same question to the reader.
+    const row = (key, sym, label, inner = '') =>
+        `<button type="button" class="nl-row" data-layer="${key}" aria-pressed="${_layerOn[key]}"` +
+        ` onclick="setLayer('${key}', !_layerOn.${key})">` +
+        `<span class="nl-sym nl-sym--${sym}" aria-hidden="true">${inner}</span>` +
+        `<span class="nl-label">${escHtml(t(label))}</span>` +
+        `<span class="nl-switch" aria-hidden="true"></span></button>`;
+
     legend.innerHTML =
         `<button type="button" class="nl-title nl-toggle" aria-expanded="${!_legendCollapsed}">` +
-            `<span>${escHtml(t('legend_lines'))}</span>` +
+            `<span>${escHtml(t('legend_title'))}</span>` +
             `<span class="nl-caret" aria-hidden="true"></span>` +
         `</button>` +
+        row('lines',    'lines',   'legend_lines') +
+        row('stops',    'stop',    'legend_stops', BUS_GLYPH) +
+        row('bikes',    'bike',    'legend_bikes') +
+        row('scooters', 'scooter', 'legend_scooters') +
+        `<div class="nl-sub">${escHtml(t('legend_lines'))}</div>` +
         NETWORK_ROUTES.map(r =>
-            `<button type="button" class="nl-chip" data-route-id="${escHtml(r.route_id)}"` +
+            `<button type="button" class="nl-chip${_layerOn.lines ? '' : ' nl-chip--dim'}" data-route-id="${escHtml(r.route_id)}"` +
             ` style="--nl-color:${routeColorById(r.route_id, r.short_name)};` +
             `--nl-text:${routeTextColor(r.short_name, routeColorById(r.route_id, r.short_name))}"` +
             ` title="${escHtml(r.long_name || r.short_name)}">` +
@@ -1194,13 +1272,20 @@ document.addEventListener('click', e => {
     if (!chip) return;
     const route = NETWORK_ROUTES.find(r => r.route_id === chip.dataset.routeId);
     if (!route) return;
-    // A second tap on the active chip clears the highlight instead of re-opening it
-    if (_focusedRouteId === route.route_id) { resetNetworkView(); return; }
+    // A second tap on the active chip clears the highlight instead of re-opening
+    // it — back to the stops alone if that is what the map was showing, not to
+    // the whole network the traveller had just switched off.
+    if (_focusedRouteId === route.route_id) {
+        _layerOn.lines ? resetNetworkView() : clearBusRoute();
+        return;
+    }
     drawBusRoute(route.route_id, route.short_name, routeColorById(route.route_id, route.short_name));
 });
 
-// Back to the whole network: no line highlighted, no stop list open.
+// Back to the whole network: no line highlighted, no stop list open, and
+// the lines back if the legend had switched them off — "All" means all.
 function resetNetworkView() {
+    if (!_layerOn.lines) setLayer('lines', true);
     clearBusRoute();
     // Fresh bounds object: Polyline.getBounds() hands back the layer's own
     // instance, so extending it in place would corrupt the layer.
@@ -1263,6 +1348,7 @@ function renderBikeMarkers(list) {
         if (_networkHidden && b.bike_id !== window._keepBikeId) return;
         const type = b.vehicle_type === 'SCOOTER' ? 'SCOOTER' : 'BIKE';
         if (!_bikeTypeVisible(type)) return;
+        if (!_layerOn[type === 'SCOOTER' ? 'scooters' : 'bikes']) return;
         const batteryTxt = b.battery_pct != null
             ? `${t('bike_battery')}: ${batteryBadgeHtml(b.battery_pct)}<br>` : '';
         const priceTxt = type === 'SCOOTER' ? t('bike_price_scooter') : t('bike_price_bike');
@@ -1330,6 +1416,7 @@ async function loadBikeZones() {
                 window._bikeZoneLayers.push(layer);
             }
         });
+        syncBikeZones();
     } catch (e) {
         console.warn('[BIKE] zones fetch failed:', e);
     }
@@ -1585,8 +1672,7 @@ function clearRouteHighlight() {
     _busRouteLayers.forEach(l => { try { map.removeLayer(l); } catch(_) {} });
     _busRouteLayers = [];
     clearNetworkFocus();
-    if (!_networkHidden && window._stopMarkers)
-        window._stopMarkers.forEach(m => { try { m.addTo(map); } catch(_) {} });
+    if (!_networkHidden) showStopMarkers();
 }
 
 function closeStopListPanel() {
@@ -1871,35 +1957,68 @@ async function loadStops() {
 let userLat = null;
 let userLon = null;
 let userMarker = null;
+let userAccuracyCircle = null;
 
-function placeUserMarker(lat, lon) {
-    if (userMarker) map.removeLayer(userMarker);
+// A one-off fix, as opposed to the watch that follows a journey. High accuracy
+// is asked for explicitly: without it a phone is free to answer from Wi-Fi and
+// cell towers, which put the dot streets — sometimes a town — away from the
+// traveller, with nothing on screen to say the fix was coarse. A cached fix is
+// accepted only if recent: a minute is long enough to have crossed the centre.
+const GPS_FIX_OPTIONS = { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 };
+
+// Below this the ring would hide under the dot; above it, the ring is the
+// honest size of the fix and the reason a dot may sit a street off.
+const ACCURACY_RING_MIN_M = 30;
+
+function placeUserMarker(lat, lon, accuracyM) {
+    removeUserMarker();
     // zIndexOffset keeps the dot on top — a stop sitting on your position used to
     // hide it completely, which is half the reason it was hard to find
     userMarker = L.marker([lat, lon], { icon: userIcon, zIndexOffset: 1000 })
         .addTo(map)
         .bindPopup('📍 ' + t('you_are_here'));
+    if (Number.isFinite(accuracyM) && accuracyM >= ACCURACY_RING_MIN_M) {
+        userAccuracyCircle = L.circle([lat, lon], {
+            radius: accuracyM,
+            color: '#3b82f6', weight: 1, opacity: 0.5,
+            fillColor: '#3b82f6', fillOpacity: 0.10,
+            interactive: false
+        }).addTo(map);
+    }
 }
 
+function removeUserMarker() {
+    if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
+    if (userAccuracyCircle) { map.removeLayer(userAccuracyCircle); userAccuracyCircle = null; }
+}
+
+// Rejects when the device does not answer. It used to resolve on every error
+// with a fixed point on Via Folcara, labelled "approx" and shown as the
+// traveller's own position: a refused permission or a slow fix put the dot on
+// the campus and planned the trip from there, and the callers' catch branches
+// — the ones with the honest message — never ran.
 function tryGetGPS() {
     return new Promise((resolve, reject) => {
-        if (!navigator.geolocation) { reject('no_geolocation'); return; }
+        if (!navigator.geolocation) { reject({ code: 0, message: 'no_geolocation' }); return; }
         navigator.geolocation.getCurrentPosition(
             pos => {
                 userLat = pos.coords.latitude;
                 userLon = pos.coords.longitude;
-                placeUserMarker(userLat, userLon);
+                placeUserMarker(userLat, userLon, pos.coords.accuracy);
                 resolve({ name: t('my_location'), lat: userLat, lon: userLon, isGPS: true });
             },
-            err => {
-                // Friendly fallback so the demo still works
-                userLat = 41.5020; userLon = 13.8200;
-                placeUserMarker(userLat, userLon);
-                resolve({ name: t('approx_location'), lat: userLat, lon: userLon, isGPS: true });
-            },
-            { timeout: 8000, maximumAge: 60000 }
+            reject,
+            GPS_FIX_OPTIONS
         );
     });
+}
+
+// The message for a failed fix. A refused permission needs a different
+// sentence from a fix that never came: the first is settled in the browser or
+// the phone's settings, and "GPS unavailable" sends the reader to the sky.
+function gpsFailMessage(err, fallbackKey) {
+    if (err && err.code === 1) return t('toast_gps_denied');   // PERMISSION_DENIED
+    return t(fallbackKey);
 }
 
 // ── GPS trigger when user switches to "My Location" ───────────────
@@ -2213,7 +2332,7 @@ async function doSearch() {
         let pos;
         try { pos = await tryGetGPS(); }
         catch (e) {
-            showToast(!dest ? t('toast_gps_dest_fail') : t('toast_gps_origin_fail'), true);
+            showToast(gpsFailMessage(e, !dest ? 'toast_gps_dest_fail' : 'toast_gps_origin_fail'), true);
             return;
         }
         if (!origin) origin = pos;
@@ -3507,10 +3626,11 @@ function clearJourneySelection() {
 
     // Restore bus-stop markers and the base network underneath them
     window._keepBikeId = null;
-    if (window._stopMarkers) window._stopMarkers.forEach(m => m.addTo(map));
+    showStopMarkers();
     setNetworkLinesVisible(true);
 
     selectedJourney = null;
+    setSidebarJourneyMode(false);
     // Left true by a successful start: without this reset, Start Journey on the next pick
     // returned immediately and nothing happened.
     window._journeyStarting = false;
@@ -3518,6 +3638,29 @@ function clearJourneySelection() {
 
 function closeRouteDetail() {
     clearJourneySelection();
+}
+
+// The sidebar heading reads "Smart Routes" over a list of options to pick
+// from. Once a journey is under way there is nothing left to pick or to sort:
+// the heading says what is actually on screen — "Your journey", and where it
+// goes from and to — and the sort control steps aside. Done through data-i18n
+// so a language switch mid-journey keeps the right title instead of falling
+// back to the markup's.
+function setSidebarJourneyMode(on, origin, dest) {
+    const h2 = document.querySelector('.map-sidebar-header h2');
+    if (h2) {
+        h2.dataset.i18n = on ? 'your_journey' : 'smart_routes';
+        h2.textContent  = t(h2.dataset.i18n);
+    }
+    const sort = document.querySelector('.map-sidebar-header .sort-group');
+    if (sort) sort.style.display = on ? 'none' : '';
+    const line = document.getElementById('journeyRouteLine');
+    if (line) {
+        line.hidden = !on;
+        line.innerHTML = on
+            ? `<b>${escHtml(origin?.name || '')}</b> → <b>${escHtml(dest?.name || '')}</b>`
+            : '';
+    }
 }
 
 // ── Ricalcolo su richiesta della scheda aperta ──────────────────────
@@ -4127,9 +4270,10 @@ async function startJourney() {
                 gpsPos = await new Promise((resolve, reject) => {
                     if (!navigator.geolocation) { reject(); return; }
                     navigator.geolocation.getCurrentPosition(
-                        p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+                        p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude,
+                                       accuracy: p.coords.accuracy }),
                         () => reject(),
-                        { timeout: 6000, maximumAge: 30000 }
+                        GPS_FIX_OPTIONS
                     );
                 });
                 userLat = gpsPos.lat;
@@ -4199,17 +4343,16 @@ async function startJourney() {
 
         // 6) Linea GPS→fermata solo se origine = My Location
         if (gpsPos && origin.isGPS) {
-            placeUserMarker(gpsPos.lat, gpsPos.lon);
+            placeUserMarker(gpsPos.lat, gpsPos.lon, gpsPos.accuracy);
             window._routeLineGps = L.polyline(
                 [[gpsPos.lat, gpsPos.lon], [origin.lat, origin.lon]],
                 { color: LINE_COLORS.WALK, weight: 4, opacity: 0.9, dashArray: '1,9',
                   lineCap: 'round', lineJoin: 'round' }
             ).addTo(map);
         } else if (gpsPos) {
-            placeUserMarker(gpsPos.lat, gpsPos.lon);
-        } else if (userMarker) {
-            map.removeLayer(userMarker);
-            userMarker = null;
+            placeUserMarker(gpsPos.lat, gpsPos.lon, gpsPos.accuracy);
+        } else {
+            removeUserMarker();
         }
 
         // 7) Marker destinazione
@@ -4358,6 +4501,8 @@ async function startJourney() {
                 <span style="font-size:16px">🏁</span> ${t('end_journey')}
               </button>
             </div>`;
+
+        setSidebarJourneyMode(true, origin, dest);
 
         // Remembered so the clock can name the destination when it runs out,
         // without reaching back into a search that may be long gone.
@@ -6432,7 +6577,7 @@ function _acPick(target, id) {
         setStop(target, 'GPS');
         showToast(t('toast_locating'));
         tryGetGPS().then(pos => { showToast(t('toast_located')); map.setView([pos.lat, pos.lon], 16); })
-                   .catch(() => showToast(t('toast_gps_pick_stop'), true));
+                   .catch(e => showToast(gpsFailMessage(e, 'toast_gps_pick_stop'), true));
     } else {
         setStop(target, id);
     }
@@ -7450,7 +7595,7 @@ function onJourneyFix(pos) {
     // position, so drawing both would stack two markers on one pixel.
     userLat = lat;
     userLon = lon;
-    if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
+    removeUserMarker();
 
     // ── Arrival ──
     const toDest = map.distance([lat, lon], [w.dest.lat, w.dest.lon]);
@@ -7768,7 +7913,7 @@ function finishMapPick() {
     // preview owns the map too, and must not have its background handed back
     if (restoreNetwork) {
         setNetworkLinesVisible(true);
-        (window._stopMarkers || []).forEach(m => { try { m.addTo(map); } catch(_) {} });
+        showStopMarkers();
     }
 
     // Live buses come back only if they were already being polled, which happens
