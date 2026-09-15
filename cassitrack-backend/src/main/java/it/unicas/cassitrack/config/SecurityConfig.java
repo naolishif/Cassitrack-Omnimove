@@ -141,6 +141,7 @@ public class SecurityConfig {
                                 "/cassitrack-admin.css",
                                 "/cassitrack-admin.js",
                                 "/api/v1/users/**",
+                                "/api/v1/admin/**",      // partner API keys
                                 "/api/v1/auth/register"
                         ).hasAnyAuthority("ADMIN", "ROLE_ADMIN")
 

@@ -1,4 +1,5 @@
 package it.unicas.omnimove.config;
+import it.unicas.omnimove.security.ApiKeyFilter;
 import it.unicas.omnimove.security.JwtFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +30,7 @@ public class SecurityConfig {
     private static final String LOGIN_PAGE = "omnimove-login.html";
 
     private final JwtFilter jwtFilter;
+    private final ApiKeyFilter apiKeyFilter;
 
     @Value("${omnimove.cors.allowed-origins}")
     private List<String> corsAllowedOrigins;
@@ -79,11 +81,22 @@ public class SecurityConfig {
                         // work anonymously. Reading consents back still requires an account.
                         .requestMatchers(HttpMethod.POST, "/api/v1/privacy/consents").permitAll()
                         .requestMatchers("/api/v1/privacy/**").authenticated()
+                        // The partner group of the OpenAPI document is the contract we
+                        // hand to the other systems: it describes only /api/partner/**,
+                        // which is shared on purpose, so it is readable without an
+                        // account. The full document below stays behind authentication.
+                        .requestMatchers("/api/docs/partner").permitAll()
                         .requestMatchers( // API docs — require authentication
                                 "/api/docs/**",
                                 "/api/swagger-ui/**",
                                 "/api/swagger-ui.html"
                         ).authenticated()
+
+                        // ── Partner systems — API key only, never a user's JWT ──────────
+                        // ApiKeyFilter turns a valid X-Api-Key into this authority and
+                        // nothing else, so a traveller or admin token does not reach
+                        // these and a key does not reach anything but these.
+                        .requestMatchers("/api/partner/**").hasAuthority(ApiKeyFilter.AUTHORITY)
 
                         // ── 2. Admin only ────────────────────────────────────────────────
                         .requestMatchers(
@@ -158,7 +171,8 @@ public class SecurityConfig {
                                         "form-action 'self';"
                         ))
                 )
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(apiKeyFilter, JwtFilter.class);
 
         return http.build();
     }
@@ -228,7 +242,8 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(corsAllowedOrigins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        // X-Api-Key: a partner dashboard calling /api/partner/** from the browser
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", ApiKeyFilter.HEADER));
         config.setAllowCredentials(false);  // JWT is sent in Authorization header, not cookies
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

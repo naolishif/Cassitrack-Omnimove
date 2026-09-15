@@ -121,6 +121,19 @@ public class SecurityAuditService {
                 "targetId=" + targetId + " target=" + targetEmail);
     }
 
+    /** A new door into the feeds: who opened it, for whom, until when. */
+    public void apiKeyIssued(String adminEmail, long keyId, String label, String expiresAt) {
+        log.warn("API_KEY_ISSUED admin={} key={} label={} expires={}",
+                maskEmail(adminEmail), keyId, label, expiresAt);
+        persist("API_KEY_ISSUED", adminEmail, null,
+                "key=" + keyId + " label=" + label + " expires=" + expiresAt);
+    }
+
+    public void apiKeyRevoked(String adminEmail, long keyId, String label) {
+        log.warn("API_KEY_REVOKED admin={} key={} label={}", maskEmail(adminEmail), keyId, label);
+        persist("API_KEY_REVOKED", adminEmail, null, "key=" + keyId + " label=" + label);
+    }
+
     /**
      * Rate-limit / login-lockout exceeded.
      *

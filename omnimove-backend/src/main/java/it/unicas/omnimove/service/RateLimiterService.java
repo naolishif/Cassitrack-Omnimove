@@ -57,6 +57,18 @@ public class RateLimiterService {
     private int stopArrivalsPerHour;
 
     /**
+     * Reachability calls per partner key per hour. Same cost profile as a
+     * journey search — it is one — so it gets the same kind of ceiling, keyed
+     * by the key rather than by a person.
+     */
+    @Value("${omnimove.ratelimit.partner-reachability-per-hour:120}")
+    private int partnerReachabilityPerHour;
+
+    /** Every other partner call: CO₂ arithmetic and stop lookups, answered from memory. */
+    @Value("${omnimove.ratelimit.partner-per-hour:1000}")
+    private int partnerPerHour;
+
+    /**
      * @param key         Unique string identifying the bucket (e.g. "rl:register:192.168.1.1")
      * @param maxRequests Maximum number of requests allowed in the window
      * @param window      Length of the sliding window
@@ -121,6 +133,16 @@ public class RateLimiterService {
     /** Stop-arrivals lookups per user per hour. */
     public boolean allowStopArrivalsLookup(String email) {
         return isAllowed("rl:stop-arrivals:" + email, stopArrivalsPerHour, Duration.ofHours(1));
+    }
+
+    /** Reachability (a journey plan) per partner key per hour; see {@link #partnerReachabilityPerHour}. */
+    public boolean allowPartnerReachability(long clientId) {
+        return isAllowed("rl:partner-reach:" + clientId, partnerReachabilityPerHour, Duration.ofHours(1));
+    }
+
+    /** Any other partner call per key per hour. */
+    public boolean allowPartnerCall(long clientId) {
+        return isAllowed("rl:partner:" + clientId, partnerPerHour, Duration.ofHours(1));
     }
 
     /**

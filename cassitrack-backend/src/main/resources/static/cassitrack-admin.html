@@ -250,6 +250,78 @@
 
         </div>
 
+        <!-- Partner API keys: what other systems present as X-Api-Key on the
+             NeTEx, version and SSE feeds. Only a hash is stored; the key is
+             shown once, right after it is generated. -->
+        <div class="panel api-keys-panel">
+
+            <div class="panel-title">
+                <h2>Partner API keys</h2>
+                <p class="muted">
+                    Keys other systems present as <code>X-Api-Key</code> on
+                    <code>/api/static/netex</code>, <code>/api/static/version</code> and
+                    <code>/api/v1/telemetry/stream</code>. Only a hash is stored: the key is
+                    shown <b>once</b>, right after it is generated. A lost key is revoked and
+                    replaced, not recovered. OmniMove keeps its own token and is not listed here.
+                </p>
+            </div>
+
+            <div class="topbar">
+
+                <div class="search-box">
+                    <input
+                            type="text"
+                            class="search-input"
+                            maxlength="100"
+                            placeholder="Label — e.g. FARO UniSannio"
+                            id="apiKeyLabel"
+                    />
+                </div>
+
+                <div class="actions">
+                    <select class="search-input api-key-expiry" id="apiKeyExpiry">
+                        <option value="30">Expires in 30 days</option>
+                        <option value="90" selected>Expires in 90 days</option>
+                        <option value="180">Expires in 180 days</option>
+                        <option value="365">Expires in 1 year</option>
+                        <option value="0">Never expires</option>
+                    </select>
+                    <button class="btn btn-primary" id="apiKeyGenerateBtn">
+                        + Generate Key
+                    </button>
+                </div>
+
+            </div>
+
+            <div id="apiKeyReveal" hidden></div>
+            <div id="apiKeysState" class="muted"></div>
+
+            <div class="table-wrapper">
+
+                <table class="api-keys-table">
+
+                    <thead>
+
+                    <tr>
+                        <th>LABEL</th>
+                        <th>KEY</th>
+                        <th>CREATED</th>
+                        <th>EXPIRES</th>
+                        <th>LAST USED</th>
+                        <th>STATUS</th>
+                        <th></th>
+                    </tr>
+
+                    </thead>
+
+                    <tbody id="apiKeysTable"></tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
     </div>
 
 </div>

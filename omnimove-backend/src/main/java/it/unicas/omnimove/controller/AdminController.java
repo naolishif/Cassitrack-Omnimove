@@ -12,6 +12,7 @@ import it.unicas.omnimove.repository.AdminExportRepository;
 import it.unicas.omnimove.repository.UserMessageRepository;
 import it.unicas.omnimove.repository.UserRepository;
 import it.unicas.omnimove.service.ActiveSessionService;
+import it.unicas.omnimove.service.ApiClientService;
 import it.unicas.omnimove.service.AnalyticsExportService;
 import it.unicas.omnimove.service.AnalyticsService;
 import it.unicas.omnimove.service.ConsentService;
@@ -69,6 +70,7 @@ public class AdminController {
     private final UiSettingsService uiSettingsService;
     private final UserMessageRepository messageRepository;
     private final AdminExportRepository exportRepository;
+    private final ApiClientService apiClientService;
 
     private UserDTO toDTO(User u) {
         return toDTO(u, null);
@@ -638,5 +640,82 @@ public class AdminController {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
         return ResponseEntity.ok(googleApiSettings.snapshot());
+    }
+
+    // ── Partner API keys ────────────────────────────────────────────────
+    // The keys other systems present on /api/partner/**. The plaintext is in
+    // the response that creates it and nowhere else: the list shows only the
+    // prefix, and a lost key is replaced, not recovered.
+
+    // == GET /api/v1/admin/api-keys ======================================
+    @GetMapping("/api-keys")
+    @Operation(summary = "List the partner API keys (prefix only, never the key)")
+    public ResponseEntity<?> listApiKeys() {
+        java.time.Instant now = java.time.Instant.now();
+        return ResponseEntity.ok(apiClientService.list().stream()
+                .map(c -> apiKeyRow(c, now))
+                .collect(Collectors.toList()));
+    }
+
+    // == POST /api/v1/admin/api-keys =====================================
+    // Body: { "label": "FARO UniSannio", "expiresInDays": 90 }   0 or absent = never
+    @PostMapping("/api-keys")
+    @Operation(summary = "Issue a partner API key — the plaintext is returned this once")
+    public ResponseEntity<?> createApiKey(@RequestBody Map<String, Object> body,
+                                          @AuthenticationPrincipal UserDetails principal) {
+        if (body == null) return ResponseEntity.badRequest().body(Map.of("message", "Empty body."));
+
+        String label = body.get("label") instanceof String s ? s : null;
+        Integer days;
+        try {
+            Object d = body.get("expiresInDays");
+            days = d == null ? null : Integer.valueOf(String.valueOf(d));
+        } catch (NumberFormatException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "expiresInDays must be a whole number of days."));
+        }
+
+        ApiClientService.IssuedKey issued;
+        try {
+            issued = apiClientService.issue(label, days, principal.getUsername());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+
+        var c = issued.client();
+        securityAuditService.apiKeyIssued(principal.getUsername(), c.getId(), c.getLabel(),
+                c.getExpiresAt() == null ? "never" : c.getExpiresAt().toString());
+
+        Map<String, Object> out = apiKeyRow(c, java.time.Instant.now());
+        out.put("key", issued.plaintext());
+        return ResponseEntity.status(201).body(out);
+    }
+
+    // == DELETE /api/v1/admin/api-keys/{id} ==============================
+    // Revocation, not deletion: the row stays so the panel can still say which
+    // partner had a key, when, and that it was withdrawn.
+    @DeleteMapping("/api-keys/{id}")
+    @Operation(summary = "Revoke a partner API key")
+    public ResponseEntity<?> revokeApiKey(@PathVariable("id") Long id,
+                                          @AuthenticationPrincipal UserDetails principal) {
+        return apiClientService.revoke(id)
+                .map(c -> {
+                    securityAuditService.apiKeyRevoked(principal.getUsername(), c.getId(), c.getLabel());
+                    return ResponseEntity.ok(apiKeyRow(c, java.time.Instant.now()));
+                })
+                .orElseGet(() -> ResponseEntity.status(404).body(Map.of("message", "No key with id " + id)));
+    }
+
+    private static Map<String, Object> apiKeyRow(it.unicas.omnimove.model.ApiClient c, java.time.Instant now) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id",         c.getId());
+        m.put("label",      c.getLabel());
+        m.put("prefix",     c.getKeyPrefix());
+        m.put("createdBy",  c.getCreatedBy());
+        m.put("createdAt",  c.getCreatedAt());
+        m.put("expiresAt",  c.getExpiresAt());
+        m.put("revokedAt",  c.getRevokedAt());
+        m.put("lastUsedAt", c.getLastUsedAt());
+        m.put("status", c.isRevoked() ? "REVOKED" : c.isExpired(now) ? "EXPIRED" : "ACTIVE");
+        return m;
     }
 }

@@ -493,6 +493,47 @@
                 <button class="switch" id="swCaptcha" data-key="security.recaptcha" data-endpoint="/admin/settings/security" role="switch" aria-checked="false"></button>
             </div>
         </div>
+
+        <!-- Spans both columns: a key row has six columns and a button, and
+             squeezed into half the grid it wrapped on every line. -->
+        <div class="settings-card settings-card--table settings-card--wide">
+            <h2 class="settings-h">Partner API keys</h2>
+            <p class="settings-note">
+                Keys other systems present as <code>X-Api-Key</code> on
+                <code>/api/partner/v1/**</code> (reachability, CO₂, nearby stops).
+                Only a hash is stored: the key is shown <strong>once</strong>, right
+                after it is generated. A lost key is revoked and replaced, not recovered.
+                Contract: <a href="/omnimove/api/docs/partner" target="_blank" rel="noopener">/api/docs/partner</a>.
+            </p>
+            <div class="setting-row" style="flex-wrap:wrap;gap:8px">
+                <input class="filter-control" id="apiKeyLabel" type="text" maxlength="100"
+                       placeholder="Label — e.g. FARO UniSannio" style="flex:1 1 220px">
+                <select class="filter-control" id="apiKeyExpiry" style="flex:0 0 auto">
+                    <option value="30">Expires in 30 days</option>
+                    <option value="90" selected>Expires in 90 days</option>
+                    <option value="180">Expires in 180 days</option>
+                    <option value="365">Expires in 1 year</option>
+                    <option value="0">Never expires</option>
+                </select>
+                <button class="btn btn-primary" id="apiKeyGenerate" onclick="generateApiKey()">GENERATE</button>
+            </div>
+            <div id="apiKeyReveal" hidden></div>
+            <div id="apiKeysState"></div>
+            <table class="user-table" id="apiKeysTable">
+                <thead>
+                <tr>
+                    <th>Label</th>
+                    <th>Key</th>
+                    <th>Created</th>
+                    <th>Expires</th>
+                    <th>Last used</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody id="apiKeysTbody"></tbody>
+            </table>
+        </div>
     </div>
     </div>
 </div>

@@ -123,6 +123,19 @@ public class SecurityAuditService {
         persist("CAPTCHA_TOGGLED", adminEmail, null, "enabled=" + enabled);
     }
 
+    /** A new door into the system: who opened it, for whom, until when. */
+    public void apiKeyIssued(String adminEmail, long keyId, String label, String expiresAt) {
+        log.warn("API_KEY_ISSUED admin={} key={} label={} expires={}",
+                maskEmail(adminEmail), keyId, label, expiresAt);
+        persist("API_KEY_ISSUED", adminEmail, null,
+                "key=" + keyId + " label=" + label + " expires=" + expiresAt);
+    }
+
+    public void apiKeyRevoked(String adminEmail, long keyId, String label) {
+        log.warn("API_KEY_REVOKED admin={} key={} label={}", maskEmail(adminEmail), keyId, label);
+        persist("API_KEY_REVOKED", adminEmail, null, "key=" + keyId + " label=" + label);
+    }
+
     public void accountLocked(String email) {
         log.warn("ACCOUNT_LOCKED email={}", maskEmail(email));
         persist("ACCOUNT_LOCKED", email, null, null);

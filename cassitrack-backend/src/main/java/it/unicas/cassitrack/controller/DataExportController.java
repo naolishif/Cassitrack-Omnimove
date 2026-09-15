@@ -3,8 +3,9 @@ package it.unicas.cassitrack.controller;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import it.unicas.cassitrack.dto.BusTelemetryDTO;
 import it.unicas.cassitrack.dto.siri.Siri;
-import it.unicas.cassitrack.dto.siri.SiriMapper;
+import it.unicas.cassitrack.service.ApiClientService;
 import it.unicas.cassitrack.service.InfluxService;
+import it.unicas.cassitrack.service.SiriService;
 import it.unicas.cassitrack.service.VehicleStateCache;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -19,10 +20,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.RequestHeader;
 
 @RestController
@@ -33,15 +31,18 @@ public class DataExportController {
     private final VehicleStateCache vehicleStateCache;
     private final XmlMapper xmlMapper = new XmlMapper();
 
-    @Value("${sse.api-token}")
-    private String expectedToken;
+    private final ApiClientService apiClientService;
+    private final SiriService siriService;
 
     // Lista speciale thread-safe per memorizzare i client connessi (es. Omnimove)
     private final CopyOnWriteArrayList<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 
-    public DataExportController(InfluxService influxService, VehicleStateCache vehicleStateCache) {
+    public DataExportController(InfluxService influxService, VehicleStateCache vehicleStateCache,
+                                ApiClientService apiClientService, SiriService siriService) {
         this.influxService = influxService;
         this.vehicleStateCache = vehicleStateCache;
+        this.apiClientService = apiClientService;
+        this.siriService = siriService;
     }
 
 
@@ -58,9 +59,8 @@ public class DataExportController {
     public SseEmitter streamTelemetry(@RequestHeader(value = "X-Api-Key", required = false) String receivedToken,
                                       HttpServletResponse response) {
 
-        if (!MessageDigest.isEqual(
-                expectedToken.getBytes(StandardCharsets.UTF_8),
-                (receivedToken != null ? receivedToken : "").getBytes(StandardCharsets.UTF_8))) {
+        // OmniMove's token or a partner key: the service tells them apart
+        if (apiClientService.authorizeFeed(receivedToken).isEmpty()) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return null;
         }
@@ -87,7 +87,7 @@ public class DataExportController {
     public void pushTelemetryData() {
         if (emitters.isEmpty()) return;
 
-        Siri siri = SiriMapper.toSiriFromCache(vehicleStateCache.getActive());
+        Siri siri = siriService.vehicleMonitoring(vehicleStateCache.getActive());
         String siriXml;
         try {
             siriXml = xmlMapper.writeValueAsString(siri);

@@ -542,6 +542,18 @@ td .sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim)
 #pane-settings .settings-card--table{overflow-x:auto}
 #pane-settings .settings-card--table table{width:100%;min-width:520px}
 #pane-settings .settings-card{flex-shrink:0}
+#pane-settings .settings-card--wide{grid-column:1 / -1}
+/* The one time a partner key is readable. Boxed and monospaced so it can be
+   selected in one sweep; the amber border says "copy this now". */
+.api-key-reveal{
+    margin:12px 0 4px;padding:12px 14px;border:1px solid var(--accent-amber);
+    border-radius:8px;background:rgba(245,158,11,.08);font-size:12px;line-height:1.5
+}
+.api-key-reveal code{
+    display:block;margin:6px 0;padding:8px 10px;font-family:var(--font-mono);font-size:13px;
+    word-break:break-all;user-select:all;background:var(--bg-card);
+    border:1px solid var(--border);border-radius:6px
+}
 .settings-grid{
     display:grid;
     /* Two fixed columns rather than auto-fit: with auto-fit a wide screen makes
