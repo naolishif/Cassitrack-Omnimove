@@ -376,6 +376,7 @@ const OMNI_T = {
     btn_send_ai:'Send ↗',
     // Journey dynamic
     journey_in_progress:'Journey In Progress',
+    your_journey:'Your journey',
     min_left:'min left', end_journey:'End Journey',
     your_destination:'🏁 Your destination',
     live_tracking:'Live tracking active',
@@ -412,7 +413,8 @@ const OMNI_T = {
     lbl_line:'line', lbl_lines:'lines',
     lbl_next_departures:'next departures',
     // Network legend on the map
-    legend_lines:'Lines', legend_all:'All',
+    legend_title:'Legend', legend_lines:'Lines', legend_all:'All',
+    legend_stops:'Stops', legend_bikes:'Bikes', legend_scooters:'Scooters',
     no_buses:'No upcoming buses found',
     err_arrivals:'Could not load arrivals',
     err_service:'Service unavailable',
@@ -451,7 +453,6 @@ const OMNI_T = {
     pick_map_dest:'Tap the map to set your destination',
     map_point:'Point on the map',
     map_point_set:'Point set from the map.',
-    approx_location:'Via Folcara (approx)',
     // Toasts
     toast_prefs_saved:'✅ Preferences saved!',
     toast_prefs_error:'Could not save your preferences',
@@ -474,6 +475,7 @@ const OMNI_T = {
     toast_gps_origin_fail:'GPS unavailable — select a stop as origin',
     toast_gps_dest_fail:'GPS unavailable — select a stop as destination',
     toast_gps_pick_stop:'GPS unavailable — pick a stop',
+    toast_gps_denied:'Location access denied — allow it in the browser settings, or pick a stop',
     toast_same_stops:'Origin and destination cannot be the same',
     toast_journey_started:'Journey started! {min} min to destination',
     toast_journey_start_fail:'⚠️ Could not start the journey',
@@ -881,6 +883,7 @@ const OMNI_T = {
     btn_send_ai:'Invia ↗',
     // Journey dynamic
     journey_in_progress:'Percorso in corso',
+    your_journey:'Il tuo viaggio',
     min_left:'min rimanenti', end_journey:'Termina percorso',
     your_destination:'🏁 La tua destinazione',
     live_tracking:'Tracking in tempo reale',
@@ -917,7 +920,8 @@ const OMNI_T = {
     lbl_line:'linea', lbl_lines:'linee',
     lbl_next_departures:'prossime partenze',
     // Legenda della rete sulla mappa
-    legend_lines:'Linee', legend_all:'Tutte',
+    legend_title:'Legenda', legend_lines:'Linee', legend_all:'Tutte',
+    legend_stops:'Fermate', legend_bikes:'Bici', legend_scooters:'Monopattini',
     no_buses:'Nessun bus in arrivo',
     err_arrivals:'Impossibile caricare gli arrivi',
     err_service:'Servizio non disponibile',
@@ -956,7 +960,6 @@ const OMNI_T = {
     pick_map_dest:'Tocca la mappa per scegliere la destinazione',
     map_point:'Punto sulla mappa',
     map_point_set:'Punto scelto dalla mappa.',
-    approx_location:'Via Folcara (circa)',
     // Toasts
     toast_prefs_saved:'✅ Preferenze salvate!',
     toast_prefs_error:'Impossibile salvare le preferenze',
@@ -979,6 +982,7 @@ const OMNI_T = {
     toast_gps_origin_fail:'GPS non disponibile — scegli una fermata come partenza',
     toast_gps_dest_fail:'GPS non disponibile — scegli una fermata come destinazione',
     toast_gps_pick_stop:'GPS non disponibile — scegli una fermata',
+    toast_gps_denied:'Accesso alla posizione negato — consentilo nelle impostazioni del browser, oppure scegli una fermata',
     toast_same_stops:'Partenza e destinazione non possono coincidere',
     toast_journey_started:'Viaggio avviato! {min} min alla destinazione',
     toast_journey_start_fail:'⚠️ Impossibile avviare il percorso',

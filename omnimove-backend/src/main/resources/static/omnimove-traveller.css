@@ -453,6 +453,16 @@ body {
     border-bottom: 1px solid var(--border);
 }
 .map-sidebar-header h2 { font-size: 16px; font-weight: 800; color: var(--text-dark); }
+.journey-route-line {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-soft);
+    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.journey-route-line b { color: var(--text-dark); font-weight: 700; }
 /* Departure time — now a segment of the search row, between the swap and Search */
 .time-pill {
     background: var(--bg-app);
@@ -1152,6 +1162,10 @@ body {
     display: flex;
     flex-direction: column;
     padding-bottom: env(safe-area-inset-bottom, 0px);
+    /* Nothing inside the sheet may be dragged sideways: the finger scrolls the
+       list up and down and that is all. */
+    overflow: hidden;
+    touch-action: pan-y;
 }
 .stop-sheet-handle {
     width: 40px; height: 4px;
@@ -1190,6 +1204,13 @@ body {
 }
 .stop-sheet-list {
     overflow-y: auto;
+    /* overflow-y alone leaves overflow-x at auto, and on iOS a scroll
+       container that can move sideways rubber-bands sideways: the rows
+       followed the finger off the screen. Vertical only, no bounce. */
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
     flex: 1;
     min-height: 0;
     padding: 12px 16px 16px;
@@ -2754,7 +2775,9 @@ body {
 }
 .network-legend--collapsed .nl-caret { transform: rotate(-90deg); }
 /* Folded: the title strip and nothing else, so the map stays visible. */
-.network-legend--collapsed .nl-chip { display: none; }
+.network-legend--collapsed .nl-chip,
+.network-legend--collapsed .nl-row,
+.network-legend--collapsed .nl-sub { display: none; }
 .network-legend--collapsed { gap: 0; padding-bottom: 8px; }
 .network-legend--collapsed .nl-title { margin-bottom: 0; }
 .nl-chip {
@@ -2793,6 +2816,92 @@ body {
     font-weight: 700;
     color: var(--text-soft);
 }
+/* Legend rows: what a symbol means and whether it is drawn are one control.
+   The symbols are small copies of the markers themselves, so the legend can be
+   matched to the map by eye rather than by reading. */
+.nl-row {
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: none;
+    border: none;
+    padding: 2px 0;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-dark);
+    text-align: left;
+    cursor: pointer;
+    line-height: 1;
+}
+.nl-row[aria-pressed="false"] { color: var(--text-soft); }
+.nl-row[aria-pressed="false"] .nl-sym { opacity: 0.35; filter: grayscale(1); }
+.nl-label { flex: 1; min-width: 0; }
+.nl-sym {
+    width: 18px; height: 18px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: opacity 0.15s;
+}
+/* Three ribbons, as the lines are drawn on the map */
+.nl-sym--lines {
+    height: 12px;
+    border-radius: 2px;
+    background: linear-gradient(#ef4444 0 25%, transparent 25% 37.5%,
+                                #2563eb 37.5% 62.5%, transparent 62.5% 75%,
+                                #16a34a 75% 100%);
+}
+.nl-sym--stop, .nl-sym--bike, .nl-sym--scooter {
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.28);
+    font-size: 10px;
+    line-height: 1;
+    color: #fff;
+}
+.nl-sym--stop svg { width: 11px; height: 11px; display: block; }
+.nl-sym--stop    { background: var(--primary); }
+.nl-sym--bike    { background: #3b82f6; }
+.nl-sym--scooter { background: #7c3aed; }
+.nl-sym--bike::before    { content: '🚲'; }
+.nl-sym--scooter::before { content: '🛴'; }
+/* A switch, not a checkbox: the row is the target and this is just the state */
+.nl-switch {
+    width: 22px; height: 12px;
+    border-radius: 6px;
+    background: var(--border-mid);
+    position: relative;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+.nl-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s;
+}
+.nl-row[aria-pressed="true"] .nl-switch { background: var(--primary); }
+.nl-row[aria-pressed="true"] .nl-switch::after { transform: translateX(10px); }
+/* The line chips sit under their own heading, below the rows */
+.nl-sub {
+    flex-basis: 100%;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+}
+/* Lines switched off: the chips fade so the legend itself says so, except the
+   one line a tap has drawn back on its own */
+.nl-chip--dim { opacity: 0.45; }
+.nl-chip--dim.nl-chip--active { opacity: 1; }
 
 @media (max-width: 768px) {
     .network-legend { max-width: 152px; padding: 7px 8px 8px; gap: 4px; }
