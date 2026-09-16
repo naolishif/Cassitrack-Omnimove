@@ -1755,3 +1755,47 @@ input.fm-filter-select::placeholder{color:var(--dim)}
     color: #6b7f95 !important;
 }
 .leaflet-control-attribution a { color: #8fa6bd !important; }
+
+/* ── Partner road hazards ─────────────────────────
+   The circle + marker on the fleet map, the yellow triangle / green tick in
+   the Routes table, and the queued notice modal. Severity colours: LOW amber,
+   MEDIUM orange, HIGH red — kept identical between the map and the badges. */
+.hz-marker{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:14px;background:var(--panel);border:2px solid var(--amber);box-shadow:0 0 0 3px rgba(245,158,11,.25);cursor:pointer}
+.hz-marker.hz-medium{border-color:#F97316;box-shadow:0 0 0 3px rgba(249,115,22,.25)}
+.hz-marker.hz-high{border-color:var(--red);box-shadow:0 0 0 3px rgba(239,68,68,.3);animation:hzPulse 1.6s ease-in-out infinite}
+@keyframes hzPulse{0%,100%{box-shadow:0 0 0 3px rgba(239,68,68,.3)}50%{box-shadow:0 0 0 8px rgba(239,68,68,.05)}}
+.hz-popup{font-family:var(--mono);font-size:11px;line-height:1.6;min-width:200px;padding:10px 12px}
+.hz-popup .hz-pop-title{font-family:var(--display);font-size:13px;font-weight:800;margin-bottom:4px}
+.hz-popup .hz-sev{font-size:10px;padding:1px 7px;border-radius:20px;border:1px solid currentColor;margin-left:6px}
+.hz-popup .hz-desc{margin:6px 0;white-space:pre-wrap}
+.hz-popup .hz-meta{opacity:.7}
+.hz-popup .hz-lines{margin-top:6px}
+.hz-sev-low{color:var(--amber)} .hz-sev-medium{color:#F97316} .hz-sev-high{color:var(--red)}
+
+/* Routes table badges — buttons, so the notice can be reopened from the row */
+.hz-badge{font-size:13px;line-height:1;padding:2px 5px;border:1px solid transparent;border-radius:6px;background:transparent;
+    cursor:pointer;margin-right:6px;vertical-align:middle;transition:border-color .2s}
+.hz-badge.warn{color:var(--amber);background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.4)}
+.hz-badge.warn:hover{border-color:var(--amber)}
+.hz-badge.ok{color:var(--green);background:rgba(34,197,94,.10);border-color:rgba(34,197,94,.35)}
+.hz-badge.ok:hover{border-color:var(--green)}
+
+/* Notice modal, above the Data Management drawer (1000) and confirm (1100) */
+.hz-backdrop[hidden]{display:none}
+.hz-backdrop{position:fixed;inset:0;background:rgba(7,9,15,.72);display:flex;align-items:center;justify-content:center;z-index:1200}
+.hz-modal{background:var(--panel);border:1px solid rgba(245,158,11,.45);border-radius:12px;padding:24px 26px;width:440px;max-width:92vw;max-height:90vh;overflow-y:auto}
+.hz-modal.resolved{border-color:rgba(34,197,94,.45)}
+.hz-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.hz-icon{font-size:22px}
+.hz-head h4{font-size:15px;font-weight:800;color:var(--amber)}
+.hz-modal.resolved .hz-head h4{color:var(--green)}
+.hz-body{font-family:var(--mono);font-size:12px;color:var(--text);line-height:1.65}
+.hz-body p{margin-bottom:10px}
+.hz-body .hz-dim{color:var(--dim)}
+.hz-body .hz-strong{font-weight:700;color:var(--amber)}
+.hz-modal.resolved .hz-body .hz-strong{color:var(--green)}
+.hz-body ul{list-style:none;margin:4px 0 10px}
+.hz-body li{padding:4px 0 4px 10px;border-left:2px solid var(--border)}
+.hz-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:16px}
+.hz-actions .apply-btn{padding:8px 14px;font-size:11px}

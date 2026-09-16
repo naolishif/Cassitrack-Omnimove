@@ -21,7 +21,7 @@ public class ApiClient {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** Who the key was issued to — "FARO UniSannio", "SOLI staging"… */
+    /** Who the key was issued to — "Partner A", "Partner B staging"… */
     @Column(nullable = false, length = 100)
     private String label;
 

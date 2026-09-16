@@ -3193,6 +3193,10 @@ function renderRoutes(data) {
         // Zone check on the ride destination (Elerent operating / no-parking areas)
         const bikeWarn = opt.bike_warning
             ? `<span class="status-badge s-delay">${escHtml(opt.bike_warning)}</span>` : '';
+        // An emergency reported by the partners that no candidate route could
+        // avoid: the option stays, with the note; the circle is drawn on select.
+        const hazardWarn = opt.hazard_warning
+            ? `<span class="status-badge s-delay" title="${escAttr(opt.hazard_warning)}">${escHtml(opt.hazard_warning)}</span>` : '';
         // Departure / arrival time labels for the card, read from the clock
         // rather than from the moment of the search: the list is re-rendered by
         // the ranking buttons too, and a plan from five minutes ago must not
@@ -3247,6 +3251,7 @@ function renderRoutes(data) {
     <div class="status-row">
         ${warn || `<span class="status-badge s-ok">${t('badge_available')}</span>`}
         ${bikeWarn}
+        ${hazardWarn}
         ${changeBadge}
         ${delayBadge}
     </div>
@@ -3295,9 +3300,30 @@ function clearRoutePreview() {
     window._activeBusRouteIds = [];
 }
 
-function showRoutePreview(mode, legs) {
+function showRoutePreview(mode, legs, hazards) {
     clearRoutePreview();
     window._previewLayers = [];
+    // The emergencies this option still passes through, drawn under the legs
+    // the same way the Elerent zones are — a circle of the reported radius —
+    // in red, so "emergency" reads differently from "no parking".
+    (hazards || []).forEach(h => {
+        if (h.latitude == null || h.longitude == null || !h.radius_m) return;
+        const type = String(h.event_type || '').replace(/_/g, ' ').toLowerCase();
+        const head = h.title ? escHtml(h.title) : (type.charAt(0).toUpperCase() + type.slice(1));
+        const popup = `<b>⚠ ${head}</b>${h.severity ? ' · ' + escHtml(h.severity) : ''}<br><small>${escHtml(t('hazard_popup'))}</small>`;
+        // Filled strongly enough to read as "do not go here" under the route
+        // line, with a marker and label in the middle so the eye finds it.
+        const circle = L.circle([h.latitude, h.longitude], {
+            color: '#b91c1c', weight: 3, fillColor: '#ef4444', fillOpacity: 0.3
+        }).bindPopup(popup);
+        const pin = L.marker([h.latitude, h.longitude], {
+            icon: L.divIcon({ className: '', html: '<div class="hazard-pin">⚠</div>', iconSize: [30, 30], iconAnchor: [15, 15] }),
+            zIndexOffset: 900
+        }).bindPopup(popup);
+        pin.bindTooltip(head, { permanent: true, direction: 'top', offset: [0, -14], className: 'hazard-label' });
+        circle.addTo(map); pin.addTo(map);
+        window._previewLayers.push(circle, pin);
+    });
 
     const origin = window._currentOrigin;
     const dest   = window._currentDest;
@@ -3469,6 +3495,7 @@ function selectMode(key, label, greenIndex, distanceMetres, costEuros) {
     };
 
     selectedJourney.legs = _opt.legs || [];
+    selectedJourney.hazards = _opt.hazards || [];
 
     // Highlight selected card
     document.querySelectorAll('.route-card').forEach(c => {
@@ -3484,7 +3511,7 @@ function selectMode(key, label, greenIndex, distanceMetres, costEuros) {
     window._keepBikeId = _opt.bike_id || null;
 
     // Show dashed preview on map immediately
-    showRoutePreview(mode, selectedJourney.legs || []);
+    showRoutePreview(mode, selectedJourney.legs || [], selectedJourney.hazards || []);
 
     // Open detail sheet instead of a sticky banner. It reads the option back
     // out of the map, so it needs the key, not the mode.

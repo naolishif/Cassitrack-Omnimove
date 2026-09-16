@@ -100,6 +100,38 @@
 
 </div>
 
+<!-- API KEY USAGE MODAL: how many calls a partner key has made, on which
+     endpoints, and when. Opened by clicking the key's label. -->
+<div class="modal-overlay" id="apiKeyUsageModal">
+
+    <div class="modal modal-activity">
+
+        <div class="modal-header">
+
+            <h2 id="apiKeyUsageTitle">API key usage</h2>
+
+            <button class="close-btn" id="apiKeyUsageCloseBtn">
+                ✕
+            </button>
+
+        </div>
+
+        <div class="activity-body">
+
+            <div class="activity-meta" id="apiKeyUsageMeta"></div>
+
+            <div class="activity-section">Calls per endpoint</div>
+            <div class="usage-chart-wrap"><canvas id="apiKeyUsageByEndpoint"></canvas></div>
+
+            <div class="activity-section">Calls per day — last 30 days</div>
+            <div class="usage-chart-wrap"><canvas id="apiKeyUsageByDay"></canvas></div>
+
+        </div>
+
+    </div>
+
+</div>
+
 <!-- DELETE MODAL -->
 
 <div class="modal-overlay" id="deleteModal">
@@ -259,8 +291,9 @@
                 <h2>Partner API keys</h2>
                 <p class="muted">
                     Keys other systems present as <code>X-Api-Key</code> on
-                    <code>/api/static/netex</code>, <code>/api/static/version</code> and
-                    <code>/api/v1/telemetry/stream</code>. Only a hash is stored: the key is
+                    <code>/api/static/netex</code>, <code>/api/static/version</code>,
+                    <code>/api/v1/telemetry/stream</code> and <code>POST /api/v1/road-closures</code>
+                    (emergency reports). Click a key's label for its usage chart. Only a hash is stored: the key is
                     shown <b>once</b>, right after it is generated. A lost key is revoked and
                     replaced, not recovered. OmniMove keeps its own token and is not listed here.
                 </p>
@@ -273,7 +306,7 @@
                             type="text"
                             class="search-input"
                             maxlength="100"
-                            placeholder="Label — e.g. FARO UniSannio"
+                            placeholder="Label — e.g. Partner A"
                             id="apiKeyLabel"
                     />
                 </div>
@@ -326,6 +359,9 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"
+        integrity="sha256-/tanOfjQ8GhxdN5s0UdF/A/HgJFEqxE9IpCKJr8Nf+o="
+        crossorigin="anonymous"></script>
 <script src="cassitrack-session.js"></script>
 <script src="cassitrack-admin.js"></script>
 

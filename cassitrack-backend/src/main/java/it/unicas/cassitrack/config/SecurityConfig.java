@@ -110,6 +110,9 @@ public class SecurityConfig {
                                 "/ws/**",
                                 "/api/static/**"
                         ).permitAll()
+                        // Partner road-closure reports: open here, X-Api-Key checked in the
+                        // controller via ApiClientService.authorizeFeed(), same as /api/static
+                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/road-closures").permitAll()
 
                         // V-07 FIX (OWASP A05): Swagger UI now requires authentication — no free recon
                         .requestMatchers(
@@ -124,6 +127,7 @@ public class SecurityConfig {
                                 "/cassitrack-fleetmanager.css",
                                 "/cassitrack-fleetmanager.js",
                                 "/api/v1/analytics/**",
+                                "/api/v1/hazards/**",   // partner road closures, as the manager sees them
                                 "/api/v1/buses/**",
                                 "/api/v1/trips/**"     // trips + their timetable (Data Management);
                                                        // /api/v1/timetable/** was merged into it

@@ -16,6 +16,13 @@ public class JourneyOption {
     private String summary;
     @JsonProperty("weather_warning") private String weatherWarning;
     @JsonProperty("weather_suggestion") private String weatherSuggestion;
+    /**
+     * Set only when every candidate for some leg crossed an emergency the
+     * partners reported, so the option is shown with a warning instead of
+     * being silently rerouted. The circles to draw are in {@link #hazards}.
+     */
+    @JsonProperty("hazard_warning") private String hazardWarning;
+    private List<HazardDTO> hazards;
     private List<JourneyLeg> legs;
     @JsonProperty("delay_minutes")   private Integer delayMinutes;
     @JsonProperty("delay_status")    private String  delayStatus;    // ON_TIME, SLIGHTLY_LATE

@@ -970,3 +970,14 @@ td .sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim)
     display:flex;align-items:center;justify-content:center;height:100%;
     font-family:var(--font-mono);font-size:11px;color:var(--text-dim);text-align:center;padding:0 20px;
 }
+
+/* ── API key usage (modal opened from the key's label) ─────────────────── */
+.modal-usage { width: 640px; max-width: calc(100vw - 40px); }
+.api-key-label {
+    background: none; border: none; padding: 0; margin: 0;
+    font: inherit; color: var(--text-primary);
+    cursor: pointer; text-decoration: underline dotted var(--text-secondary);
+    text-underline-offset: 3px;
+}
+.api-key-label:hover { color: var(--accent-cyan); text-decoration-color: var(--accent-cyan); }
+.usage-chart-wrap { position: relative; height: 180px; margin-bottom: 6px; }

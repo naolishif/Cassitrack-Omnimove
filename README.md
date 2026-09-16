@@ -376,11 +376,14 @@ Interactive docs (authentication required — no free reconnaissance):
 | GET | `/api/v1/telemetry/latest` (deprecated) | public |
 | GET | `/api/v1/telemetry/stream` (SSE) | `X-Api-Key` |
 | GET | `/api/static/netex` · `/api/static/version` | `X-Api-Key` |
+| POST | `/api/v1/road-closures` — emergency reported by a partner (`eventId`, `eventType`, `severity`, lat/lon, `radiusMeters`, `meetingPoint`; same `eventId` again updates, `status:false` resolves) | `X-Api-Key` |
+| GET/POST | `/api/v1/hazards` · `/{id}/ack` — the reports as the fleet manager sees them (lines hit, notice state) | `FLEET_MANAGER` |
 | GET/POST/PUT/DELETE | `/api/v1/buses` · `/api/v1/trips` · `/api/v1/routes` · `/api/v1/stops` | `FLEET_MANAGER` |
 | GET | `/api/v1/analytics/**` (summary, adherence, busiest-hours, delay-by-route, co2, network, …) | `FLEET_MANAGER` |
 | POST | `/api/v1/reports/export` (CSV / XLSX / PDF) | authenticated (driven from the fleet-manager UI) |
 | POST | `/api/v1/ai/chat` | `FLEET_MANAGER`, `ADMIN` |
 | GET/POST/PUT/DELETE | `/api/v1/users/**` | `ADMIN` |
+| GET/POST/DELETE | `/api/v1/admin/api-keys` · `/{id}` · `/{id}/usage` (calls per endpoint and per day) | `ADMIN` |
 | POST | `/api/v1/auth/login` · `/logout` | public / authenticated |
 
 ### OMNIMOVE — `http://localhost:8180/omnimove`
@@ -404,7 +407,12 @@ Interactive docs (authentication required — no free reconnaissance):
 | POST | `/api/v1/auth/register` · `/login` · `/google` · `/forgot-password` · `/reset-password` | public |
 | GET | `/api/v1/auth/me` · `/verify` | authenticated |
 | DELETE | `/api/v1/auth/account` | authenticated |
-| GET/PUT/DELETE | `/api/v1/admin/**` (users, analytics, retention, settings) | `ADMIN` |
+| GET/PUT/DELETE | `/api/v1/admin/**` (users, analytics, retention, settings, api-keys + `/usage`, road-closures) | `ADMIN` |
+| GET | `/api/partner/v1/meta` · `/stops/nearby` | `X-Api-Key` (partner) |
+| POST | `/api/partner/v1/reachability` · `/co2` | `X-Api-Key` (partner) |
+| POST | `/api/partner/v1/road-closures` — emergency reported by a partner; the journey planner routes walks and rides around it and flags what still crosses it | `X-Api-Key` (partner) |
+
+Every partner call (`X-Api-Key`) on both apps is counted per endpoint; the admin panel shows the chart by clicking the key's label. A full set of `curl` examples for both apps is kept next to the repository (`partner-curl-examples.txt`), outside version control.
 
 ### Example — journey search
 

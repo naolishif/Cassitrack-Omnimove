@@ -48,7 +48,7 @@ public class ApiKeyAdminController {
                 .collect(Collectors.toList()));
     }
 
-    // Body: { "label": "FARO UniSannio", "expiresInDays": 90 }   0 or absent = never
+    // Body: { "label": "Partner A", "expiresInDays": 90 }   0 or absent = never
     @PostMapping
     @Operation(summary = "Issue a partner API key — the plaintext is returned this once")
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body, Authentication auth) {
@@ -77,6 +77,15 @@ public class ApiKeyAdminController {
         Map<String, Object> out = row(c, Instant.now());
         out.put("key", issued.plaintext());
         return ResponseEntity.status(201).body(out);
+    }
+
+    @GetMapping("/{id}/usage")
+    @Operation(summary = "How a key has been used: calls in total, per endpoint and per day")
+    public ResponseEntity<?> usage(@PathVariable("id") Long id,
+                                   @RequestParam(name = "days", defaultValue = "30") int days) {
+        return apiClientService.usage(id, Math.max(1, Math.min(days, 365)))
+                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.status(404).body(Map.of("message", "No key with id " + id)));
     }
 
     @DeleteMapping("/{id}")
