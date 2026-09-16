@@ -17,6 +17,7 @@ const OMNI_T = {
     note_reset:'Choose a new password for your OMNIMOVE account.',
     email_sent_to:"We've sent a verification link to",
     email_sent_p:'Open the email and click the link to activate your account, then come back here to sign in.',
+    email_sent_spam:"Can't find it? Check your spam or junk folder — it can take a couple of minutes to arrive.",
     lang_choose:'Language',
     // Privacy / consent
     consent_notice_html:'I have read the <a href="privacy.html">privacy notice</a>.',
@@ -524,6 +525,7 @@ const OMNI_T = {
     note_reset:'Scegli una nuova password per il tuo account OMNIMOVE.',
     email_sent_to:'Abbiamo inviato un link di verifica a',
     email_sent_p:"Apri l'email e clicca sul link per attivare il tuo account, poi torna qui per accedere.",
+    email_sent_spam:'Non la trovi? Controlla la cartella spam o posta indesiderata — potrebbe impiegare qualche minuto ad arrivare.',
     lang_choose:'Lingua',
     // Privacy / consenso
     consent_notice_html:'Ho letto l\'<a href="privacy.html">informativa privacy</a>.',
