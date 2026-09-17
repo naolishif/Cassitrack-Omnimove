@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CassiTrack — Route Crosses Hazard (Mockup)</title>
+<style>
+  :root{
+    --bg-map:#0b1626;
+    --bg-panel:#0f1c33;
+    --bg-navbar:#0c1830;
+    --border:#1f2f4a;
+    --text:#e6edf7;
+    --text-dim:#8fa3c0;
+    --accent-blue:#38bdf8;
+    --route-blue:#4f8ff7;
+    --route-orange:#f2994a;
+    --route-teal:#22d3c9;
+    --route-purple:#a78bfa;
+    --route-pink:#f472b6;
+    --hazard-red:#ef4444;
+    --ok-green:#22c55e;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg-map);color:var(--text);}
+  .app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+  /* ── Top navbar ─────────────────────────────────────────── */
+  .navbar{
+    height:52px;flex:0 0 auto;display:flex;align-items:center;
+    background:var(--bg-navbar);border-bottom:1px solid var(--border);
+    padding:0 18px;gap:22px;
+  }
+  .logo{font-weight:800;font-size:17px;letter-spacing:0.5px;}
+  .logo .b{color:#fff;}
+  .logo .t{color:var(--accent-blue);}
+  .nav-tabs{display:flex;gap:6px;align-items:center;}
+  .nav-tab{
+    font-size:12.5px;font-weight:600;color:var(--text-dim);
+    padding:7px 12px;border-radius:7px;cursor:default;
+  }
+  .nav-tab.active{background:#16305a;color:#bfe0ff;border:1px solid #2a5590;}
+  .nav-tab.logout{color:#ef6a6a;margin-left:2px;}
+  .navbar-right{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-dim);}
+  .dot-green{width:7px;height:7px;border-radius:50%;background:var(--ok-green);display:inline-block;box-shadow:0 0 6px var(--ok-green);}
+
+  /* ── Body ───────────────────────────────────────────────── */
+  .body{flex:1;display:flex;min-height:0;}
+  .map-wrap{position:relative;flex:1;min-width:0;background:
+      radial-gradient(ellipse 480px 320px at 14% 18%, #16281c 0%, transparent 70%),
+      radial-gradient(ellipse 520px 420px at 78% 78%, #16323a 0%, transparent 65%),
+      repeating-linear-gradient(120deg, rgba(255,255,255,0.015) 0px, rgba(255,255,255,0.015) 1px, transparent 1px, transparent 46px),
+      repeating-linear-gradient(30deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 60px),
+      var(--bg-map);
+    overflow:hidden;
+  }
+  .map-wrap svg{position:absolute;inset:0;width:100%;height:100%;}
+
+  .zoom-ctl{position:absolute;top:14px;left:14px;display:flex;flex-direction:column;z-index:5;}
+  .zoom-ctl button{
+    width:30px;height:30px;background:#12213b;border:1px solid var(--border);color:var(--text);
+    font-size:16px;cursor:default;
+  }
+  .zoom-ctl button:first-child{border-radius:6px 6px 0 0;}
+  .zoom-ctl button:last-child{border-radius:0 0 6px 6px;border-top:none;}
+
+  .mock-ribbon{
+    position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;
+    background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.5);color:#fecaca;
+    font-size:11.5px;font-weight:700;letter-spacing:0.4px;padding:6px 14px;border-radius:20px;
+    text-transform:uppercase;
+  }
+
+  /* ── Hazard popup card ─────────────────────────────────── */
+  .hazard-card{
+    position:absolute;left:305px;top:150px;width:262px;z-index:7;
+    background:#0f1e36;border:1px solid #253a5c;border-radius:10px;
+    box-shadow:0 12px 30px rgba(0,0,0,0.5);padding:14px 15px 12px;
+  }
+  .hazard-card .hc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .hazard-card .hc-title{font-size:14px;font-weight:800;}
+  .badge-high{background:#3a1220;color:#ff8f8f;border:1px solid #6b1c2e;font-size:10px;font-weight:800;
+    padding:2px 7px;border-radius:5px;letter-spacing:0.4px;}
+  .hc-sub{font-size:11px;color:var(--text-dim);margin-bottom:10px;}
+  .hc-desc{font-size:12px;color:#cfe0f5;margin-bottom:9px;line-height:1.4;}
+  .hc-meta{font-size:11px;color:var(--text-dim);margin-bottom:3px;line-height:1.5;}
+  .hc-meta b{color:#cfe0f5;font-weight:600;}
+  .hc-lines-label{font-size:11px;font-weight:700;color:#cfe0f5;margin-top:10px;margin-bottom:5px;}
+  .hc-line{font-size:11.5px;color:#a9c2e0;padding:3px 0;border-top:1px dashed #22314f;display:flex;
+    align-items:center;justify-content:space-between;gap:6px;}
+  .hc-line:first-of-type{border-top:none;}
+  .hc-conflict{color:#ff9d9d;font-size:10px;font-weight:700;white-space:nowrap;}
+  .hc-footer{
+    margin-top:11px;padding-top:10px;border-top:1px solid #22314f;
+    font-size:11px;color:#ffb4b4;font-weight:600;display:flex;align-items:center;gap:6px;
+  }
+  .hc-cta{
+    margin-top:9px;width:100%;background:#1b3050;border:1px solid #2c4770;color:#bfe0ff;
+    font-size:11.5px;font-weight:700;padding:7px 0;border-radius:6px;text-align:center;
+  }
+
+  .tag{
+    position:absolute;z-index:6;background:#2a1015;border:1px solid var(--hazard-red);color:#ffb4b4;
+    font-size:10.5px;font-weight:700;padding:4px 9px;border-radius:14px;white-space:nowrap;
+    box-shadow:0 4px 10px rgba(0,0,0,0.4);
+  }
+
+  /* ── Right sidebar ──────────────────────────────────────── */
+  .sidebar{width:290px;flex:0 0 auto;background:var(--bg-panel);border-left:1px solid var(--border);
+    padding:14px 14px 10px;overflow-y:auto;font-size:12px;}
+  .sb-h{font-size:10.5px;font-weight:800;letter-spacing:0.6px;color:var(--text-dim);margin:2px 0 10px;}
+  .sb-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;}
+  .sb-row label{color:var(--text-dim);font-size:11.5px;}
+  .sb-select{background:#16253f;border:1px solid var(--border);color:var(--text);font-size:11px;
+    padding:5px 8px;border-radius:6px;min-width:110px;text-align:right;}
+  .sb-slider{width:110px;accent-color:var(--accent-blue);}
+  .sb-search{width:100%;background:#16253f;border:1px solid var(--border);color:var(--text);
+    font-size:11px;padding:6px 8px;border-radius:6px;margin-top:2px;}
+
+  .fleet-stats{display:flex;gap:8px;margin:12px 0 14px;}
+  .stat-box{flex:1;background:#16253f;border:1px solid var(--border);border-radius:8px;padding:9px 10px;}
+  .stat-box .num{font-size:19px;font-weight:800;}
+  .stat-box .lbl{font-size:9px;color:var(--text-dim);letter-spacing:0.4px;margin-top:2px;}
+
+  .bus-card{background:#16253f;border:1px solid var(--border);border-radius:8px;padding:10px 11px;margin-bottom:9px;}
+  .bus-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .bus-name{font-weight:800;font-size:12.5px;}
+  .no-trip{background:#3a2c10;color:#f4c765;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;}
+  .bus-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:10.5px;color:var(--text-dim);margin-bottom:6px;}
+  .bus-grid b{display:block;color:var(--text);font-size:12px;font-weight:700;margin-top:1px;}
+  .bar{height:3px;border-radius:2px;background:#22c55e;width:22%;margin-top:2px;}
+  .not-service{font-size:10px;color:var(--text-dim);margin-top:4px;}
+
+  .attribution{position:absolute;bottom:6px;right:10px;font-size:9.5px;color:#5b7196;z-index:5;}
+  .footer-brand{position:absolute;bottom:6px;left:14px;font-size:9.5px;color:#5b7196;z-index:5;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="navbar">
+    <div class="logo"><span class="b">CASSI</span><span class="t">TRACK</span></div>
+    <div class="nav-tabs">
+      <div class="nav-tab active">Fleet Monitor</div>
+      <div class="nav-tab">Analytics</div>
+      <div class="nav-tab">Data Management</div>
+      <div class="nav-tab">About us</div>
+      <div class="nav-tab logout">Log Out</div>
+    </div>
+    <div class="navbar-right"><span class="dot-green"></span>34 buses active · next in 14s</div>
+  </div>
+
+  <div class="body">
+    <div class="map-wrap">
+      <div class="mock-ribbon">Mockup · Route crosses hazard</div>
+      <div class="zoom-ctl"><button>+</button><button>−</button></div>
+
+      <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+        <!-- base street grid (decorative) -->
+        <g stroke="#233757" stroke-width="1.4" opacity="0.55">
+          <path d="M0,120 L1600,180" fill="none"/>
+          <path d="M0,300 L1600,260" fill="none"/>
+          <path d="M0,620 L1600,700" fill="none"/>
+          <path d="M180,0 L260,900" fill="none"/>
+          <path d="M900,0 L960,900" fill="none"/>
+          <path d="M1300,0 L1240,900" fill="none"/>
+        </g>
+
+        <!-- decorative secondary transit lines -->
+        <path d="M60,760 C260,790 420,800 620,770 C820,740 980,700 1180,660" fill="none" stroke="var(--route-teal)" stroke-width="4" opacity="0.85"/>
+        <path d="M980,120 C960,260 940,380 900,520 C870,630 840,720 800,860" fill="none" stroke="var(--route-purple)" stroke-width="4" opacity="0.85"/>
+        <path d="M1080,560 C1120,600 1160,640 1210,690" fill="none" stroke="var(--route-pink)" stroke-width="4" opacity="0.85"/>
+        <path d="M120,560 C300,610 480,600 650,560" fill="none" stroke="#c9b458" stroke-width="4" opacity="0.7"/>
+
+        <!-- Line 01 — also flagged, left untouched in this mockup -->
+        <path d="M50,380 C210,398 360,428 480,445 C520,452 545,456 560,460 C610,466 700,480 850,460 C1000,440 1150,380 1300,340"
+              fill="none" stroke="var(--route-orange)" stroke-width="4.5" opacity="0.9"/>
+
+        <!-- Line 09 — the affected route: runs straight through the hazard -->
+        <path d="M560,90 C562,180 558,280 559,360 C560,400 560,430 560,460 C560,500 562,560 590,640 C620,730 660,800 700,860"
+              fill="none" stroke="var(--route-blue)" stroke-width="6" stroke-linecap="round"/>
+
+        <!-- scattered stop markers -->
+        <g fill="#0b1626" stroke="#c7d8ef" stroke-width="2">
+          <circle cx="559" cy="200" r="6.5"/>
+          <circle cx="560" cy="300" r="6.5"/>
+          <circle cx="575" cy="600" r="6.5"/>
+          <circle cx="660" cy="780" r="6.5"/>
+          <circle cx="230" cy="770" r="6.5"/>
+          <circle cx="1000" cy="360" r="6.5"/>
+          <circle cx="890" cy="500" r="6.5"/>
+          <circle cx="1180" cy="655" r="6.5"/>
+          <circle cx="150" cy="580" r="6.5"/>
+        </g>
+
+        <!-- hazard zone -->
+        <circle cx="560" cy="460" r="130" fill="var(--hazard-red)" opacity="0.12"/>
+        <circle cx="560" cy="460" r="92" fill="var(--hazard-red)" opacity="0.22"/>
+        <circle cx="560" cy="460" r="92" fill="none" stroke="var(--hazard-red)" stroke-width="2" opacity="0.8"/>
+        <!-- stop sitting inside the hazard, called out in red -->
+        <circle cx="560" cy="460" r="8" fill="#0b1626" stroke="var(--hazard-red)" stroke-width="2.5"/>
+        <g transform="translate(560,460)">
+          <circle r="17" fill="#1b1220" stroke="var(--hazard-red)" stroke-width="2"/>
+          <text x="0" y="6" text-anchor="middle" font-size="18">⚠</text>
+        </g>
+      </svg>
+
+      <div class="tag" style="left:640px;top:492px;">⚠ Line 09 crosses flood zone</div>
+
+      <div class="hazard-card">
+        <div class="hc-top"><div class="hc-title">Flood Emergency</div><div class="badge-high">HIGH</div></div>
+        <div class="hc-sub">Flood · EMERGENCY</div>
+        <div class="hc-desc">There is a flood emergency in the zone</div>
+        <div class="hc-meta"><b>Reported by faro</b> · 17/09 00:18</div>
+        <div class="hc-meta"><b>Radius</b> 400 m · ref. evt-flood-002</div>
+        <div class="hc-meta"><b>Meeting point:</b> Piazza Diaz</div>
+        <div class="hc-lines-label">Lines through the area:</div>
+        <div class="hc-line"><span>Line 01 – Solfegna – Casilina Nord</span></div>
+        <div class="hc-line"><span>Line 01 – Solfegna – Casilina Nord (ritorno)</span></div>
+        <div class="hc-line"><span>Line 09 – Istituto Agrario</span><span class="hc-conflict">⚠ conflict</span></div>
+        <div class="hc-line"><span>Line 09 – Istituto Agrario (ritorno)</span><span class="hc-conflict">⚠ conflict</span></div>
+        <div class="hc-footer">⚠ 2 routes cross this area — manual reroute recommended</div>
+        <div class="hc-cta">Suggest reroute in Routes tab →</div>
+      </div>
+
+      <div class="footer-brand">UNICAS · Distributed Programming 2025/2026 — CASSITRACK + OMNIMOVE v0.1 · Cassino</div>
+      <div class="attribution">Leaflet | © OpenStreetMap contributors</div>
+    </div>
+
+    <div class="sidebar">
+      <div class="sb-h">FILTERS</div>
+      <div class="sb-row"><label>Route</label><div class="sb-select">All routes</div></div>
+      <div class="sb-row"><label>Service</label><div class="sb-select">All</div></div>
+      <div class="sb-row"><label>Idle lines</label><div class="sb-select">Dimmed</div></div>
+      <div class="sb-row"><label>Min delay</label><input class="sb-slider" type="range" value="0" readonly></div>
+      <div class="sb-row" style="display:block"><label>Bus</label><input class="sb-search" placeholder="name or #" readonly></div>
+
+      <div class="sb-h" style="margin-top:16px">FLEET OVERVIEW</div>
+      <div class="fleet-stats">
+        <div class="stat-box"><div class="num">34/37</div><div class="lbl">BUSES ACTIVE</div></div>
+        <div class="stat-box"><div class="num">515</div><div class="lbl">TOTAL PAX</div></div>
+      </div>
+
+      <div class="bus-card">
+        <div class="bus-top"><div class="bus-name">BUS1</div><div class="no-trip">⚠ NO TRIP</div></div>
+        <div class="bus-grid">
+          <div>SPEED<b>0.0 km/h</b></div><div>PASSENGERS<b>~17</b></div>
+          <div>CROWDING<b>LOW</b></div><div>ROUTE<b>–</b></div>
+        </div>
+        <div class="bar"></div><div class="not-service">Not in service</div>
+      </div>
+      <div class="bus-card">
+        <div class="bus-top"><div class="bus-name">BUS2</div><div class="no-trip">⚠ NO TRIP</div></div>
+        <div class="bus-grid">
+          <div>SPEED<b>0.0 km/h</b></div><div>PASSENGERS<b>~15</b></div>
+          <div>CROWDING<b>LOW</b></div><div>ROUTE<b>–</b></div>
+        </div>
+        <div class="bar" style="width:35%"></div><div class="not-service">Not in service</div>
+      </div>
+      <div class="bus-card">
+        <div class="bus-top"><div class="bus-name">BUS6</div><div class="no-trip">⚠ NO TRIP</div></div>
+        <div class="bus-grid">
+          <div>SPEED<b>0.0 km/h</b></div><div>PASSENGERS<b>~1</b></div>
+          <div>CROWDING<b>LOW</b></div><div>ROUTE<b>–</b></div>
+        </div>
+        <div class="bar" style="width:6%"></div><div class="not-service">Not in service</div>
+      </div>
+      <div class="bus-card">
+        <div class="bus-top"><div class="bus-name">BUS7</div><div class="no-trip">⚠ NO TRIP</div></div>
+        <div class="bus-grid">
+          <div>SPEED<b>0.0 km/h</b></div><div>PASSENGERS<b>~18</b></div>
+          <div>CROWDING<b>LOW</b></div><div>ROUTE<b>–</b></div>
+        </div>
+        <div class="bar" style="width:40%"></div><div class="not-service">Not in service</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

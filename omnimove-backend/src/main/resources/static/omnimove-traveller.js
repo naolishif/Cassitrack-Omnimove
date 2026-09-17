@@ -7936,3 +7936,407 @@ function clearMapPickMarker() {
         window._mapPickMarker = null;
     }
 }
+
+
+// ════════════════════════════════════════════════════════════════════
+// DEMO ONLY — SoLi (Solidarities Link) integration mockup, for the
+// Smart City Challenge presentation screenshots. Nothing here calls a
+// real SoLi endpoint or writes to the real backend — it fakes the UI
+// states we want to show. Safe to delete this whole block; it is
+// additive and touches nothing above it.
+// Delimited clearly so it is easy to strip before anything real ships:
+// DEMO-SOLI-BLOCK-START
+
+let _soliLinked = false;
+let _soliVolunteerActive = false;
+
+function linkWithSoli() {
+    const btn  = document.getElementById('soliLinkBtn');
+    const desc = document.getElementById('soliLinkDesc');
+    const chip = document.getElementById('volunteerChip');
+
+    if (_soliLinked) {
+        _soliLinked = false;
+        btn.textContent = '🔗 Link with SoLi';
+        btn.classList.remove('btn-green');
+        btn.classList.add('btn-dark');
+        desc.textContent = 'Connect your SoLi volunteer-network account to unlock the Volunteer travel mode — a nearby certified volunteer can accompany you for part of your journey.';
+        chip.style.display = 'none';
+        chip.classList.remove('active');
+        _soliVolunteerActive = false;
+        // If our preview happens to be open, close it through the real
+        // closeRouteDetail so the wrapper below restores itself cleanly.
+        if (_origCloseRouteDetail) window.closeRouteDetail();
+        removeVolunteerCard();
+        setDemoImpairedProfile(false);
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Connecting to SoLi…';
+    setTimeout(() => {
+        _soliLinked = true;
+        btn.disabled = false;
+        btn.textContent = 'Linked with SoLi';
+        btn.classList.remove('btn-dark');
+        btn.classList.add('btn-green');
+        desc.innerHTML = 'Linked as <b>Maria Bianchi</b> · SoLi identity verified (SPID) ✓<br>The Volunteer mode is now available when planning a journey.';
+        chip.style.display = '';
+        setDemoImpairedProfile(true);
+        if (typeof showToast === 'function') showToast('SoLi account linked — Volunteer mode unlocked', false);
+    }, 900);
+}
+
+function setDemoImpairedProfile(on) {
+    const nameEl = document.getElementById('profileName');
+    const avatarEl = document.querySelector('.profile-avatar-lg');
+    if (!nameEl || !avatarEl) return;
+    if (on) {
+        nameEl.dataset.demoOriginal = nameEl.textContent;
+        avatarEl.dataset.demoOriginal = avatarEl.textContent;
+        nameEl.innerHTML = 'Maria Bianchi <span style="font-size:12px;font-weight:600;color:var(--text-soft)">· Accessibility profile</span>';
+        avatarEl.textContent = '♿';
+    } else {
+        if (nameEl.dataset.demoOriginal) nameEl.textContent = nameEl.dataset.demoOriginal;
+        if (avatarEl.dataset.demoOriginal) avatarEl.textContent = avatarEl.dataset.demoOriginal;
+    }
+}
+
+// The Volunteer chip does NOT go through toggleModeChip/doSearch — it is
+// not a real backend mode. Omnimove never looks up volunteer location or
+// availability itself: it only shows the option and, on request, POSTs to
+// SoLi, which handles matching entirely on its side.
+function toggleVolunteerChip(el) {
+    if (!_soliLinked) return;
+    el.classList.toggle('active');
+    _soliVolunteerActive = el.classList.contains('active');
+    if (_soliVolunteerActive) {
+        injectVolunteerCard();
+    } else {
+        removeVolunteerCard();
+    }
+}
+
+// ── List card ────────────────────────────────────────────────────────
+// Deliberately minimal and stateless — the request/accept flow lives in the
+// detail sheet below, not here. The real routes-list is rewritten wholesale
+// by refreshRoutes() every few seconds; a stateful button living inside a
+// card that gets swapped out from under it is exactly what made the demo
+// vanish mid-interaction before. renderRoutes is wrapped further down to
+// re-add this card whenever that happens, but nothing about its own state
+// needs to survive that — it never carries any.
+function injectVolunteerCard() {
+    removeVolunteerCard();
+    const list = document.querySelector('.routes-list');
+    if (!list) return;
+    const card = document.createElement('div');
+    card.className = 'route-card';
+    card.id = 'card-VOLUNTEER-DEMO';
+    card.innerHTML = `
+        <div class="route-top">
+            <div class="route-name">🤝 Volunteer accompaniment</div>
+            <div class="route-time">5 min</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin:-4px 0 6px;font-size:12px;color:var(--text-mid);font-weight:600">
+            <span>Meet at last stop</span>
+            <span style="color:var(--border-mid)">→</span>
+            <span>Destination</span>
+        </div>
+        <div class="status-row">
+            <span class="status-badge s-ok">Matched by SoLi</span>
+        </div>
+        <div class="metrics-row">
+            <div class="metric-box"><div class="metric-label">Cost</div><div class="metric-value">Free</div></div>
+            <div class="metric-box"><div class="metric-label">CO₂</div><div class="metric-value">0 g</div></div>
+            <div class="metric-box"><div class="metric-label">Provider</div><div class="metric-value" style="font-size:12px">SoLi</div></div>
+        </div>
+        <button class="action-btn btn-dark" style="width:100%" onclick="openVolunteerDetail()">
+            Select
+        </button>`;
+    list.prepend(card);
+}
+
+function removeVolunteerCard() {
+    const el = document.getElementById('card-VOLUNTEER-DEMO');
+    if (el) el.remove();
+}
+
+// ── Detail sheet ─────────────────────────────────────────────────────
+// Reuses the real #routeDetailSheet — the same overlay every other mode
+// (Walk/Bike/Bus…) previews in — instead of a bespoke demo popup, so the
+// screenshot matches the rest of the app pixel for pixel. It lives outside
+// .routes-list, so unlike the card above it survives the periodic refresh
+// untouched: this is why the request/accept state machine is kept here.
+let _volunteerRequestState = 'idle'; // idle -> searching -> accepted
+let _origCloseRouteDetail = null;
+
+function openVolunteerDetail() {
+    const sheet = document.getElementById('routeDetailSheet');
+    if (!sheet || typeof closeRouteDetail !== 'function') return;
+
+    // Wrap the close handler only for the lifetime of this preview, so the
+    // moment it closes — ✕, or unlinking SoLi — everything reverts and real
+    // route previews behave exactly as before we ever touched this.
+    if (!_origCloseRouteDetail) {
+        _origCloseRouteDetail = window.closeRouteDetail;
+        window.closeRouteDetail = function() {
+            _origCloseRouteDetail();
+            window.closeRouteDetail = _origCloseRouteDetail;
+            _origCloseRouteDetail = null;
+            const rdRefresh = document.getElementById('rdRefreshBtn');
+            if (rdRefresh) rdRefresh.style.visibility = '';
+            _volunteerRequestState = 'idle';
+        };
+    }
+
+    // Prefer the resolved search object's name, but the visible input text
+    // is the more reliable source in practice: _currentOrigin/_currentDest can
+    // be null here (cleared elsewhere, e.g. by an unrelated network/legend
+    // view) even while the address bar still shows the real origin/destination.
+    const originName = (window._currentOrigin && window._currentOrigin.name)
+        || document.getElementById('originSelect')?.value?.trim()
+        || 'Your location';
+    const destName = (window._currentDest && window._currentDest.name)
+        || document.getElementById('destSelect')?.value?.trim()
+        || 'Your destination';
+
+    document.getElementById('rdEmoji').textContent = '🤝';
+    document.getElementById('rdLabel').textContent = 'Volunteer accompaniment';
+    const now = new Date();
+    const arr = new Date(now.getTime() + 5 * 60000);
+    const hhmm = d => d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+    document.getElementById('rdTimes').textContent = `${hhmm(now)} → ${hhmm(arr)}`;
+    document.getElementById('rdDur').textContent = '5 min';
+    const fresh = document.getElementById('rdFresh');
+    if (fresh) fresh.textContent = '';
+    // No live recalculation to offer — SoLi owns the match, not us.
+    const rdRefresh = document.getElementById('rdRefreshBtn');
+    if (rdRefresh) rdRefresh.style.visibility = 'hidden';
+    document.getElementById('rdGreen').textContent = '100/100';
+    document.getElementById('rdGreen').style.color = '#059669';
+    document.getElementById('rdCost').textContent = 'Free';
+    document.getElementById('rdCo2').textContent = '0 g CO₂';
+    document.getElementById('rdTimeline').innerHTML = _volunteerTimelineHtml(originName, destName);
+
+    _volunteerRequestState = 'idle';
+    _renderVolunteerStartBtn();
+
+    sheet.classList.add('open');
+}
+
+function _volunteerTimelineHtml(originName, destName) {
+    const col = '#0f9d78';
+    const esc = typeof escHtml === 'function' ? escHtml : (s => s);
+    return `
+    <div class="tl-row">
+      <div class="tl-left">
+        <div class="tl-dot" style="background:white;border-color:#6366f1;border-width:2px"></div>
+        <div class="tl-line" style="background:#6366f133"></div>
+      </div>
+      <div class="tl-body">
+        <div class="tl-from" style="margin:0">${esc(originName)}</div>
+        <div class="tl-meta">
+          <span class="tl-badge" style="background:#6366f118;color:#6366f1">♿ Accessible route · 3 min</span>
+          <span class="tl-sub">250 m</span>
+        </div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-left">
+        <div class="tl-dot tl-dot-board" style="background:${col};border-color:${col}"></div>
+        <div class="tl-line" style="background:${col}"></div>
+      </div>
+      <div class="tl-body">
+        <div class="tl-from" style="margin:0">Meet your volunteer</div>
+        <div class="tl-meta">
+          <span class="tl-badge" style="background:${col}18;color:${col}">🤝 Matched by SoLi</span>
+        </div>
+      </div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-left">
+        <div class="tl-dot" style="background:${col};border-color:${col}"></div>
+      </div>
+      <div class="tl-body" style="padding-bottom:0">
+        <div class="tl-from" style="margin:0">${esc(destName)}</div>
+        <div style="font-size:11px;color:#10b981;font-weight:600;margin-top:2px">Your destination</div>
+      </div>
+    </div>`;
+}
+
+function _renderVolunteerStartBtn() {
+    const btn = document.getElementById('rdStartBtn');
+    if (!btn) return;
+    if (_volunteerRequestState === 'idle') {
+        btn.disabled = false;
+        btn.textContent = 'Request Volunteer';
+        btn.classList.remove('btn-green');
+        btn.classList.add('btn-dark');
+        btn.onclick = requestVolunteerDemo;
+    } else if (_volunteerRequestState === 'searching') {
+        btn.disabled = true;
+        btn.textContent = '🔍 Looking for a volunteer…';
+    } else if (_volunteerRequestState === 'accepted') {
+        btn.disabled = false;
+        btn.textContent = 'Mario accepted — Start Journey';
+        btn.classList.remove('btn-dark');
+        btn.classList.add('btn-green');
+        btn.onclick = function() {
+            if (typeof showToast === 'function') showToast('Demo only — this is where startJourney() would run', false);
+        };
+    }
+}
+
+// The state machine agreed for the pitch: the button stays disabled/"looking"
+// until SoLi reports the task accepted — only then does it become "Start
+// Journey". Timed for the screenshot sequence, not a real request.
+function requestVolunteerDemo() {
+    _volunteerRequestState = 'searching';
+    _renderVolunteerStartBtn();
+    setTimeout(() => {
+        _volunteerRequestState = 'accepted';
+        _renderVolunteerStartBtn();
+    }, 2200);
+}
+
+// ── Survive the periodic route refresh ──────────────────────────────
+// renderRoutes() rewrites .routes-list wholesale on every scheduled
+// refresh, which silently deleted our injected card mid-interaction. It is
+// a plain global function declaration, so it can be wrapped in place:
+// nothing about the real rendering changes, we just top it up afterwards.
+if (typeof renderRoutes === 'function' && !window._renderRoutesWrappedForSoliDemo) {
+    const _origRenderRoutes = renderRoutes;
+    renderRoutes = function(data) {
+        _origRenderRoutes(data);
+        if (_soliVolunteerActive) injectVolunteerCard();
+    };
+    window._renderRoutesWrappedForSoliDemo = true;
+}
+
+// DEMO-SOLI-BLOCK-END
+
+
+// ════════════════════════════════════════════════════════════════════
+// DEMO ONLY — FARO emergency alert mockup, for the Smart City Challenge
+// presentation (SoLi-mockup branch). Represents a real hazard FARO would
+// push to Omnimove (a flood zone near Biblioteca Comunale), drawn in the
+// same visual language CassiTrack already uses for a FARO alert: a dashed
+// zone + a red danger marker + an info popup. Nothing here calls a real
+// API or touches the backend — purely frontend, for screenshots. Added
+// directly (not inside a function tied to search/selection) and stored in
+// its own variables, never in window._previewLayers / _stopMarkers /
+// _networkLayers / _bikeMarkers — those are exactly what selectMode(),
+// showRoutePreview() and clearRoutePreview() sweep when a journey option
+// is picked, so keeping clear of them is what makes this zone and its
+// marker stay on the map through a journey selection instead of getting
+// cleared with the rest of the preview. Safe to delete; additive only.
+// DEMO-FARO-HAZARD-BLOCK-START
+// ════════════════════════════════════════════════════════════════════
+
+// Injected once, scoped to this demo, so the "Flood Emergency" tooltip
+// reads as a red pill tag (matching CassiTrack's alert style) instead of
+// Leaflet's plain default tooltip box.
+(function () {
+    if (document.getElementById('faro-hazard-demo-style')) return;
+    const s = document.createElement('style');
+    s.id = 'faro-hazard-demo-style';
+    s.textContent = `
+        .faro-hazard-tag {
+            background: #ef4444 !important;
+            color: #fff !important;
+            border: none !important;
+            border-radius: 14px !important;
+            font-weight: 800 !important;
+            font-size: 12px !important;
+            padding: 5px 12px !important;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.35) !important;
+        }
+        .faro-hazard-tag::before { border-top-color: #ef4444 !important; }
+    `;
+    document.head.appendChild(s);
+})();
+
+let _faroHazardLayer = null;
+let _faroHazardMarker = null;
+
+// Approximated near the map's own default center (see the L.map(...).setView
+// call above) to sit close to Biblioteca Comunale di Cassino — nudge these
+// two numbers if it doesn't line up with the exact corner once on screen.
+const DEMO_FARO_HAZARD = {
+    center: [41.4908, 13.8290],
+    radius_m: 90,
+    title: 'Flood Emergency',
+    badge: 'HIGH',
+    category: 'Flood · EMERGENCY',
+    description: 'There is a flood emergency in the zone',
+    source: 'faro',
+    reported: '17/09 00:18',
+    ref: 'evt-flood-002',
+    meetingPoint: 'Piazza Diaz'
+};
+
+function faroHazardIcon() {
+    return L.divIcon({
+        html: '<div style="width:32px;height:32px;border-radius:50%;background:#7a1220;' +
+              'border:2px solid #ef4444;display:flex;align-items:center;justify-content:center;' +
+              'font-size:16px;box-shadow:0 2px 10px rgba(0,0,0,0.5)">⚠️</div>',
+        className: '', iconSize: [32, 32], iconAnchor: [16, 16]
+    });
+}
+
+function drawFaroHazardDemo() {
+    clearFaroHazardDemo();
+    const z = DEMO_FARO_HAZARD;
+
+    _faroHazardLayer = L.circle(z.center, {
+        radius: z.radius_m,
+        color: '#ef4444',
+        weight: 2,
+        opacity: 0.9,
+        dashArray: '8,6',
+        fillColor: '#ef4444',
+        fillOpacity: 0.15
+    }).addTo(map);
+
+    const popupHtml = `
+    <div style="font-family:inherit;font-size:12px;min-width:220px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:14px;font-weight:800;color:#0f172a">${escHtml(z.title)}</div>
+            <span style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-size:10px;
+                font-weight:800;padding:2px 7px;border-radius:5px;letter-spacing:0.3px">${escHtml(z.badge)}</span>
+        </div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:8px">${escHtml(z.category)}</div>
+        <div style="font-size:12px;color:#1f2937;margin-bottom:8px;line-height:1.4">${escHtml(z.description)}</div>
+        <div style="font-size:11px;color:#64748b;line-height:1.6">
+            <b style="color:#1f2937">Reported by</b> ${escHtml(z.source)} · ${escHtml(z.reported)}<br>
+            <b style="color:#1f2937">Radius</b> ${z.radius_m} m · ref. ${escHtml(z.ref)}<br>
+            <b style="color:#1f2937">Meeting point:</b> ${escHtml(z.meetingPoint)}
+        </div>
+    </div>`;
+    _faroHazardLayer.bindPopup(popupHtml, { maxWidth: 260 });
+
+    // The marker itself (the red ⚠ badge) is what stays permanently visible —
+    // no click needed to see it, unlike the popup above which is opened on
+    // demand. The tag above it is a permanent tooltip for the same reason:
+    // it should read "Flood Emergency" straight off the map for a screenshot.
+    _faroHazardMarker = L.marker(z.center, { icon: faroHazardIcon(), zIndexOffset: 1000 })
+        .addTo(map)
+        .bindPopup(popupHtml, { maxWidth: 260 })
+        .bindTooltip(z.title, {
+            permanent: true,
+            direction: 'top',
+            offset: [0, -20],
+            className: 'faro-hazard-tag'
+        });
+}
+
+function clearFaroHazardDemo() {
+    if (_faroHazardLayer)  { map.removeLayer(_faroHazardLayer);  _faroHazardLayer  = null; }
+    if (_faroHazardMarker) { map.removeLayer(_faroHazardMarker); _faroHazardMarker = null; }
+}
+
+// Auto-draw once the map exists, and stays drawn — see the block comment
+// above for why selecting a journey option doesn't clear it.
+drawFaroHazardDemo();
+
+// DEMO-FARO-HAZARD-BLOCK-END

@@ -148,6 +148,8 @@
             <div class="cat-chip" data-mode="BUS" onclick="toggleModeChip(this)" data-i18n="chip_bus">🚌 Bus</div>
             <div class="cat-chip" data-mode="BIKE" onclick="toggleModeChip(this)" data-i18n="chip_bike">🚲 Bike</div>
             <div class="cat-chip" data-mode="SCOOTER" onclick="toggleModeChip(this)" data-i18n="chip_scooter">🛴 Scooter</div>
+            <!-- DEMO-SOLI-CHIP -->
+            <div class="cat-chip" id="volunteerChip" data-mode="VOLUNTEER" onclick="toggleVolunteerChip(this)" style="display:none">🤝 Volunteer</div>
         </div>
     </div>
 
@@ -635,6 +637,17 @@
                                 <div class="pref-desc" data-i18n="desc_live_position">Once a journey starts, an arrow on the drawn route shows where you are along it, and we notice when you reach your destination. Your position stays on this device — it is never sent or saved. Turn it off and, while a journey is running, nothing will say where you are relative to the route, and arrival will only be declared when you tap End Journey or when the time runs out.</div>
                             </div>
                             <div class="toggle on" id="prefLivePosition" onclick="togglePref(this)"></div>
+                        </div>
+                    </div>
+                    <!-- DEMO-SOLI-SETTINGS -->
+                    <div class="settings-section" id="soliSection">
+                        <span class="section-label">Accessibility &amp; Volunteer Assistance</span>
+                        <div class="pref-row">
+                            <div>
+                                <div class="pref-label">Link with SoLi (Solidarities Link)</div>
+                                <div class="pref-desc" id="soliLinkDesc">Connect your SoLi volunteer-network account to unlock the Volunteer travel mode — a nearby certified volunteer can accompany you for part of your journey.</div>
+                            </div>
+                            <button class="action-btn btn-dark" id="soliLinkBtn" onclick="linkWithSoli()" style="width:auto;padding:9px 18px;font-size:13px;white-space:nowrap">🔗 Link with SoLi</button>
                         </div>
                     </div>
                     <div class="settings-section">
