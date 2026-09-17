@@ -1,7 +1,11 @@
 package it.unicas.omnimove.service;
 
 import it.unicas.omnimove.model.ApiClient;
+import it.unicas.omnimove.model.ApiClientUsage;
 import it.unicas.omnimove.repository.ApiClientRepository;
+import it.unicas.omnimove.repository.ApiClientUsageRepository;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,8 +20,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.HexFormat;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Issues, checks and revokes the keys partner systems present on
@@ -40,6 +44,7 @@ public class ApiClientService {
     private static final Duration LAST_USED_GRANULARITY = Duration.ofMinutes(1);
 
     private final ApiClientRepository repo;
+    private final ApiClientUsageRepository usage;
     private final SecureRandom random = new SecureRandom();
 
     /** The one moment the plaintext is available. */
@@ -93,8 +98,47 @@ public class ApiClientService {
                 c.setLastUsedAt(now);
                 repo.save(c);
             }
+            recordUsage(c, now);
         });
         return found;
+    }
+
+    /**
+     * One row per authenticated call, for the usage chart in the admin panel.
+     * The endpoint is read from the request this runs in — every caller is a
+     * request handler or filter — so no call site has to pass it along.
+     */
+    private void recordUsage(ApiClient c, Instant now) {
+        try {
+            var attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attrs == null) return;
+            var req = attrs.getRequest();
+            String path = req.getRequestURI().substring(req.getContextPath().length());
+            if (path.length() > 200) path = path.substring(0, 200);
+            usage.save(ApiClientUsage.builder()
+                    .clientId(c.getId()).method(req.getMethod()).endpoint(path).calledAt(now).build());
+        } catch (Exception e) {
+            log.debug("API key usage not recorded: {}", e.getMessage());
+        }
+    }
+
+    public record EndpointCount(String method, String endpoint, long count) {}
+    public record DayCount(String day, long count) {}
+    public record Usage(long total, List<EndpointCount> byEndpoint, List<DayCount> byDay) {}
+
+    /** How a key has been used: in total, per endpoint, and per day over the last {@code days}. */
+    @Transactional(readOnly = true)
+    public Optional<Usage> usage(Long id, int days) {
+        return repo.findById(id).map(c -> {
+            Instant since = Instant.now().minus(days, ChronoUnit.DAYS);
+            List<EndpointCount> byEndpoint = usage.countByEndpoint(id).stream()
+                    .map(r -> new EndpointCount((String) r[0], (String) r[1], ((Number) r[2]).longValue()))
+                    .collect(Collectors.toList());
+            List<DayCount> byDay = usage.countByDay(id, since).stream()
+                    .map(r -> new DayCount(String.valueOf(r[0]), ((Number) r[1]).longValue()))
+                    .collect(Collectors.toList());
+            return new Usage(usage.countByClientId(id), byEndpoint, byDay);
+        });
     }
 
     /** @return the client, or empty if there is no key with that id */

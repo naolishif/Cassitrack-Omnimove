@@ -390,7 +390,7 @@ const USERS_REFRESH_MS = 30000;
 let usersRefreshTimer = null;
 
 function anyModalOpen() {
-    return ['userModal', 'deleteModal', 'activityModal'].some(id => {
+    return ['userModal', 'deleteModal', 'activityModal', 'apiKeyUsageModal'].some(id => {
         const el = document.getElementById(id);
         return el && getComputedStyle(el).display !== 'none';
     });
@@ -808,7 +808,7 @@ async function loadApiKeys() {
                 action = `<span class="muted">${plainWhen(k.revokedAt)}</span>`;
             }
             return `<tr>
-                <td><b>${escHtml(k.label)}</b>${k.createdBy ? `<br><span class="muted">by ${escHtml(k.createdBy)}</span>` : ''}</td>
+                <td><button type="button" class="api-key-label" data-usage-id="${Number(k.id)}" title="Show how this key has been used">${escHtml(k.label)}</button>${k.createdBy ? `<br><span class="muted">by ${escHtml(k.createdBy)}</span>` : ''}</td>
                 <td>${escHtml(k.prefix)}…</td>
                 <td>${fmtWhen(k.createdAt)}</td>
                 <td>${k.expiresAt ? fmtWhen(k.expiresAt) : '<span class="muted">never</span>'}</td>
@@ -904,8 +904,99 @@ document.getElementById('apiKeyLabel').addEventListener('keydown', e => {
 document.querySelector('.api-keys-panel').addEventListener('click', e => {
     const revoke = e.target.closest('.btn-revoke-key');
     if (revoke) { revokeApiKey(revoke.dataset.id, revoke); return; }
+    const label = e.target.closest('.api-key-label');
+    if (label) { openApiKeyUsage(label.dataset.usageId, label.textContent); return; }
     if (e.target.id === 'apiKeyCopyBtn') copyApiKey();
     if (e.target.id === 'apiKeyDoneBtn') dismissApiKey();
+});
+
+// ── API key usage ────────────────────────────────────────────────────────
+// Clicking a key's label opens two charts: calls per endpoint (all time) and
+// calls per day (last 30 days), from /admin/api-keys/{id}/usage.
+let usageEndpointChart = null;
+let usageDayChart = null;
+
+const USAGE_TICK = { color: '#6b7f95', font: { size: 10 } };
+const USAGE_GRID = { color: 'rgba(255,255,255,.05)' };
+
+function destroyUsageCharts() {
+    if (usageEndpointChart) { usageEndpointChart.destroy(); usageEndpointChart = null; }
+    if (usageDayChart)      { usageDayChart.destroy();      usageDayChart = null; }
+}
+
+async function openApiKeyUsage(id, label) {
+    const modal = document.getElementById('apiKeyUsageModal');
+    const meta  = document.getElementById('apiKeyUsageMeta');
+    document.getElementById('apiKeyUsageTitle').textContent = `Usage — ${label}`;
+    meta.textContent = 'Loading…';
+    destroyUsageCharts();
+    modal.style.display = 'flex';
+
+    let u;
+    try {
+        const r = await fetch('/cassitrack/api/v1/admin/api-keys/' + encodeURIComponent(id) + '/usage');
+        if (!r.ok) throw new Error('usage ' + r.status);
+        u = await r.json();
+    } catch (e) {
+        console.error('Could not load API key usage:', e);
+        meta.textContent = 'Could not read the usage of this key.';
+        return;
+    }
+
+    const last30 = u.byDay.reduce((n, d) => n + d.count, 0);
+    meta.innerHTML = `<b>${u.total}</b> call${u.total === 1 ? '' : 's'} in total · `
+                   + `<b>${last30}</b> in the last 30 days · `
+                   + `<b>${u.byEndpoint.length}</b> endpoint${u.byEndpoint.length === 1 ? '' : 's'}`;
+    if (!u.total) {
+        meta.innerHTML += '<br><span class="muted">This key has not been used yet.</span>';
+    }
+
+    // Per endpoint: horizontal bars, most used first, "METHOD /path" labels
+    usageEndpointChart = new Chart(document.getElementById('apiKeyUsageByEndpoint'), {
+        type: 'bar',
+        data: {
+            labels: u.byEndpoint.map(e => `${e.method} ${e.endpoint}`),
+            datasets: [{ data: u.byEndpoint.map(e => e.count),
+                         backgroundColor: 'rgba(59,130,246,.75)', borderRadius: 4 }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true, ticks: { ...USAGE_TICK, precision: 0 }, grid: USAGE_GRID },
+                      y: { ticks: { ...USAGE_TICK, font: { size: 10, family: 'monospace' } }, grid: { display: false } } }
+        }
+    });
+
+    // Per day: one bar per calendar day of the window, zero where nothing happened
+    const byDay = new Map(u.byDay.map(d => [d.day, d.count]));
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        days.push(d.toISOString().slice(0, 10));
+    }
+    usageDayChart = new Chart(document.getElementById('apiKeyUsageByDay'), {
+        type: 'bar',
+        data: {
+            labels: days.map(d => d.slice(5)),
+            datasets: [{ data: days.map(d => byDay.get(d) || 0),
+                         backgroundColor: 'rgba(34,197,94,.7)', borderRadius: 3 }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { ticks: { ...USAGE_TICK, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false } },
+                      y: { beginAtZero: true, ticks: { ...USAGE_TICK, precision: 0 }, grid: USAGE_GRID } }
+        }
+    });
+}
+
+function closeApiKeyUsage() {
+    document.getElementById('apiKeyUsageModal').style.display = 'none';
+    destroyUsageCharts();
+}
+document.getElementById('apiKeyUsageCloseBtn').addEventListener('click', closeApiKeyUsage);
+document.getElementById('apiKeyUsageModal').addEventListener('click', e => {
+    if (e.target.id === 'apiKeyUsageModal') closeApiKeyUsage();
 });
 
 loadApiKeys();

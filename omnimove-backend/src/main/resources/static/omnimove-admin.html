@@ -500,14 +500,15 @@
             <h2 class="settings-h">Partner API keys</h2>
             <p class="settings-note">
                 Keys other systems present as <code>X-Api-Key</code> on
-                <code>/api/partner/v1/**</code> (reachability, CO₂, nearby stops).
+                <code>/api/partner/v1/**</code> (reachability, CO₂, nearby stops,
+                emergency reports). Click a key's label for its usage chart.
                 Only a hash is stored: the key is shown <strong>once</strong>, right
                 after it is generated. A lost key is revoked and replaced, not recovered.
                 Contract: <a href="/omnimove/api/docs/partner" target="_blank" rel="noopener">/api/docs/partner</a>.
             </p>
             <div class="setting-row" style="flex-wrap:wrap;gap:8px">
                 <input class="filter-control" id="apiKeyLabel" type="text" maxlength="100"
-                       placeholder="Label — e.g. FARO UniSannio" style="flex:1 1 220px">
+                       placeholder="Label — e.g. Partner A" style="flex:1 1 220px">
                 <select class="filter-control" id="apiKeyExpiry" style="flex:0 0 auto">
                     <option value="30">Expires in 30 days</option>
                     <option value="90" selected>Expires in 90 days</option>
@@ -532,6 +533,33 @@
                 </tr>
                 </thead>
                 <tbody id="apiKeysTbody"></tbody>
+            </table>
+        </div>
+
+        <!-- The partners' emergency reports, as received: a read-only ledger
+             of what was posted, when it was activated and when it was resolved. -->
+        <div class="settings-card settings-card--table settings-card--wide">
+            <h2 class="settings-h">Partner emergencies</h2>
+            <p class="settings-note">
+                Reports posted by the partner systems on
+                <code>POST /api/partner/v1/road-closures</code>. Stored as received;
+                the journey planner steers walks and rides around the ones in force
+                and flags the options that still pass through one.
+            </p>
+            <div id="hazardsState"></div>
+            <table class="user-table" id="hazardsTable">
+                <thead>
+                <tr>
+                    <th>Event</th>
+                    <th>Type</th>
+                    <th>Severity</th>
+                    <th>Area</th>
+                    <th>Reported by</th>
+                    <th>Activated</th>
+                    <th>Resolved</th>
+                </tr>
+                </thead>
+                <tbody id="hazardsTbody"></tbody>
             </table>
         </div>
     </div>
@@ -586,6 +614,24 @@
 </div>
 
 <!-- DELETE MODAL -->
+<!-- API key usage: how many calls a partner key has made, on which endpoints,
+     and when. Opened by clicking the key's label. -->
+<div class="modal-overlay" id="apiKeyUsageModal">
+    <div class="modal modal-usage">
+        <div class="modal-header">
+            <span id="apiKeyUsageTitle">API key usage</span>
+            <button class="modal-close" onclick="closeApiKeyUsage()">✕</button>
+        </div>
+        <div class="profile-scroll">
+            <div class="profile-id" id="apiKeyUsageMeta"></div>
+            <div class="profile-section">Calls per endpoint</div>
+            <div class="usage-chart-wrap"><canvas id="apiKeyUsageByEndpoint"></canvas></div>
+            <div class="profile-section">Calls per day — last 30 days</div>
+            <div class="usage-chart-wrap"><canvas id="apiKeyUsageByDay"></canvas></div>
+        </div>
+    </div>
+</div>
+
 <div class="modal-overlay" id="deleteModal">
     <div class="modal" style="width:360px;">
         <div class="modal-header">

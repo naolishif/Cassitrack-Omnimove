@@ -501,3 +501,15 @@ td.num  { text-align: right; font-variant-numeric: tabular-nums; }
     border-radius: 8px;
 }
 .api-key-reveal .reveal-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── API key usage (modal opened from the key's label) ─────────────────── */
+.api-key-label {
+    background: none; border: none; padding: 0; margin: 0;
+    font: inherit; font-weight: 700; color: var(--text, #E2E8F0);
+    cursor: pointer; text-decoration: underline dotted var(--dim, #6b7f95);
+    text-underline-offset: 3px;
+}
+.api-key-label:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.usage-chart-wrap { position: relative; height: 180px; margin-bottom: 6px; }
+.usage-chart-wrap.tall { height: 240px; }
+.usage-empty { font-size: 13px; color: var(--dim, #6b7f95); padding: 8px 0 16px; }

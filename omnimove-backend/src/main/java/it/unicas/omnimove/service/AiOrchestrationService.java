@@ -59,6 +59,7 @@ public class AiOrchestrationService {
     private final WeatherService weatherService;
     private final GreenIndexService greenIndexService;
     private final BikeSharingService bikeSharingService;
+    private final HazardService hazardService;
 
     // The shared-mobility tariffs, quoted verbatim rather than guessed
     @Value("${elerent.bike.unlock:1.00}")      private double bikeUnlock;
@@ -83,7 +84,8 @@ public class AiOrchestrationService {
                                   ConsentService consentService,
                                   WeatherService weatherService,
                                   GreenIndexService greenIndexService,
-                                  BikeSharingService bikeSharingService) {
+                                  BikeSharingService bikeSharingService,
+                                  HazardService hazardService) {
         this.cassitrackClient = cassitrackClient;
         this.stopRepository = stopRepository;
         this.routeRepository = routeRepository;
@@ -94,6 +96,7 @@ public class AiOrchestrationService {
         this.weatherService = weatherService;
         this.greenIndexService = greenIndexService;
         this.bikeSharingService = bikeSharingService;
+        this.hazardService = hazardService;
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -368,6 +371,11 @@ public class AiOrchestrationService {
             sb.append("\nWEATHER: unavailable.\n");
         }
 
+        // ── 3b. Emergencies reported by the partner systems ─────────────
+        // What the planner already avoids: the assistant should know why a
+        // route bends, and be able to answer "is there a problem near X?".
+        appendHazards(sb);
+
         // ── 2. Personalisation — only with the traveller's consent ──────
         //
         // Everything below is this person's own history, and it went into the
@@ -405,6 +413,46 @@ public class AiOrchestrationService {
      * uses when Google is unavailable, and are labelled approximate so the
      * assistant does not quote them as routed walking times.
      */
+    /**
+     * The emergencies in force, one line each, placed by the nearest stop.
+     * Listed even when there are none, so the model says "no emergency
+     * reported" rather than guessing.
+     */
+    private void appendHazards(StringBuilder sb) {
+        try {
+            var hazards = hazardService.active();
+            sb.append("\nEMERGENCIES REPORTED BY THE PARTNER SYSTEMS (in force now): ")
+              .append(hazards.isEmpty() ? "none.\n" : hazards.size() + "\n");
+            if (hazards.isEmpty()) return;
+            List<Stop> stops = stopRepository.findAll();
+            for (var h : hazards) {
+                Stop near = nearestStop(stops, h.getLatitude(), h.getLongitude());
+                String type = h.getEventType() == null ? "emergency"
+                        : h.getEventType().replace('_', ' ').toLowerCase();
+                sb.append("  - ").append(h.getTitle() != null ? h.getTitle() : type)
+                  .append(" (").append(type)
+                  .append(h.getSeverity() != null ? ", severity " + h.getSeverity().toLowerCase() : "")
+                  .append(")");
+                sb.append(", affected area: a circle of ").append(h.getRadiusMetres()).append(" m radius");
+                if (near != null)
+                    sb.append(" centred ~").append(Math.round(GeoUtils.haversineMetres(
+                              h.getLatitude(), h.getLongitude(), near.getLat(), near.getLon())))
+                      .append(" m from the stop ").append(near.getName());
+                if (h.getDescription() != null) sb.append(": ").append(h.getDescription());
+                if (h.getMeetingAddress() != null)
+                    sb.append(". Meeting point: ").append(h.getMeetingAddress());
+                else if (h.getMeetingLat() != null)
+                    sb.append(String.format(". Meeting point at %.5f, %.5f", h.getMeetingLat(), h.getMeetingLon()));
+                sb.append(". Reported by ").append(h.getReportedBy()).append(".\n");
+            }
+            sb.append("  Walks, bike and scooter rides are routed around these areas when a\n")
+              .append("  road allows it; bus lines keep their fixed path. An option that still\n")
+              .append("  passes through one is shown with a warning, not hidden.\n");
+        } catch (Exception e) {
+            sb.append("\nEMERGENCIES: unavailable.\n");
+        }
+    }
+
     private String describeFleet(List<BikeVehicleDTO> fleet, ChatRequest.ChatContext ctx) {
         Double oLat = ctx == null ? null : ctx.getOriginLat();
         Double oLon = ctx == null ? null : ctx.getOriginLon();
@@ -658,6 +706,12 @@ public class AiOrchestrationService {
                   on it — and if it is running late or its bus is untracked, say
                   that rather than reaching for another line.
                 - If the weather is bad, warn about bike, scooter and walking.
+                - If an emergency is listed near where the traveller is going,
+                  mention it, say the app routes around it where it can, and
+                  point to the meeting point if there is one. Say only what the
+                  list says — no closed roads, diversions or advice the data does
+                  not contain. Never invent an emergency: if none is listed,
+                  there is none.
                 - If asked about something outside Cassino transport, steer back.
 
                 DOING THINGS, NOT JUST SAYING THEM

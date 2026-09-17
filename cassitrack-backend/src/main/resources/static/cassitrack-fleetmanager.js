@@ -883,7 +883,7 @@ function switchTopView(viewId, btn){
 }
 
 // ── Data Management sub-navigation (Buses / Stops / …) ────────────────────
-function switchDmPanel(panelId, btn){
+function switchDmPanel(panelId, btn, skipLoad = false){
     // Scoped to #data-management: the old #data-management-view was merged away.
     document.querySelectorAll('#data-management .dm-panel').forEach(p=>p.classList.remove('active'));
     const panel = document.getElementById(panelId);
@@ -897,7 +897,9 @@ function switchDmPanel(panelId, btn){
     tripHideDrawer();
 
     if(panelId === 'dm-panel-stops') loadStops();
-    else if(panelId === 'dm-panel-routes') loadRoutesAdmin();
+    // skipLoad: the hazard notice awaits its own loadRoutesAdmin() so it can
+    // open the editor on fresh rows — a second fetch here would race it.
+    else if(panelId === 'dm-panel-routes'){ if(!skipLoad) loadRoutesAdmin(); }
     // Both panels exist: Timetable edits the runs, Trips watches them.
     else if(panelId === 'dm-panel-trips'){
         tripsLoad();               // route names come with the trip rows
@@ -1085,7 +1087,7 @@ function renderRoutesAdmin(){
         const hex = rt.color ? ('#'+rt.color) : null;
         const tr = document.createElement('tr');
         tr.innerHTML = `
-                <td class="bm-mono">${escHtml(rt.id)}</td>
+                <td class="bm-mono">${hzBadgesHtml(rt.id)}${escHtml(rt.id)}</td>
                 <td>${escHtml(rt.shortName)||'—'}</td>
                 <td>${escHtml(rt.longName)||'—'}</td>
                 <td>${hex ? `<span class="rt-swatch" data-bg="${escHtml(hex)}"></span><span class="bm-mono">${escHtml(rt.color)}</span>` : '—'}</td>
@@ -3242,6 +3244,7 @@ if(rtTableBody) rtTableBody.addEventListener('click', e => {
     if(btn.dataset.act === 'edit'){ const rt = rtRoutes.find(x=>x.id===id); if(rt) openRouteForm(rt); }
     else if(btn.dataset.act === 'del'){ deleteRoute(id); }
     else if(btn.dataset.act === 'stops'){ rtToggleStops(id, btn); }
+    else if(btn.dataset.act === 'hazard'){ const h = hzById(btn.dataset.hz); if(h) hzShowModal(h); }
 });
 
 // Fleet Monitor > filters (route + service + min delay)
@@ -4227,4 +4230,237 @@ document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     if (document.getElementById('dmConfirmBackdrop').classList.contains('open')) dmCloseConfirm();
     else if (document.getElementById('dmDrawer').classList.contains('open')) dmCloseDrawer();
+});
+
+// ── Partner road hazards ──────────────────────────
+// Road closures the partner systems POST to /api/v1/road-closures, read back
+// here as /api/v1/hazards with the lines each one hits already worked out by
+// the backend. Three surfaces, all fed by the same poll:
+//   - the fleet map: a circle of the reported radius plus a marker whose
+//     popup carries the partner's details;
+//   - the Routes table: a yellow triangle on every line that runs through an
+//     active hazard, a green tick once the hazard is resolved;
+//   - a notice modal, queued one at a time, for every hazard that appears
+//     or changes status WHILE the screen is open ("Do it now" / "Later").
+//     What is already on the board when the screen opens is shown on the
+//     map and in the table, not announced: the manager just arrived, and a
+//     stack of modals about things that happened earlier is noise.
+// The board is polled every 15 s: a partner's POST is on screen within that.
+const HZ_REFRESH = 15000;
+const HZ_SEV  = { LOW:{color:'#F59E0B', cls:'low'}, MEDIUM:{color:'#F97316', cls:'medium'}, HIGH:{color:'#EF4444', cls:'high'} };
+let hazards = { active: [], resolved: [] };
+let hazardLayer = null;
+const hzQueue = [];              // notices waiting for the modal
+let hzOpen = null;               // hazard currently in the modal
+const hzQueued = new Set();      // `${id}:${status}` already seen this session
+let hzSeeded = false;            // first board read: remember, do not announce
+
+// Anything not LOW or MEDIUM is treated as HIGH: partners may say CRITICAL
+// or EXTREME, and an unknown word on an emergency should not read as mild.
+function hzSev(h){ return HZ_SEV[h.severity] || HZ_SEV.HIGH; }
+// The partner's eventType, made readable: FLOOD → Flood, ROAD_WORKS → Road works
+function hzTypeLabel(h){
+    const t = String(h.type || 'Hazard').replace(/_/g, ' ').toLowerCase();
+    return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function hzHeading(h){ return h.title || hzTypeLabel(h); }
+function hzRouteLabel(r){
+    const name = r.short_name ? `Line ${r.short_name}` : r.id;
+    return r.long_name ? `${name} — ${r.long_name}` : name;
+}
+function hzWhen(iso){
+    if(!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit'}) + ' ' +
+           d.toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit'});
+}
+function hzById(id){
+    return [...hazards.active, ...hazards.resolved].find(h => String(h.id) === String(id)) || null;
+}
+function hzActiveFor(routeId){
+    return hazards.active.filter(h => (h.affected_routes||[]).some(r => r.id === routeId));
+}
+function hzResolvedFor(routeId){
+    return hazards.resolved.filter(h => (h.affected_routes||[]).some(r => r.id === routeId));
+}
+
+async function fetchHazards(){
+    try{
+        const r = await fetch(`${API}/hazards`, {headers:{'Accept':'application/json'}});
+        if(!r.ok) return;
+        const d = await r.json();
+        hazards = { active: d.active || [], resolved: d.resolved || [] };
+    }catch(e){ return; }
+    // Each surface on its own: a drawing problem must never swallow the notice
+    try{ drawHazards(); }catch(e){ console.warn('hazards: map', e); }
+    try{
+        // The Routes table is rebuilt from memory, so its badges follow the fetch
+        const routesPanel = document.getElementById('dm-panel-routes');
+        if(routesPanel && routesPanel.classList.contains('active') && rtRoutes.length) renderRoutesAdmin();
+    }catch(e){ console.warn('hazards: routes table', e); }
+    try{ hzQueueNotices(); }catch(e){ console.warn('hazards: notice', e); }
+}
+
+
+// ── Fleet map ─────────────────────────────────────────────────────────────
+function drawHazards(){
+    if(!map) return;
+    if(!hazardLayer) hazardLayer = L.layerGroup().addTo(map);
+    hazardLayer.clearLayers();
+    hazards.active.forEach(h => {
+        const sev = hzSev(h);
+        L.circle([h.latitude, h.longitude], {
+            radius: h.radius_m, color: sev.color, weight: 2, opacity: .9,
+            fillColor: sev.color, fillOpacity: .18, interactive: false
+        }).addTo(hazardLayer);
+        const marker = L.marker([h.latitude, h.longitude], {
+            icon: L.divIcon({ className: '', html: `<div class="hz-marker hz-${sev.cls}">⚠️</div>`,
+                              iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -14] }),
+            zIndexOffset: 500
+        }).addTo(hazardLayer);
+        marker.bindPopup(hzPopupHtml(h), { maxWidth: 280 });
+    });
+}
+
+function hzPopupHtml(h){
+    const sev = hzSev(h);
+    const lines = (h.affected_routes||[]).map(r => escHtml(hzRouteLabel(r))).join('<br>');
+    return `<div class="hz-popup">
+        <div class="hz-pop-title">${escHtml(hzHeading(h))}
+            <span class="hz-sev hz-sev-${sev.cls}">${escHtml(h.severity||'')}</span></div>
+        <div class="hz-meta">${escHtml(hzTypeLabel(h))}${h.category ? ' · ' + escHtml(h.category) : ''}</div>
+        ${h.description ? `<div class="hz-desc">${escHtml(h.description)}</div>` : ''}
+        <div class="hz-meta">Reported by ${escHtml(h.reported_by||'—')} · ${hzWhen(h.created_at)}<br>
+            Radius ${escHtml(String(h.radius_m))} m · ref. ${escHtml(h.external_id||'')}
+            ${hzMeetingHtml(h)}</div>
+        <div class="hz-lines">${lines ? `<b>Lines through the area:</b><br>${lines}` : 'No line runs through the area.'}</div>
+    </div>`;
+}
+
+function hzMeetingHtml(h){
+    const mp = h.meeting_point;
+    if(!mp || (mp.latitude == null && !mp.address)) return '';
+    const where = mp.address ? escHtml(mp.address)
+                : `${Number(mp.latitude).toFixed(5)}, ${Number(mp.longitude).toFixed(5)}`;
+    return `<br>Meeting point: ${where}`;
+}
+
+// ── Routes table badges ───────────────────────────────────────────────────
+// A triangle per active hazard the line runs through; once every hazard on
+// the line is resolved, a tick that says the path can go back to normal.
+function hzBadgesHtml(routeId){
+    const active = hzActiveFor(routeId);
+    if(active.length)
+        return active.map(h => `<button type="button" class="hz-badge warn" data-act="hazard" data-hz="${escHtml(String(h.id))}"
+            title="${escHtml(hzTypeLabel(h))} (${escHtml(h.severity||'')}) reported by ${escHtml(h.reported_by||'')} — path change recommended">⚠</button>`).join('');
+    const resolved = hzResolvedFor(routeId);
+    if(resolved.length)
+        return resolved.slice(0, 1).map(h => `<button type="button" class="hz-badge ok" data-act="hazard" data-hz="${escHtml(String(h.id))}"
+            title="Hazard resolved (${escHtml(hzTypeLabel(h))}) — the original path can be restored">✓</button>`).join('');
+    return '';
+}
+
+// ── Notice modal ──────────────────────────────────────────────────────────
+function hzQueueNotices(){
+    [...hazards.active, ...hazards.resolved].forEach(h => {
+        const key = `${h.id}:${h.status}`;
+        if(hzQueued.has(key)) return;
+        hzQueued.add(key);
+        if(hzSeeded) hzQueue.push(h);
+    });
+    hzSeeded = true;
+    hzShowNext();
+}
+
+function hzShowNext(){
+    if(hzOpen || !hzQueue.length) return;
+    hzShowModal(hzQueue.shift());
+}
+
+function hzShowModal(h){
+    hzOpen = h;
+    const resolved = h.status === false;
+    const routes = h.affected_routes || [];
+    const sev = hzSev(h);
+
+    document.getElementById('hzModal').classList.toggle('resolved', resolved);
+    document.getElementById('hzIcon').textContent = resolved ? '✅' : '⚠️';
+    document.getElementById('hzTitle').textContent = resolved ? 'Road hazard resolved' : 'Road hazard reported';
+
+    const who = `<b>${escHtml(h.reported_by||'a partner system')}</b>`;
+    const what = `<span class="hz-strong">${escHtml(h.severity||'')} · ${escHtml(hzTypeLabel(h))}</span>`
+               + (h.category ? ` <span class="hz-dim">(${escHtml(h.category)})</span>` : '');
+    const where = `<span class="hz-dim">${Number(h.latitude).toFixed(5)}, ${Number(h.longitude).toFixed(5)} · radius ${escHtml(String(h.radius_m))} m · ref. ${escHtml(h.external_id||'')}${hzMeetingHtml(h)}</span>`;
+    const list = routes.length ? `<ul>${routes.map(r => `<li>${escHtml(hzRouteLabel(r))}</li>`).join('')}</ul>` : '';
+
+    let body;
+    if(resolved){
+        body = `${h.title ? `<p><b>${escHtml(h.title)}</b></p>` : ''}
+                <p>${who} reports that the hazard (${what}, ${hzWhen(h.created_at)}) is over as of ${hzWhen(h.updated_at)}.</p>
+                ${h.description ? `<p>${escHtml(h.description)}</p>` : ''}
+                <p>${where}</p>
+                ${routes.length
+                    ? `<p>The problems on these lines are over — you can restore their original path:</p>${list}`
+                    : `<p>No line was running through the area.</p>`}`;
+    }else{
+        body = `${h.title ? `<p><b>${escHtml(h.title)}</b></p>` : ''}
+                <p>${what} reported by ${who} at ${hzWhen(h.created_at)}.</p>
+                ${h.description ? `<p>${escHtml(h.description)}</p>` : ''}
+                <p>${where}</p>
+                ${routes.length
+                    ? `<p>These lines run through the affected area. <b>Changing their path is strongly recommended.</b></p>${list}`
+                    : `<p>No line runs through the affected area.</p>`}`;
+    }
+    document.getElementById('hzBody').innerHTML = body;
+
+    const actions = document.getElementById('hzActions');
+    actions.innerHTML = '';
+    const mk = (label, cls, onClick) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = cls; b.textContent = label;
+        b.addEventListener('click', onClick);
+        actions.appendChild(b);
+    };
+    if(routes.length){
+        mk('Later', 'bm-btn-ghost', () => { hzAck(h); hzClose(); });
+        routes.forEach(r => mk(`${resolved ? 'Restore' : 'Edit'} now: ${r.short_name ? 'Line ' + r.short_name : r.id}`,
+                               'apply-btn', () => { hzAck(h); hzGoEdit(r.id); }));
+    }else{
+        mk('OK', 'apply-btn', () => { hzAck(h); hzClose(); });
+    }
+    document.getElementById('hzBackdrop').hidden = false;
+}
+
+function hzClose(){
+    document.getElementById('hzBackdrop').hidden = true;
+    hzOpen = null;
+    hzShowNext();
+}
+
+// Acknowledge the current status server-side. Fire-and-forget: the modal
+// has already been shown, and the poll will not re-queue it this session.
+function hzAck(h){
+    if(!h.notice_pending) return;
+    h.notice_pending = false;
+    fetch(`${API}/hazards/${encodeURIComponent(h.id)}/ack`, {method:'POST'}).catch(()=>{});
+}
+
+// "Do it now": straight into the editor of that line, path editor open.
+async function hzGoEdit(routeId){
+    hzClose();
+    switchTopView('data-management', document.getElementById('topBtnDataMgmt'));
+    switchDmPanel('dm-panel-routes', document.getElementById('dmTabRoutes'), true);
+    await loadRoutesAdmin();
+    const rt = rtRoutes.find(x => x.id === routeId);
+    if(!rt){ setRtMsg(`Route ${routeId} not found.`, false); return; }
+    await openRouteForm(rt);
+    const pathBtn = document.getElementById('rtEditPathBtn');
+    if(pathBtn) pathBtn.click();
+    const form = document.getElementById('rtForm');
+    if(form) form.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+window.addEventListener('load', () => {
+    fetchHazards();
+    setInterval(fetchHazards, HZ_REFRESH);
 });

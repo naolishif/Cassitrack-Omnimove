@@ -70,7 +70,7 @@ document.querySelectorAll('.tab').forEach(t=>{
         document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
         t.classList.add('active');
         document.getElementById('pane-'+t.dataset.tab).classList.add('active');
-        if (t.dataset.tab === 'settings') { loadGoogleSettings(); loadRetention(); loadAiNudge(); loadApiKeys(); }
+        if (t.dataset.tab === 'settings') { loadGoogleSettings(); loadRetention(); loadAiNudge(); loadApiKeys(); loadHazards(); }
     });
 });
 
@@ -958,6 +958,131 @@ function deleteUser(id) {
         `Remove "${name}"? This action cannot be undone.`;
     _pendingDeleteId = id;
     document.getElementById('deleteModal').classList.add('open');
+}
+
+// ── Partner emergencies ──────────────────────────────────────────────────
+// A read-only ledger of the reports the partners posted: event, where, who,
+// when it was activated and when it was resolved.
+async function loadHazards() {
+    const state = document.getElementById('hazardsState');
+    const tbody = document.getElementById('hazardsTbody');
+    if (!state || !tbody) return;
+    try {
+        const r = await apiFetch('/admin/road-closures');
+        if (!r.ok) throw new Error('road-closures ' + r.status);
+        const rows = await r.json();
+        state.innerHTML = rows.length ? '' : '<div class="settings-note">No emergency has been reported yet.</div>';
+        tbody.innerHTML = rows.map(function (h) {
+            const sev = String(h.severity || '').toUpperCase();
+            const sevCls = sev === 'LOW' ? 'text-amber' : sev === 'MEDIUM' ? 'text-amber' : 'text-red';
+            const type = String(h.eventType || '').replace(/_/g, ' ').toLowerCase();
+            const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+            const area = Number(h.latitude).toFixed(4) + ', ' + Number(h.longitude).toFixed(4)
+                       + ' · ' + h.radiusMeters + ' m';
+            const resolved = h.status === false
+                ? escHtml(fmtDateTime(h.resolvedAt || h.updatedAt))
+                : '<span class="text-green">in force</span>';
+            return '<tr>'
+                 + '<td>' + escHtml(h.title || h.eventId)
+                 + '<br><span class="sub text-mono">' + escHtml(h.eventId) + '</span>'
+                 + (h.description ? '<br><span class="sub">' + escHtml(h.description) + '</span>' : '')
+                 + '</td>'
+                 + '<td>' + escHtml(typeLabel) + (h.category ? '<br><span class="sub">' + escHtml(h.category) + '</span>' : '') + '</td>'
+                 + '<td class="' + sevCls + '">' + escHtml(sev || '—') + '</td>'
+                 + '<td class="text-mono" style="font-size:11px">' + escHtml(area)
+                 + (h.meetingAddress ? '<br><span class="sub">meeting: ' + escHtml(h.meetingAddress) + '</span>' : '') + '</td>'
+                 + '<td>' + escHtml(h.reportedBy || '—') + '</td>'
+                 + '<td class="text-mono" style="font-size:11px">' + escHtml(fmtDateTime(h.activatedAt)) + '</td>'
+                 + '<td class="text-mono" style="font-size:11px">' + resolved + '</td>'
+                 + '</tr>';
+        }).join('');
+    } catch (e) {
+        console.warn('Could not load partner emergencies:', e);
+        state.innerHTML = '<div class="settings-note text-red">Could not read the partner emergencies.</div>';
+        tbody.innerHTML = '';
+    }
+}
+
+// ── API key usage ────────────────────────────────────────────────────────
+// Clicking a key's label opens two charts: calls per endpoint (all time) and
+// calls per day (last 30 days), from /admin/api-keys/{id}/usage.
+let usageEndpointChart = null;
+let usageDayChart = null;
+const USAGE_TICK = { color: '#7c8ea3', font: { size: 10 } };
+const USAGE_GRID = { color: 'rgba(255,255,255,.05)' };
+
+function destroyUsageCharts() {
+    if (usageEndpointChart) { usageEndpointChart.destroy(); usageEndpointChart = null; }
+    if (usageDayChart)      { usageDayChart.destroy();      usageDayChart = null; }
+}
+
+async function openApiKeyUsage(id, label) {
+    const modal = document.getElementById('apiKeyUsageModal');
+    const meta  = document.getElementById('apiKeyUsageMeta');
+    document.getElementById('apiKeyUsageTitle').textContent = 'Usage — ' + label;
+    meta.textContent = 'Loading…';
+    destroyUsageCharts();
+    modal.classList.add('open');
+
+    let u;
+    try {
+        const r = await apiFetch('/admin/api-keys/' + encodeURIComponent(id) + '/usage');
+        if (!r.ok) throw new Error('usage ' + r.status);
+        u = await r.json();
+    } catch (e) {
+        console.warn('Could not load API key usage:', e);
+        meta.textContent = 'Could not read the usage of this key.';
+        return;
+    }
+
+    const last30 = u.byDay.reduce((n, d) => n + d.count, 0);
+    meta.innerHTML = '<b>' + u.total + '</b> call' + (u.total === 1 ? '' : 's') + ' in total · '
+                   + '<b>' + last30 + '</b> in the last 30 days · '
+                   + '<b>' + u.byEndpoint.length + '</b> endpoint' + (u.byEndpoint.length === 1 ? '' : 's')
+                   + (u.total ? '' : '<br><span class="sub">This key has not been used yet.</span>');
+
+    // Per endpoint: horizontal bars, most used first, "METHOD /path" labels
+    usageEndpointChart = new Chart(document.getElementById('apiKeyUsageByEndpoint'), {
+        type: 'bar',
+        data: {
+            labels: u.byEndpoint.map(e => e.method + ' ' + e.endpoint),
+            datasets: [{ data: u.byEndpoint.map(e => e.count),
+                         backgroundColor: 'rgba(56,189,248,.75)', borderRadius: 4 }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true, ticks: { ...USAGE_TICK, precision: 0 }, grid: USAGE_GRID },
+                      y: { ticks: { ...USAGE_TICK, font: { size: 10, family: 'monospace' } }, grid: { display: false } } }
+        }
+    });
+
+    // Per day: one bar per calendar day of the window, zero where nothing happened
+    const byDay = new Map(u.byDay.map(d => [d.day, d.count]));
+    const days = [];
+    for (let i = 29; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        days.push(d.toISOString().slice(0, 10));
+    }
+    usageDayChart = new Chart(document.getElementById('apiKeyUsageByDay'), {
+        type: 'bar',
+        data: {
+            labels: days.map(d => d.slice(5)),
+            datasets: [{ data: days.map(d => byDay.get(d) || 0),
+                         backgroundColor: 'rgba(52,211,153,.7)', borderRadius: 3 }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { ticks: { ...USAGE_TICK, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false } },
+                      y: { beginAtZero: true, ticks: { ...USAGE_TICK, precision: 0 }, grid: USAGE_GRID } }
+        }
+    });
+}
+
+function closeApiKeyUsage() {
+    document.getElementById('apiKeyUsageModal').classList.remove('open');
+    destroyUsageCharts();
 }
 
 function closeDeleteModal() {
@@ -2096,7 +2221,8 @@ async function loadApiKeys() {
             }
 
             return '<tr>'
-                 + '<td>' + escHtml(k.label)
+                 + '<td><button type="button" class="api-key-label" title="Show how this key has been used" onclick="openApiKeyUsage('
+                 + Number(k.id) + ', this.textContent)">' + escHtml(k.label) + '</button>'
                  + (k.createdBy ? '<br><span class="sub">by ' + escHtml(k.createdBy) + '</span>' : '')
                  + '</td>'
                  + '<td class="text-mono">' + escHtml(k.prefix) + '…</td>'

@@ -71,6 +71,7 @@ public class AdminController {
     private final UserMessageRepository messageRepository;
     private final AdminExportRepository exportRepository;
     private final ApiClientService apiClientService;
+    private final it.unicas.omnimove.repository.RoadClosureRepository roadClosureRepository;
 
     private UserDTO toDTO(User u) {
         return toDTO(u, null);
@@ -647,6 +648,37 @@ public class AdminController {
     // the response that creates it and nowhere else: the list shows only the
     // prefix, and a lost key is replaced, not recovered.
 
+    // == GET /api/v1/admin/road-closures =================================
+    // The emergencies the partners have posted, newest first: what was
+    // reported, by whom, when it was activated and when it was resolved.
+    // Read-only — the partners own their reports; nothing is edited here.
+    @GetMapping("/road-closures")
+    @Operation(summary = "Emergencies reported by the partner systems, newest first")
+    public ResponseEntity<?> roadClosures() {
+        return ResponseEntity.ok(roadClosureRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(c -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id",           c.getId());
+                    m.put("eventId",      c.getExternalId());
+                    m.put("emergencyId",  c.getEmergencyId());
+                    m.put("eventType",    c.getEventType());
+                    m.put("severity",     c.getSeverity());
+                    m.put("category",     c.getCategory());
+                    m.put("title",        c.getTitle());
+                    m.put("description",  c.getDescription());
+                    m.put("latitude",     c.getLatitude());
+                    m.put("longitude",    c.getLongitude());
+                    m.put("radiusMeters", c.getRadiusMetres());
+                    m.put("meetingAddress", c.getMeetingAddress());
+                    m.put("status",       c.getStatus());
+                    m.put("reportedBy",   c.getReportedBy());
+                    m.put("activatedAt",  c.getCreatedAt());
+                    m.put("resolvedAt",   c.getResolvedAt());
+                    m.put("updatedAt",    c.getUpdatedAt());
+                    return m;
+                }).collect(java.util.stream.Collectors.toList()));
+    }
+
     // == GET /api/v1/admin/api-keys ======================================
     @GetMapping("/api-keys")
     @Operation(summary = "List the partner API keys (prefix only, never the key)")
@@ -658,7 +690,7 @@ public class AdminController {
     }
 
     // == POST /api/v1/admin/api-keys =====================================
-    // Body: { "label": "FARO UniSannio", "expiresInDays": 90 }   0 or absent = never
+    // Body: { "label": "Partner A", "expiresInDays": 90 }   0 or absent = never
     @PostMapping("/api-keys")
     @Operation(summary = "Issue a partner API key — the plaintext is returned this once")
     public ResponseEntity<?> createApiKey(@RequestBody Map<String, Object> body,
@@ -693,6 +725,15 @@ public class AdminController {
     // == DELETE /api/v1/admin/api-keys/{id} ==============================
     // Revocation, not deletion: the row stays so the panel can still say which
     // partner had a key, when, and that it was withdrawn.
+    @GetMapping("/api-keys/{id}/usage")
+    @Operation(summary = "How a key has been used: calls in total, per endpoint and per day")
+    public ResponseEntity<?> apiKeyUsage(@PathVariable("id") Long id,
+                                         @RequestParam(name = "days", defaultValue = "30") int days) {
+        return apiClientService.usage(id, Math.max(1, Math.min(days, 365)))
+                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.status(404).body(Map.of("message", "No key with id " + id)));
+    }
+
     @DeleteMapping("/api-keys/{id}")
     @Operation(summary = "Revoke a partner API key")
     public ResponseEntity<?> revokeApiKey(@PathVariable("id") Long id,

@@ -45,13 +45,17 @@ public class GoogleMapsService {
     private final ObjectMapper objectMapper;
     /** The administrator's switches: every call here can be turned off. */
     private final GoogleApiSettingsService settings;
+    /** The partners' emergencies: a route through one is taken only when Google offers no other. */
+    private final HazardService hazards;
 
     public GoogleMapsService(WebClient.Builder webClientBuilder,
                              ObjectMapper objectMapper,
-                             GoogleApiSettingsService settings) {
+                             GoogleApiSettingsService settings,
+                             HazardService hazards) {
         this.webClient    = webClientBuilder.baseUrl(BASE_URL).build();
         this.objectMapper = objectMapper;
         this.settings     = settings;
+        this.hazards      = hazards;
     }
 
     /**
@@ -239,48 +243,76 @@ public class GoogleMapsService {
         try {
             // Coordinates are plain numbers and mode is a fixed keyword, so the
             // URL needs no escaping beyond what the values already are.
+            // alternatives=true: two or three routes for the price of one, so
+            // that a walk or ride can be steered around an emergency the
+            // partners reported without a second call.
             String url = DIRECTIONS_URL
                     + "?origin="      + originLat + "," + originLon
                     + "&destination=" + destLat   + "," + destLon
                     + "&mode="        + mode
+                    + "&alternatives=true"
                     + "&key="         + apiKey;
 
             String response = webClient.get()
                     .uri(URI.create(url))
                     .retrieve().bodyToMono(String.class).block();
 
-            return parseDirections(response);
+            return pickClear(parseDirections(response));
         } catch (Exception e) {
             log.warn("Google Directions fallita ({}): {}", mode, e.getMessage());
             return Optional.empty();
         }
     }
 
-    private Optional<RouteResult> parseDirections(String json) {
+    /**
+     * Google's first route is its best; it is taken unless it passes through
+     * an emergency in force and a later alternative does not. When every
+     * candidate crosses one, the first is kept all the same — the planner
+     * marks the option rather than hiding it — so the caller always gets a
+     * route when Google gave any.
+     */
+    private Optional<RouteResult> pickClear(List<RouteResult> candidates) {
+        if (candidates.isEmpty()) return Optional.empty();
+        var active = hazards.active();
+        if (!active.isEmpty()) {
+            for (RouteResult r : candidates)
+                if (!HazardService.crossesAny(r.points(), active)) {
+                    if (r != candidates.get(0))
+                        log.debug("Google Directions: alternative chosen to avoid an emergency");
+                    return Optional.of(r);
+                }
+            log.debug("Google Directions: every route crosses an emergency, keeping the first");
+        }
+        return Optional.of(candidates.get(0));
+    }
+
+    /** Every route Google returned, in its order: the recommended one first. */
+    private List<RouteResult> parseDirections(String json) {
         try {
             JsonNode root = objectMapper.readTree(json);
 
             String status = root.path("status").asText();
             if (!"OK".equals(status)) {
                 log.warn("Google Directions returned status: {}", status);
-                return Optional.empty();
+                return List.of();
             }
 
-            JsonNode route = root.path("routes").get(0);
-            JsonNode leg   = route.path("legs").get(0);
-
-            long duration = leg.path("duration").path("value").asLong();
-            long distance = leg.path("distance").path("value").asLong();
-            List<double[]> points =
-                    decodePolyline(route.path("overview_polyline").path("points").asText());
-
-            log.debug("Google Directions: dist={}m, {}s, {} punti",
-                    distance, duration, points.size());
-
-            return Optional.of(new RouteResult(duration, distance, points));
+            List<RouteResult> out = new ArrayList<>();
+            for (JsonNode route : root.path("routes")) {
+                JsonNode leg = route.path("legs").get(0);
+                if (leg == null) continue;
+                long duration = leg.path("duration").path("value").asLong();
+                long distance = leg.path("distance").path("value").asLong();
+                List<double[]> points =
+                        decodePolyline(route.path("overview_polyline").path("points").asText());
+                out.add(new RouteResult(duration, distance, points));
+            }
+            log.debug("Google Directions: {} route(s), first dist={}m",
+                    out.size(), out.isEmpty() ? 0 : out.get(0).distanceMetres());
+            return out;
         } catch (Exception e) {
             log.warn("Parsing Google Directions fallito: {}", e.getMessage());
-            return Optional.empty();
+            return List.of();
         }
     }
 

@@ -66,6 +66,7 @@ public class JourneyPlannerService {
     private final it.unicas.omnimove.repository.UserPreferencesRepository preferencesRepository;
     private final GoogleApiSettingsService googleApiSettings;
     private final BikeSharingService bikeSharingService;
+    private final HazardService hazardService;
 
     private static final double SPEED_SCOOTER = 20.0;
     private static final double COST_BUS      = 1.00;
@@ -372,6 +373,17 @@ public class JourneyPlannerService {
         // regardless of which builder produced it
         options.forEach(o -> o.setReliabilityScore(
                 reliabilityOf(o.getMode(), o.getTransferWaitMinutes(), o.getDelayMinutes())));
+
+        // Same idea for the partners' emergencies: walks and rides were already
+        // steered around them where Google offered a way (GoogleMapsService),
+        // bus legs follow a fixed shape and cannot be. Whatever still crosses
+        // one is shown with a warning rather than hidden.
+        hazardService.mark(options, req.isItalian());
+        // …and a line under the weather saying where the problem is, so the
+        // traveller knows why a route bends or why a card carries the badge.
+        msgs.addAll(hazardService.notices(options,
+                req.getOriginLat(), req.getOriginLon(), req.getDestLat(), req.getDestLon(),
+                req.isItalian()));
 
         return JourneyResponse.builder()
                 .options(options)

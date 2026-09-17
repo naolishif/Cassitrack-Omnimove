@@ -873,6 +873,20 @@
     </div>
 
 
+    <!-- Partner hazard notice: an emergency reported by a partner system
+         that a line runs through, or one that has just been resolved.
+         One at a time, queued by the JS. -->
+    <div class="hz-backdrop" id="hzBackdrop" hidden>
+        <div class="hz-modal" id="hzModal" role="dialog" aria-labelledby="hzTitle">
+            <div class="hz-head">
+                <span class="hz-icon" id="hzIcon">⚠️</span>
+                <h4 id="hzTitle">Road hazard reported</h4>
+            </div>
+            <div class="hz-body" id="hzBody"></div>
+            <div class="hz-actions" id="hzActions"></div>
+        </div>
+    </div>
+
     <div id="about-us" class="main-view">
         <div class="about-wrap">
             <h2 class="about-title">About us</h2>
