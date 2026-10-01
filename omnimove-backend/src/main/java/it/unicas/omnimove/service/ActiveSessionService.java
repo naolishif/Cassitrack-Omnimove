@@ -39,7 +39,7 @@ public class ActiveSessionService {
 
     private static final String PREFIX = "session:";
 
-    /** Reported when Redis cannot answer — the dashboard renders it as "—". */
+    /** Reported when Redis cannot answer — the dashboard renders it as "—".   */
     public static final long UNKNOWN = -1L;
 
     private final StringRedisTemplate redis;

@@ -20,6 +20,9 @@ import java.util.Optional;
 public class BikeSharingService {
 
     private static final long CACHE_TTL_MS = 60_000;   // 60 s
+    private static final long ZONES_TTL_MS = CACHE_TTL_MS * 10;   // zones change rarely
+    /** How soon to try again after a failed zone refresh. */
+    private static final long ZONES_RETRY_MS = 30_000;
 
     private final BikeSharingClient client;
     // Cassino city centre — search centre for the whole service area
@@ -54,9 +57,18 @@ public class BikeSharingService {
 
     public synchronized List<BikeZoneDTO> getZones() {
         long now = System.currentTimeMillis();
-        if (cachedZones == null || now - zonesTimestamp > CACHE_TTL_MS * 10) {   // zones change rarely
-            cachedZones = client.getZones();
-            zonesTimestamp = now;
+        if (cachedZones == null || now - zonesTimestamp > ZONES_TTL_MS) {
+            List<BikeZoneDTO> fresh = client.getZones();
+            if (!fresh.isEmpty() || cachedZones == null) {
+                cachedZones = fresh;
+                zonesTimestamp = now;
+            } else {
+                // A failed refresh comes back empty. Zones describe where a ride
+                // may end, so dropping them would silently disable every zone
+                // check and erase the layer from the map over a provider hiccup:
+                // keep the last good set and try again sooner.
+                zonesTimestamp = now - ZONES_TTL_MS + ZONES_RETRY_MS;
+            }
         }
         return cachedZones;
     }
