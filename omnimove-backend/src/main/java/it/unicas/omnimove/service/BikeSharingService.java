@@ -32,6 +32,7 @@ public class BikeSharingService {
 
     private List<BikeVehicleDTO> cachedVehicles;
     private long vehiclesTimestamp = 0;
+    private boolean vehiclesProviderReachable = true;
 
     private List<BikeZoneDTO> cachedZones;
     private long zonesTimestamp = 0;
@@ -49,10 +50,24 @@ public class BikeSharingService {
     public synchronized List<BikeVehicleDTO> getAvailableBikes() {
         long now = System.currentTimeMillis();
         if (cachedVehicles == null || now - vehiclesTimestamp > CACHE_TTL_MS) {
-            cachedVehicles = client.getVehicles(centreLat, centreLon, radiusKm);
+            Optional<List<BikeVehicleDTO>> fresh = client.getVehicles(centreLat, centreLon, radiusKm);
+            // Unlike the zones, a stale position is worse than none: a bike that
+            // has since been ridden away is a wasted walk. Nothing is kept.
+            vehiclesProviderReachable = fresh.isPresent();
+            cachedVehicles = fresh.orElse(List.of());
             vehiclesTimestamp = now;
         }
         return cachedVehicles;
+    }
+
+    /**
+     * Whether the last refresh actually reached the provider. An empty fleet
+     * means two different things to a traveller — "none free right now" and
+     * "we cannot see Elerent" — and the map says which.
+     */
+    public synchronized boolean isVehicleProviderReachable() {
+        getAvailableBikes();
+        return vehiclesProviderReachable;
     }
 
     public synchronized List<BikeZoneDTO> getZones() {

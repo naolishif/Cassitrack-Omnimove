@@ -1380,15 +1380,69 @@ async function fetchAndRenderBikeMarkers() {
     }
     try {
         const r = await apiFetch('/journeys/bikes');
+        // 503 = Elerent unreachable. Nothing is drawn in its place: an invented
+        // bike sends someone to an empty pavement. The notice says which of the
+        // two silences this is, so an empty map does not read as a broken page.
+        if (r.status === 503) {
+            clearBikeMarkers();
+            window._lastBikeList = [];
+            showBikeNotice(t('bike_provider_down'));
+            return;
+        }
         if (!r.ok) throw new Error(r.status);
         const list = await r.json();
         window._lastBikeList = Array.isArray(list) ? list : [];
         renderBikeMarkers(window._lastBikeList);
+        if (window._lastBikeList.length === 0) showBikeNotice(t('bike_none_available'));
+        else hideBikeNotice();
     } catch (e) {
         if (OmniSession.isSessionOver()) return;
         console.warn('[BIKE] fetch failed:', e);
         clearBikeMarkers();
+        showBikeNotice(t('bike_provider_down'));
     }
+}
+
+/**
+ * Avviso sul layer bici. Resta finche' l'utente non lo chiude con la ✕: il
+ * polling ogni 60 s lo riproporrebbe altrimenti a ogni giro, e un messaggio
+ * che si ripresenta da solo e' piu' fastidioso del problema che segnala.
+ */
+function showBikeNotice(msg) {
+    if (window._bikeNoticeDismissed) return;
+    const existing = document.getElementById('bike-notice');
+    if (existing) {                       // gia' visibile: aggiorna solo il testo
+        const span = existing.querySelector('.bike-notice-text');
+        if (span) span.textContent = msg;
+        return;
+    }
+    const el = document.createElement('div');
+    el.id = 'bike-notice';
+    el.style.cssText = [
+        'position:absolute;bottom:120px;left:50%;transform:translateX(-50%)',
+        'background:rgba(30,30,30,0.88);color:#fff;border-radius:10px',
+        'padding:8px 14px;font-size:12px;font-weight:600;z-index:1000',
+        'display:flex;align-items:center;gap:8px;max-width:90%;pointer-events:auto'
+    ].join(';');
+    const text = document.createElement('span');
+    text.className = 'bike-notice-text';
+    text.textContent = msg;
+    const close = document.createElement('span');
+    close.textContent = '✕';
+    close.setAttribute('role', 'button');
+    close.setAttribute('aria-label', 'Chiudi');
+    close.style.cssText = 'cursor:pointer;opacity:0.7;margin-left:4px';
+    close.addEventListener('click', () => {
+        window._bikeNoticeDismissed = true;   // non si ripresenta in questa sessione
+        el.remove();
+    });
+    el.appendChild(text);
+    el.appendChild(close);
+    document.getElementById('map')?.appendChild(el);
+}
+
+function hideBikeNotice() {
+    document.getElementById('bike-notice')?.remove();
 }
 
 async function loadBikeZones() {

@@ -10,11 +10,12 @@ traveller, **in sola lettura**: nessuno sblocco, nessun pagamento, nessuna scrit
 verso Elerent. L'integrazione vive interamente in `omnimove-backend` — CASSITRACK
 non è coinvolto (le bici non sono flotta monitorata, sono dati di disponibilità).
 
-La **App-Public-Key** di Elerent è ora configurata e l'integrazione gira contro la
-piattaforma reale: le **zone disegnate sulla mappa sono quelle di Elerent**. Le
-posizioni dei mezzi sono l'unica cosa che la chiave non apre — `/get-vehicles`
-pretende anche un token bearer di utente — quindi la flotta resta quella
-**simulata** finché Elerent non ne rilascia uno (§1.1).
+L'integrazione gira ora interamente su dati reali: le **zone** arrivano dall'API
+pubblica Sharing con la App-Public-Key di Elerent, e le **posizioni dei mezzi**
+dalla dashboard operatore di Elerent, perché l'API per l'app utente serve i mezzi
+solo per conto di un utente autenticato ed Elerent non ha un id rider da
+prestarci (§1.1). Al loro posto non viene simulato nulla: quando Elerent non è
+raggiungibile il livello bici si svuota e la mappa dice perché (§1.5).
 
 ## Chi è chi: Elerent, ATOM Mobility, RideAtom
 
@@ -64,15 +65,15 @@ Cassino.
 ELERENT_API_MOCK=false
 ELERENT_PUBLIC_KEY=<chiave fornita da Elerent>
 # opzionali:
+ELERENT_DASHBOARD_EMAIL=<dashboard account>                     # vedi §1.1
+ELERENT_DASHBOARD_PASSWORD=<dashboard password>                 # vedi §1.1
 ELERENT_SECRET_KEY=<secret key>                                 # vedi §1.1
-ELERENT_USER_ID=                                                # vedi §1.1
-ELERENT_VEHICLES_FALLBACK_MOCK=true                             # default
 ELERENT_API_URL=https://app.rideatom.com/openapi/v1.0/sharing   # default
 ```
 
 La configurazione corrispondente è in `omnimove-backend/src/main/resources/application.yml`,
-blocco `elerent.api` (base-url, public-key, secret-key, user-id, mock,
-vehicles-fallback-mock, centre-lat, centre-lon, radius-km).
+blocco `elerent.api` (base-url, public-key, secret-key, dashboard-url,
+dashboard-email, dashboard-password, mock, centre-lat, centre-lon, radius-km).
 
 ### Passo 3 — Riavviare omnimove-backend
 
@@ -87,66 +88,95 @@ Non serve altro: frontend, endpoint REST e service sono identici nei due casi.
 
 ### 1.1 Credenziali: cosa apre cosa
 
-La pagina di documentazione presenta l'intero tag *Sharing* come una famiglia
-sola, ma ogni operazione dichiara il proprio requisito di sicurezza e il server
-lo applica:
+Le credenziali in gioco sono diventate tre, perché l'API per l'app utente non
+serve ciò che serve a una mappa:
 
-| Endpoint | Auth richiesta | Stato |
+| Credenziale | Apre | Usata per |
 |---|---|---|
-| `POST /get-zones` | public key | **funziona** — zone Elerent reali |
-| `POST /get-vehicles` | public key **+** secret key **+** `user_id` | **bloccato** — manca l'id del rider |
+| **App-Public-Key** | `POST /openapi/v1.0/sharing/get-zones` | le zone — §1.2 |
+| **Secret key** (account 264) | autentica `get-vehicles`, che però pretende un `user_id` | nulla: conservata nel caso Elerent rilasci un id rider |
+| **Account dashboard** (ruolo operatore) | `POST /api/v2/admin/login/openapi` → `POST /api/v2/admin/vehicles` | le posizioni dei mezzi — §1.4 |
 
-Elerent ha confermato la regola e ci ha dato la **secret key** (account 264,
-flusso `secret_key_authentication`). Viaggia come `Authorization: Bearer …`
-accanto alla public key, e il server la accetta — la chiamata ora fallisce un
-passo più avanti, sul body:
+Vale la pena registrare il vicolo cieco, perché dalla pagina di documentazione
+non si intuisce. `get-vehicles` è progettato per rispondere alla domanda *"cosa
+vede questo utente quando apre l'app"*, quindi con la secret key risponde:
 
 ```
 400 {"message": "Validation failed", "errors": [{"error_info":
      "Value error, user_id is required when using secret key authentication"}]}
 ```
 
-L'autenticazione con secret key agisce **per conto di un utente**, quindi
-`/get-vehicles` vuole l'id di un rider Elerent. L'account id 264 non lo è
-(`User not found.`). Quell'id è l'unico pezzo mancante; `ELERENT_USER_ID` è già
-cablato e lo aspetta.
+L'autenticazione con secret key agisce **per conto di un utente**, e l'account id
+264 contenuto nella chiave non lo è (`User not found.`). Elerent non ha un id
+rider da prestarci, quindi quella strada è chiusa e la secret key resta solo
+nel caso ne rilascino uno.
 
-Ci sono due modi per ottenerlo, ed entrambi sono una decisione di Elerent, non
-nostra:
+La loro risposta è stata darci un **account dashboard**, da cui ora arrivano i
+mezzi. È una credenziale privilegiata e l'integrazione la tratta come tale:
 
-1. **Elerent ci comunica l'id** di un account esistente — idealmente uno creato
-   apposta come account di servizio per OMNIMOVE;
-2. `POST /openapi/v1.0/user/register` ne crea uno con la secret key (email,
-   nome, telefono). **Non** è stato chiamato: crea un rider reale nel sistema di
-   produzione di Elerent, legato a un numero di telefono vero, ed è una scelta
-   di Elerent e del gruppo, non qualcosa da fare esplorando un'API.
+> Il token della dashboard raggiunge anche le operazioni sulla flotta: cambiare
+> lo stato di un mezzo, chiudere una corsa, creare task. Il ruolo che ci hanno
+> dato è *operatore*, che non copre anagrafica clienti né verifica documenti, ma
+> la capacità che resta è reale. `ElerentDashboardClient` chiama esattamente due
+> endpoint, login ed elenco mezzi, e nient'altro nel codice detiene il token. Le
+> credenziali vivono solo in `omnimove-backend/.env` (gitignored) e non devono
+> mai raggiungere il frontend o il repository. Da annotare nella DPIA: *OMNIMOVE
+> detiene credenziali di ruolo operatore presso Elerent, usate in sola lettura su
+> due endpoint, tecnicamente abilitate a operazioni sulla flotta.*
 
-Un **feed GBFS** (§4.1) resterebbe comunque la risposta più pulita: nessuna
-credenziale, nessuna identità di rider, esattamente il dato che serve alla mappa.
+Un **feed GBFS** (§4.1) resterebbe la risposta migliore per tutti: non richiede
+alcuna credenziale, quindi potremmo restituire sia la secret key sia l'account
+dashboard.
 
-Vale la pena essere espliciti su cosa si sta chiedendo, perché la forma dell'API
-si presta a un equivoco: a OMNIMOVE servono le posizioni dei mezzi per la mappa,
-non qualcosa sui clienti di Elerent. L'id del rider è il modo in cui ATOM
-autorizza la query di disponibilità, non un dato che ci interessa — un account
-fittizio di servizio va bene esattamente quanto uno reale. Poiché la chiamata
-viene fatta *come* quel rider, la risposta porta con sé anche le sue cose
-(`selected_payment_method`, corse in atto, importi in corso): il client non ne
-legge nulla, solo id, coordinate, targa, batteria e tipo.
+### 1.4 Posizioni dei mezzi: la via della dashboard
 
-Finché l'id non arriva, `RideAtomClient` tratta qualunque 4xx su `/get-vehicles`
-come un problema di credenziali stabile: logga una volta il messaggio del server
-e delega `getVehicles()` a `MockElerentClient`
-(`elerent.api.vehicles-fallback-mock`, default `true`). Un 5xx o un timeout viene
-invece trattato come un disservizio e non restituisce mezzi, così un guasto vero
-non viene mai mascherato da dati. La mappa mostra quindi una flotta simulata
-dentro zone Elerent reali; mettendo il flag a `false` non si mostra alcun mezzo.
+`POST /api/v2/admin/vehicles` con `filter: ["ACTIVE"]` restituisce i mezzi
+disponibili al noleggio — 28 su tutto l'account al momento in cui si scrive,
+tutti a Cassino. `RideAtomClient` delega `getVehicles()` a
+`ElerentDashboardClient` quando le credenziali dashboard sono configurate, e
+continua a servire le zone da sé.
 
-> **La secret key è una credenziale privilegiata.** È la stessa con cui si
-> autenticano gli endpoint account e admin della piattaforma — elenco utenti,
-> blocco di un rider, accredito sul portafoglio. OMNIMOVE la invia a
-> `/get-vehicles` e a nient'altro, vive solo in `omnimove-backend/.env`
-> (gitignored), e non deve mai finire nel frontend, nel repository o su un
-> endpoint di scrittura. Se trapela, chiedere a Elerent di ruotarla.
+Due chiamate per aggiornamento, unite sull'id del mezzo, perché nessuna delle due
+basta da sola: la **lista paginata** porta `vehicle_number`, la `vehicle_battery`
+esatta e le `coordinates`, mentre la **vista mappa** (`map_view: true`) porta
+`icon`, l'unico campo di questa API che distingua una bici da un monopattino.
+
+Le icone sono numeri opachi, quindi la corrispondenza è dedotta invece che
+scritta a mano: i modelli della flotta si leggono da
+`select_options.vehicle_models`, un modello è una bici quando il nome lo dice
+(`OMNI Dyna bike CAS`) e un monopattino altrimenti (`Segway MAX CAS`,
+`Hongji CAS`), e una query per modello rivela quale icona usa. Il risultato —
+oggi `{645: BIKE, 648: SCOOTER}` — resta in cache sei ore, così un modello
+aggiunto il mese prossimo si classifica da solo invece di comparire con l'icona
+sbagliata.
+
+Il token della dashboard dura **72 ore** e viene conservato fino a poco prima
+della scadenza: un login ogni tre giorni, non uno al minuto. Un 401 lo azzera e
+la chiamata viene ritentata una volta.
+
+### 1.5 Quando non ci sono mezzi da mostrare
+
+Al posto di un dato reale non viene mai disegnato nulla. `MockElerentClient`
+esiste solo per lo sviluppo locale (`elerent.api.mock=true`), non è un ripiego:
+una bici simulata manda un viaggiatore su un marciapiede vuoto.
+
+Un livello bici vuoto ha quindi due cause, e al viaggiatore viene detto quale:
+
+| Situazione | `GET /journeys/bikes` | Cosa mostra la mappa |
+|---|---|---|
+| Elerent irraggiungibile | **503**, lista vuota | "Elerent non risponde: al momento non possiamo mostrare bici e monopattini" |
+| Elerent dice che non c'è nulla | **200**, lista vuota | "Nessuna bici o monopattino Elerent disponibile a Cassino in questo momento" |
+
+L'avviso sta sulla mappa e **lo chiude solo chi legge**, con la sua ✕. Il
+livello si aggiorna ogni 60 s, quindi un avviso che si ripresentasse da solo
+sarebbe più fastidioso del problema che segnala: una volta chiuso resta chiuso
+per quella sessione di pagina.
+
+Le posizioni, a differenza delle zone, **non** vengono conservate dopo un
+aggiornamento fallito. Una bici che nel frattempo è stata presa da qualcun altro
+è una camminata sprecata, quindi una posizione vecchia è peggio di nessuna
+posizione — il compromesso opposto a quello delle zone, che si conservano
+proprio perché cambiano di rado.
 
 ### 1.2 Cosa arriva per Cassino
 
@@ -254,7 +284,8 @@ Componenti (tutti in `omnimove-backend`):
 | Componente | File | Ruolo |
 |---|---|---|
 | Client (interfaccia) | `client/BikeSharingClient.java` | Contratto read-only: `getVehicles()`, `getZones()` |
-| Client reale | `client/RideAtomClient.java` | Chiama RideAtom; parsing tollerante, GeoJSON → `[lat, lon]`, zone filtrate sull'area di servizio; su errore → lista vuota |
+| Client zone | `client/RideAtomClient.java` | Chiama RideAtom per le zone; parsing tollerante, GeoJSON → `[lat, lon]`, filtrate sull'area di servizio; delega i mezzi al client dashboard |
+| Client mezzi | `client/ElerentDashboardClient.java` | Dashboard operatore: login ed elenco mezzi, tipo dedotto dal modello, token tenuto 72 h |
 | Client mock | `client/MockElerentClient.java` | Flotta simulata deterministica (seed fisso) su punti reali di Cassino |
 | Service | `service/BikeSharingService.java` | Cache TTL: 60 s mezzi, 10 min zone |
 | REST | `controller/JourneyController.java` | `GET /api/v1/journeys/bikes`, `GET /api/v1/journeys/bikes/zones` |

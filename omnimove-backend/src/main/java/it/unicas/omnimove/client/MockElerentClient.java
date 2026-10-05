@@ -9,13 +9,14 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 
 /**
- * Simulated Elerent fleet for Cassino. It is the whole provider while
- * elerent.api.mock=true, and it stays available afterwards as the vehicle
- * fallback of {@link RideAtomClient}, whose /get-vehicles call the
- * App-Public-Key alone cannot open.
+ * Simulated Elerent fleet for Cassino, used only when elerent.api.mock=true —
+ * local development without credentials. It is never a fallback: when the real
+ * provider cannot be reached the map shows no vehicles at all, rather than
+ * inventing some.
  *
  * Positions are spread around real Cassino landmarks with a fixed
  * random seed, so the fleet is stable across calls and restarts —
@@ -42,13 +43,12 @@ public class MockElerentClient implements BikeSharingClient {
         this.fleet = buildFleet();
         this.zones = buildZones();
         log.info("MockElerentClient ready — {} simulated vehicles in Cassino "
-                + "(used as the provider when elerent.api.mock=true, and as the "
-                + "vehicle fallback of RideAtomClient otherwise)", fleet.size());
+                + "(active only while elerent.api.mock=true)", fleet.size());
     }
 
     @Override
-    public List<BikeVehicleDTO> getVehicles(double lat, double lon, int radiusKm) {
-        return fleet;
+    public Optional<List<BikeVehicleDTO>> getVehicles(double lat, double lon, int radiusKm) {
+        return Optional.of(fleet);
     }
 
     @Override

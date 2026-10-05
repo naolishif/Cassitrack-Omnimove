@@ -113,16 +113,21 @@ weather:
     country: IT
 
 # ── Elerent Shared Mobility Pricing ──────────────────────────
+# Fonte: https://elerent.com/prezzi, voce "Cassino" (letta il 2026-10-05).
+# Le tariffe cambiano da citta' a citta', quindi vale solo quella voce.
 elerent:
   bike:
     unlock: 1.00
+    # Per Cassino il listino pubblico non espone una tariffa bici: la voce
+    # parla solo di monopattini, mentre la flotta include 8 OMNI Dyna bike.
+    # Questo valore e' quindi da confermare con Elerent, non e' loro dato.
     per-minute: 0.29
   scooter:
     unlock: 1.00          # canone fisso, addebitato all'avvio
     per-minute: 0.25      # anche mentre la corsa e' in pausa
-    # Trattenuta temporanea di 5.00 EUR: non entra nel costo del viaggio
-    # perche' viene restituita a fine corsa. E' dichiarata nel listino.
-    deposit: 5.00
+    # Pre-autorizzazione: non entra nel costo del viaggio perche' viene
+    # restituita a fine corsa. Per Cassino il listino dice 3,00 EUR.
+    deposit: 3.00
   # ── Elerent live availability (ATOM Mobility / RideAtom API) ──
   # All Sharing endpoints are POST + App-Public-Key header, which selects
   # Elerent's installation on the shared platform. mock=true replaces the
@@ -130,15 +135,19 @@ elerent:
   api:
     base-url: ${ELERENT_API_URL:https://app.rideatom.com/openapi/v1.0/sharing}
     public-key: ${ELERENT_PUBLIC_KEY:}
-    # /get-vehicles also requires Elerent's secret key (sent as a bearer token)
-    # and the id of an Elerent rider to query on behalf of. The public key alone
-    # opens /get-zones only. Never send the secret key to a write endpoint.
+    # The public key alone opens /get-zones only. The secret key authenticates
+    # /get-vehicles but that endpoint then demands a rider id Elerent has none
+    # to give, so vehicles come from the dashboard below instead.
+    # Never send the secret key to a write endpoint.
     secret-key: ${ELERENT_SECRET_KEY:}
-    user-id: ${ELERENT_USER_ID:}
+    # Operator dashboard: the only route to vehicle positions that needs no
+    # rider identity. When these are set they take precedence over the Sharing
+    # API for vehicles; zones keep coming from the Sharing API either way.
+    # Privileged credentials — see elerent_it.md §1.1.
+    dashboard-url: ${ELERENT_DASHBOARD_URL:https://app.rideatom.com}
+    dashboard-email: ${ELERENT_DASHBOARD_EMAIL:}
+    dashboard-password: ${ELERENT_DASHBOARD_PASSWORD:}
     mock: ${ELERENT_API_MOCK:true}
-    # While /get-vehicles answers 401, serve the simulated fleet rather than an
-    # empty map (the real zones are drawn around it either way).
-    vehicles-fallback-mock: ${ELERENT_VEHICLES_FALLBACK_MOCK:true}
     # Cassino centre: the account covers every Elerent city, so vehicles are
     # requested and zones filtered around here.
     centre-lat: 41.4901

@@ -1020,17 +1020,24 @@ public class JourneyController {
      * GET /api/v1/journeys/bikes
      *
      * Available Elerent shared bikes/scooters around Cassino, for the
-     * traveller map. Data comes from BikeSharingService (60 s cache over
-     * the RideAtom API, or the mock provider when no key is configured).
-     * Read-only: never errors, at worst returns [].
+     * traveller map. Data comes from BikeSharingService (60 s cache over the
+     * Elerent dashboard API).
+     *
+     * 503 with an empty list when Elerent cannot be reached, 200 with an empty
+     * list when Elerent says nothing is free. The map draws neither, but it
+     * tells the traveller which of the two happened instead of leaving them
+     * with a blank area that reads like a broken page.
      */
     @GetMapping("/bikes")
     @Operation(summary = "Available shared bikes/scooters (Elerent) around Cassino")
     public ResponseEntity<List<BikeVehicleDTO>> bikes() {
         try {
-            return ResponseEntity.ok(bikeSharingService.getAvailableBikes());
+            List<BikeVehicleDTO> fleet = bikeSharingService.getAvailableBikes();
+            return bikeSharingService.isVehicleProviderReachable()
+                    ? ResponseEntity.ok(fleet)
+                    : ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Collections.emptyList());
         } catch (Exception e) {
-            return ResponseEntity.ok(Collections.emptyList());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Collections.emptyList());
         }
     }
 

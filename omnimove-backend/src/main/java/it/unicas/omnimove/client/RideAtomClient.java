@@ -18,9 +18,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -32,11 +32,9 @@ import java.util.regex.Pattern;
  * is what selects Elerent's installation out of the shared platform.
  *
  * Only /get-zones is reachable with the public key alone. /get-vehicles
- * additionally requires Elerent's secret key as a bearer token AND the id of
- * an Elerent rider to query on behalf of ({@code elerent.api.secret-key},
- * {@code elerent.api.user-id}); without either, the endpoint refuses the call
- * and the simulated fleet keeps the map populated — see
- * {@code elerent.api.vehicles-fallback-mock}.
+ * answers solely on behalf of a signed-in rider, an identity Elerent has none
+ * to lend, so vehicle positions come from {@link ElerentDashboardClient}
+ * instead and this class serves the zones.
  *
  * The secret key is a privileged credential: it is only ever sent to the two
  * read-only endpoints below, never to an endpoint that starts a ride, moves
@@ -72,12 +70,10 @@ public class RideAtomClient implements BikeSharingClient {
     private final WebClient webClient;
     private final String publicKey;
     private final String secretKey;
-    private final String userId;
     private final double centreLat;
     private final double centreLon;
     private final int radiusKm;
-    private final boolean vehiclesFallbackMock;
-    private final ObjectProvider<MockElerentClient> mockProvider;
+    private final ObjectProvider<ElerentDashboardClient> dashboardProvider;
 
     /** Missing vehicle credentials are a standing condition, not an incident: warn once. */
     private boolean vehiclesUnauthorisedLogged = false;
@@ -86,37 +82,39 @@ public class RideAtomClient implements BikeSharingClient {
             @Value("${elerent.api.base-url}") String baseUrl,
             @Value("${elerent.api.public-key:}") String publicKey,
             @Value("${elerent.api.secret-key:}") String secretKey,
-            @Value("${elerent.api.user-id:}") String userId,
             @Value("${elerent.api.centre-lat:41.4901}") double centreLat,
             @Value("${elerent.api.centre-lon:13.8303}") double centreLon,
             @Value("${elerent.api.radius-km:5}") int radiusKm,
-            @Value("${elerent.api.vehicles-fallback-mock:true}") boolean vehiclesFallbackMock,
-            ObjectProvider<MockElerentClient> mockProvider) {
+            ObjectProvider<ElerentDashboardClient> dashboardProvider) {
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .codecs(c -> c.defaultCodecs().maxInMemorySize(MAX_RESPONSE_BYTES))
                 .build();
         this.publicKey = publicKey;
         this.secretKey = secretKey;
-        this.userId = userId;
         this.centreLat = centreLat;
         this.centreLon = centreLon;
         this.radiusKm = radiusKm;
-        this.vehiclesFallbackMock = vehiclesFallbackMock;
-        this.mockProvider = mockProvider;
-        log.info("RideAtomClient → {} (public key {}, secret key {}, user id {}, vehicle fallback {})",
-                baseUrl,
+        this.dashboardProvider = dashboardProvider;
+        log.info("RideAtomClient → {} (public key {}, secret key {})", baseUrl,
                 publicKey.isBlank() ? "MISSING" : "configured",
-                secretKey.isBlank() ? "absent" : "configured",
-                userId.isBlank() ? "absent" : userId,
-                vehiclesFallbackMock ? "on" : "off");
+                secretKey.isBlank() ? "absent" : "configured");
     }
 
     @Override
-    public List<BikeVehicleDTO> getVehicles(double lat, double lon, int radiusKm) {
+    public Optional<List<BikeVehicleDTO>> getVehicles(double lat, double lon, int radiusKm) {
+        // The Sharing API will not serve vehicles without a rider identity, so
+        // when the operator dashboard is configured the positions come from
+        // there instead. Zones keep coming from the Sharing API below.
+        ElerentDashboardClient dashboard = dashboardProvider.getIfAvailable();
+        if (dashboard != null && dashboard.isConfigured()) {
+            Optional<List<BikeVehicleDTO>> fleet = dashboard.getVehicles(lat, lon, radiusKm);
+            if (fleet.isEmpty()) vehiclesUnavailable("the Elerent dashboard could not be reached");
+            return fleet;
+        }
         if (publicKey.isBlank()) {
             log.warn("RideAtom: App-Public-Key not configured, returning no vehicles");
-            return Collections.emptyList();
+            return Optional.empty();
         }
         try {
             WebClient.RequestBodySpec request = webClient.post()
@@ -125,19 +123,19 @@ public class RideAtomClient implements BikeSharingClient {
             if (!secretKey.isBlank()) {
                 request = request.header("Authorization", "Bearer " + secretKey);
             }
-            Map<String, Object> body = new LinkedHashMap<>(Map.of(
-                    "user_latitude", lat,
-                    "user_longitude", lon,
-                    "radius_in_km", radiusKm));
-            // Secret-key authentication acts on behalf of a rider, and the API
-            // rejects the call without one
-            if (!userId.isBlank()) body.put("user_id", Integer.parseInt(userId));
+            // No user_id: secret-key authentication acts on behalf of a rider
+            // and Elerent has none to lend, so this call can only fail. It stays
+            // for the case where the dashboard is not configured, and its
+            // failure is what hands over to the simulated fleet.
             JsonNode root = request
-                    .bodyValue(body)
+                    .bodyValue(Map.of(
+                            "user_latitude", lat,
+                            "user_longitude", lon,
+                            "radius_in_km", radiusKm))
                     .retrieve()
                     .bodyToMono(JsonNode.class)
                     .block(TIMEOUT);
-            if (root == null) return Collections.emptyList();
+            if (root == null) return Optional.empty();
 
             // Querying on behalf of a rider makes the response carry that rider's
             // own business — selected_payment_method, active rides, running
@@ -169,7 +167,7 @@ public class RideAtomClient implements BikeSharingClient {
                         .build());
             }
             log.debug("RideAtom: {} vehicles within {} km", result.size(), radiusKm);
-            return result;
+            return Optional.of(result);
         } catch (WebClientResponseException e) {
             // 4xx means the credentials are missing or not accepted — a standing
             // condition to fall back from. A 5xx is an outage: report nothing.
@@ -177,33 +175,32 @@ public class RideAtomClient implements BikeSharingClient {
                 return vehiclesUnauthorised(e.getStatusCode().value(), e.getResponseBodyAsString());
             }
             log.warn("RideAtom /get-vehicles failed: {}", e.getMessage());
-            return Collections.emptyList();
+            return Optional.empty();
         } catch (Exception e) {
             log.warn("RideAtom /get-vehicles unreachable: {}", e.getMessage());
-            return Collections.emptyList();
+            return Optional.empty();
         }
     }
 
     /**
-     * /get-vehicles is the one endpoint we need that the App-Public-Key does not
-     * open on its own. Rather than emptying the map — which would also remove the
-     * bike and scooter options from the planner — fall back to the simulated
-     * fleet, while the zones around it stay real.
+     * No vehicles to show. Nothing is invented in their place: a simulated bike
+     * drawn where none exists would send a traveller to an empty pavement, so
+     * the layer simply disappears and the planner drops the bike and scooter
+     * options until the provider answers again.
      */
-    private List<BikeVehicleDTO> vehiclesUnauthorised(int status, String responseBody) {
-        MockElerentClient fallback = vehiclesFallbackMock ? mockProvider.getIfAvailable() : null;
+    private Optional<List<BikeVehicleDTO>> vehiclesUnauthorised(int status, String responseBody) {
+        return vehiclesUnavailable(String.format("/get-vehicles refused the call (%d %s). "
+                + "It needs a rider id Elerent cannot provide; configure "
+                + "elerent.api.dashboard-email and dashboard-password instead",
+                status, responseBody.strip()));
+    }
+
+    private Optional<List<BikeVehicleDTO>> vehiclesUnavailable(String why) {
         if (!vehiclesUnauthorisedLogged) {
             vehiclesUnauthorisedLogged = true;
-            log.warn("RideAtom /get-vehicles refused the call ({} {}). It needs "
-                    + "elerent.api.secret-key plus elerent.api.user-id, the id of an Elerent "
-                    + "rider to query on behalf of. {}", status, responseBody.strip(),
-                    fallback != null
-                            ? "Serving the simulated fleet meanwhile (zones stay real)."
-                            : "No vehicles will be shown.");
+            log.warn("Elerent: no vehicle positions — {}. The bike layer stays empty.", why);
         }
-        return fallback != null
-                ? fallback.getVehicles(centreLat, centreLon, radiusKm)
-                : Collections.emptyList();
+        return Optional.empty();
     }
 
     @Override
