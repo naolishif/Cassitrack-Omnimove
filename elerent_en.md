@@ -229,8 +229,17 @@ before accepting it. Each zone offers two candidates — just inside its nearest
 edge, and its middle — because the bays are 10–200 m across and an edge point can
 be unusable while the middle is fine.
 
+A destination can fail in three different ways, and the traveller is told which,
+because they are not the same news: inside a **no-parking zone** (a local rule —
+26 of the 1249 test points), inside a **no-go zone** (Elerent does not operate
+there at all — 957 points, nearly all of them the mountainside and the outskirts
+covered by zone 4411), or simply **outside every parking zone** (149 points).
+Reporting the second as the first used to explain the wrong thing: "you cannot
+park here" when the honest answer was "the service does not reach here".
+
 Measured over 1249 destinations spread within 2 km of the centre, every drop-off
-produced is now legal (it was 971 out of 1132 illegal before the fix). How often
+produced is legal (it was 971 out of 1132 illegal before the drop-off search was
+rewritten). How often
 a traveller sees the notice depends on where they are going:
 
 | Distance from the centre | Destinations where the ride can end as-is |

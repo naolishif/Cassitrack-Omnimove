@@ -85,7 +85,7 @@ public class JourneyPlannerService {
      * look more expensive than it is and skew the budget ranking. It is only
      * disclosed, so the figure the traveller sees here matches the fare list.
      */
-    @Value("${elerent.scooter.deposit:5.00}")
+    @Value("${elerent.scooter.deposit:3.00}")
     private double scooterDeposit;
 
     /** How far before the deadline the first pass starts looking. */
@@ -881,7 +881,11 @@ public class JourneyPlannerService {
                         + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."
                     : "ℹ️ No Elerent parking zone at the destination: the ride ends at the nearest one, "
                         + "last " + fmtDist(lastWalk.metres()) + " on foot.";
-            // Covers both zones the provider forbids: no-parking and no-go
+            case NO_GO -> req.isItalian()
+                    ? "ℹ️ Elerent non opera alla destinazione: la corsa termina al limite dell'area servita, "
+                        + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."
+                    : "ℹ️ Elerent does not operate at the destination: the ride ends at the edge of the "
+                        + "served area, last " + fmtDist(lastWalk.metres()) + " on foot.";
             case NO_PARKING -> req.isItalian()
                     ? "ℹ️ Destinazione in zona Elerent vietata: la corsa termina nel parcheggio valido più vicino, "
                         + "ultimi " + fmtDist(lastWalk.metres()) + " a piedi."

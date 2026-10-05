@@ -229,8 +229,18 @@ possa lasciare il mezzo. I due vincoli vanno risolti insieme, quindi
 appena dentro il bordo più vicino, e il suo centro — perché gli stalli sono larghi
 10–200 m e un punto sul bordo può essere inutilizzabile mentre il centro va bene.
 
+Una destinazione può risultare non valida per tre motivi diversi, e al viaggiatore
+viene detto quale, perché non sono la stessa notizia: dentro una **zona di divieto
+di sosta** (una regola locale — 26 dei 1249 punti di prova), dentro una **no-go
+zone** (Elerent lì non opera affatto — 957 punti, quasi tutti la montagna e la
+periferia coperte dalla zona 4411), oppure semplicemente **fuori da ogni stallo**
+(149 punti). Riportare il secondo caso come il primo spiegava la cosa sbagliata:
+"qui non puoi parcheggiare" quando la risposta onesta era "il servizio non arriva
+fin qui".
+
 Misurato su 1249 destinazioni distribuite entro 2 km dal centro, ogni drop-off
-prodotto è ora legale (prima erano 971 su 1132 non validi). Quanto spesso il
+prodotto è legale (prima della riscrittura della ricerca erano 971 su 1132 non
+validi). Quanto spesso il
 viaggiatore vede l'avviso dipende da dove sta andando:
 
 | Distanza dal centro | Destinazioni dove la corsa può terminare così com'è |

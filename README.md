@@ -442,8 +442,8 @@ curl -H "X-Api-Key: $SSE_API_TOKEN" http://localhost:8280/cassitrack/api/static/
 | Mode | Provider | Fare | CO₂ (g/pax·km) |
 |---|---|---|---|
 | 🚌 Bus | Cassino urban network | €1.00 per boarding (a change costs two) | 68 |
-| 🚲 Bike | Elerent | €1.00 unlock + €0.29/min | 0 |
-| 🛴 E-Scooter | Elerent | €1.00 unlock + €0.25/min (+ €5.00 refundable hold) | 0 |
+| 🚲 Bike | Elerent | €1.00 unlock + €0.29/min (rate unconfirmed: Elerent publishes no bike tariff for Cassino) | 0 |
+| 🛴 E-Scooter | Elerent | €1.00 unlock + €0.25/min (+ €3.00 refundable hold) | 0 |
 | 🚶 Walk | — | free | 0 |
 
 Green Index = `100 − (CO₂ / CO₂ of the same trip by car) × 100`, with the car
