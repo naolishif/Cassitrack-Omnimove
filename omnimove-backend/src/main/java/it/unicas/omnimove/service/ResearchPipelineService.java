@@ -70,7 +70,8 @@ public class ResearchPipelineService {
     void validateConfiguration() {
         if (!enabled) {
             log.info("Research pipeline disabled (omnimove.research.enabled=false). "
-                   + "Journey retention is NOT being enforced.");
+                   + "Journey retention is still enforced, by DataRetentionService; "
+                   + "what is missing is the anonymised aggregate privacy.html § 7 describes.");
             return;
         }
         // Fail fast rather than self-disabling: a silently inactive pipeline means

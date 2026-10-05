@@ -36,11 +36,11 @@ The data is the real Cassino urban network, not a demo line:
 
 | | |
 |---|---|
-| Lines | **18**, each uniquely numbered and colour-coded; every non-loop line also has its return as a line of its own (`<id>_R`) |
+| Lines | **18**, each uniquely numbered and colour-coded. 12 of them have their return as a line of its own (`<id>_R`) and 6 are loops, so `routes` holds **30 rows** |
 | Stops | **45**, with real coordinates (a handful interpolated between surveyed ones) |
-| Trips | Departures **every 30 minutes, 06:00 → 23:00, both directions** |
-| Vehicles | **37** registered buses; four of them are bound to physical ESP32/OBU units (`BUS1`…`BUS4`) |
-| Geometry | All 18 lines have a road-routed polyline in `route_shapes` (OSRM-generated, editable on the map), so buses follow streets instead of cutting across blocks |
+| Trips | **1 048**, departing **every 30 minutes from 06:00 to 23:30**, both directions — the headway is uniform across the network |
+| Vehicles | **37** registered buses, each with its `current_vehicle_id` assigned; four of them are bound to physical ESP32/OBU units (`BUS1`…`BUS4`) |
+| Geometry | All **30** routes have a road-routed polyline in `route_shapes` (OSRM-generated, editable on the map), so buses follow streets instead of cutting across blocks |
 
 The stop pattern belongs to the **line** (`route_stops`), the times belong to the
 **trip** (`scheduled_stops`) — the same JourneyPattern / ServiceJourney split
@@ -131,9 +131,10 @@ ESP32 / OBU units                    gps_simulator3.py  ·  tools/simulate_bus*.
 | Accounts | Email/password with verification, password reset, Sign in with Google, optional reCAPTCHA v2 on login |
 | Admin console | Users, analytics, retention runs, UI/security/Google feature switches, analytics export |
 | Messages | Travellers can write to the operators; replies land in the app |
-| Bilingual UI | English and Italian, ~235 translated strings |
+| Account closure notice | An inactive account is warned before it is closed, in its own language |
+| Bilingual UI | English and Italian, ~545 translated strings per language |
 | GDPR layer | Privacy notice, cookie policy, consent ledger, personal-data export, nightly retention, three-tier research pipeline (off by default) |
-| Rate limiting | Per-account hourly caps on journey search and stop arrivals — a cost ceiling as much as an abuse one |
+| Rate limiting | Per-account hourly caps — 120 journey searches, 300 stop-arrival lookups — a cost ceiling as much as an abuse one, since a search can bill a Google Distance Matrix call |
 
 ---
 
@@ -175,8 +176,9 @@ cassitrack_&_omnimove/
 │   └── src/main/
 │       ├── java/it/unicas/cassitrack/
 │       │   ├── config/                 # MQTT (local + OBU), Influx, Security, Web
-│       │   ├── controller/             # vehicles, buses, trips, routes, stops, analytics,
-│       │   │                           #   reports, users, auth, ai, siri, netex, telemetry
+│       │   ├── controller/             # vehicles, buses, trips, routes, stops, timetable,
+│       │   │                           #   analytics, reports, users, auth, ai, siri, netex,
+│       │   │                           #   telemetry/SSE, hazards, road closures, API keys
 │       │   ├── service/                # trip resolution, adherence, ETA, analytics,
 │       │   │                           #   route patterns/edit, report export, audit
 │       │   ├── mqtt/MqttMessageHandler.java
@@ -184,7 +186,7 @@ cassitrack_&_omnimove/
 │       │   ├── model/  repository/  security/
 │       └── resources/
 │           ├── application.yml
-│           ├── db/migration/           # Flyway V1 … V28
+│           ├── db/migration/           # Flyway V1 … V32
 │           └── static/                 # login, fleet manager, admin (HTML/CSS/JS)
 │
 ├── omnimove-backend/                   # Journey planner — port 8180, context /omnimove
@@ -193,15 +195,16 @@ cassitrack_&_omnimove/
 │   ├── .env.example
 │   └── src/main/
 │       ├── java/it/unicas/omnimove/
-│       │   ├── client/                 # CassitrackClient, RideAtom/Elerent, mock provider
-│       │   ├── controller/             # journeys, traveller, admin, auth, privacy, ai
+│       │   ├── client/                 # CassitrackClient, Elerent (zones + dashboard), mock
+│       │   ├── controller/             # journeys, traveller, admin, auth, privacy, ai,
+│       │   │                           #   partner API, road closures
 │       │   ├── service/                # planner, green index, preferences, sync (static +
 │       │   │                           #   telemetry), weather, Google Maps, consent,
 │       │   │                           #   retention, research pipeline, mail, rate limiting
 │       │   ├── security/  model/  repository/  util/
 │       └── resources/
 │           ├── application.yml
-│           ├── db/migration/           # Flyway V1 … V35
+│           ├── db/migration/           # Flyway V1 … V42
 │           └── static/                 # traveller app, admin console, login, privacy,
 │                                       #   cookie policy, self-hosted fonts + Leaflet + Chart.js
 │
@@ -209,6 +212,8 @@ cassitrack_&_omnimove/
 ├── gps_simulator3.py                   # motion simulator — delay, early running, breakdowns emerge
 ├── tools/
 │   ├── simulate_bus.py                 # reference simulator (free-running)
+│   ├── backfill_analytics.py           # replay history into the analytics tables
+│   ├── obu_inventory.py                # what each physical OBU unit is broadcasting
 │   ├── simulate_bus_scheduled.py       # timetable-following variant
 │   ├── build_route_shapes_osrm.py      # generate route geometry from a routing engine
 │   ├── import_route_shapes.py          # import geometry drawn with crea_path.html
@@ -250,9 +255,16 @@ least 32 characters in both.
 
 Everything else degrades gracefully when left **empty**: no `GOOGLE_MAPS_API_KEY`
 means haversine ETAs, no `AI_API_KEY` means canned assistant answers, no
-`ELERENT_PUBLIC_KEY` means the mock bike fleet, no `GOOGLE_OAUTH_CLIENT_ID`
-means the login page simply does not draw the Google button, no
-`RECAPTCHA_*` keys means the login check stays off whatever the admin switch says.
+`GOOGLE_OAUTH_CLIENT_ID` means the login page simply does not draw the Google
+button, no `RECAPTCHA_*` keys means the login check stays off whatever the admin
+switch says.
+
+The bike layer is the one exception to "empty is fine", because it has two
+halves: `ELERENT_PUBLIC_KEY` fetches the zones and `ELERENT_DASHBOARD_EMAIL` /
+`ELERENT_DASHBOARD_PASSWORD` fetch the vehicles. Without them the layer stays
+empty and says so on the map — nothing is simulated in its place. For local
+development without credentials, set `ELERENT_API_MOCK=true` to get a simulated
+fleet around Cassino instead (`elerent_en.md` §1.1).
 
 Keep the *variables* present even when their value is blank — a few placeholders
 in `application.yml` have no fallback and the app refuses to start if the
@@ -463,11 +475,32 @@ The GDPR work is real and is documented in `docs/privacy/`:
 - **Consent ledger** — every consent recorded with its policy version.
 - **Data export** — a traveller can download their own data from the app.
 - **Retention** — a nightly job enforces the periods the notice states
-  (journeys 365 d, security logs 365 d, consents 730 d, unverified accounts 24 h)
-  and records every run, successes and failures alike. **On by default.**
+  (journeys 365 d, security logs 365 d, consents 730 d, unverified accounts 24 h,
+  dormant accounts 24 months with 7 days' notice first) and records every run,
+  successes and failures alike. **On by default.**
 - **Research pipeline** — a three-tier lifecycle (operational → pseudonymous →
   aggregate with k-anonymity ≥ 10). **Off by default**, and it should stay off
-  until the DPIA has been signed off by the University's DPO.
+  until the DPIA has been signed off by the University's DPO. Since `V43` tier 2
+  keeps the exact origin and destination — the research question is which places
+  people travel between — and detaches the subject instead. That makes tier 2 a
+  quasi-identifier: it is personal data, it stays on the server, and only tier 3
+  (aggregated over zones, k ≥ 10) is publishable.
+- **Journey retention does not depend on the pipeline** — with it off,
+  `DataRetentionService` deletes journeys past 365 days; with it on, retention
+  stands aside and the pipeline promotes them to tier 2 first. The notice (§ 7,
+  version `2026-10-05`) now states the first of the two, which is what the
+  system does today: journeys are deleted after 12 months. **Switching the
+  pipeline on changes that** — the rows would survive as pseudonymous tier-2
+  data — so it cannot be enabled without rewriting § 7, adding a research
+  section (purpose, legal basis, right to object) and bumping the policy version
+  again.
+- **No IP addresses in the access history** — the login audit used to store
+  `getRemoteAddr()`, which behind the reverse proxy is the Docker bridge: the
+  same value for everyone, so it identified nothing while still being personal
+  data by intent. The column was dropped (`V37`) and `util/ClientIp` now reads
+  the forwarded address only where it is actually needed, for rate limiting.
+- **Notice before closure** — an account is never closed without being told
+  first, in the language the traveller uses (`V39`).
 - **No third-country asset loads** — fonts, Leaflet and Chart.js are all
   self-hosted, so no user IP reaches Google's CDNs.
 - **AI provider** — the default assistant provider is Regolo (Seeweb, Italy):
@@ -560,6 +593,7 @@ docker compose -f cassitrack-backend/docker-compose.yml down -v
 
 - Real OBU hardware on more vehicles (`BUS4` still needs reflashing from `BUS2L`)
 - A GBFS feed from Elerent, which would let us hand back both the secret key and the dashboard credentials the vehicle positions currently depend on
+- Elerent's bike tariff for Cassino: their public price list covers scooters only, so the bike rate in configuration is unconfirmed
 - A service calendar: trips currently run every day, with no weekday/Saturday distinction
 - Official timetable data from the network operator, replacing the interpolated intermediate times
 - DPIA completion and DPO sign-off before the research pipeline is enabled anywhere real
